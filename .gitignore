@@ -62,6 +62,29 @@ fresh_server.log
 # Sentry
 .sentryclirc
 
+# Generated HTML outputs
+*.html
+
+# Loose DXF files (keep samples in sample_dxfs/ and test_dxfs/)
+complex_*.dxf
+real_house_plan.dxf
+realistic_indian_house.dxf
+preplaced_columns.dxf
+test_structure.dxf
+
+# One-off scripts
+analyze_*.py
+generate_*.py
+run_batch_*.py
+verify_*.py
+visualize_*.py
+
+# Loose test files (proper tests are in tests/)
+test_beam_placement.py
+test_comprehensive.py
+test_multi_house_beams.py
+test_slab_generation.py
+
 # Gemini / Agent
 .gemini/
 .antigravityignore
