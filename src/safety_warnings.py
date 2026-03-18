@@ -375,7 +375,7 @@ class SafetyWarningsChecker:
 def run_safety_warnings_check(
     columns: List,
     beams: List,
-    floor_width: float = 0.0,
+    footings_or_width=0.0,
     floor_length: float = 0.0,
     fck: float = 25.0,
     seismic_zone: str = "III"
@@ -385,16 +385,32 @@ def run_safety_warnings_check(
     
     Args:
         columns, beams: Structural members
-        floor_width, floor_length: Dimensions
+        footings_or_width: Either footings list (ignored) or floor_width float
+        floor_length: Floor length dimension
         fck: Concrete grade
         seismic_zone: Zone II-V
         
     Returns:
         SafetyWarningsSummary
     """
+    # Handle case where footings list is passed as 3rd argument
+    if isinstance(footings_or_width, (list, tuple)):
+        floor_width = 0.0
+    else:
+        floor_width = float(footings_or_width)
+    
+    # Auto-derive floor dimensions from columns if not provided
+    if (floor_width == 0.0 or floor_length == 0.0) and columns:
+        xs = [c.x for c in columns]
+        ys = [c.y for c in columns]
+        if xs and ys:
+            floor_width = max(xs) - min(xs) if floor_width == 0.0 else floor_width
+            floor_length = max(ys) - min(ys) if floor_length == 0.0 else floor_length
+    
     checker = SafetyWarningsChecker(
         fck=fck,
         seismic_zone=seismic_zone
     )
     
     return checker.run_all_checks(columns, beams, floor_width, floor_length)
+
