@@ -1,0 +1,67 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+env/
+.env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+app_launch.txt
+
+# Generated outputs (keep samples, ignore temp)
+temp_*.dxf
+Structural_Report_V2.pdf
+Structural_Design_Report.pdf
+Summary_Report.pdf
+Audit_Report.pdf
+BBS_Report.pdf
+Design_Schedules.pdf
+Floor_*_Report.pdf
+Structural_Plan.dxf
+Floor_*_Plan.dxf
+
+# Test artifacts
+.pytest_cache/
+htmlcov/
+.coverage
+
+# Verification outputs
+verification_report.log
+verification_report_real.log
+verification_results.txt
+audit_results.log
+audit_report.txt
+smoke_test.log
+demo_output.txt
+fresh_server.log
+
+# Streamlit
+.streamlit/
+
+# Sentry
+.sentryclirc
+
+# Gemini / Agent
+.gemini/
+.antigravityignore
