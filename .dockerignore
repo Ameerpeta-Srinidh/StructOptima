@@ -1,0 +1,35 @@
+# Ignore Streamlit config directory from Docker
+.streamlit/secrets.toml
+
+# Git
+.git
+.gitignore
+
+# Python cache
+__pycache__
+*.pyc
+*.pyo
+
+# IDE
+.vscode
+.idea
+
+# Logs
+*.log
+*.txt
+!requirements.txt
+
+# Test artifacts
+.pytest_cache
+htmlcov
+.coverage
+
+# Generated outputs
+*.pdf
+*.html
+
+# Temp files
+temp_*
+
+# Agent files
+.gemini

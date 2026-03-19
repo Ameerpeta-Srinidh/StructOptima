@@ -1,0 +1,10 @@
+services:
+  structoptima:
+    build: .
+    ports:
+      - "8501:8501"
+    restart: unless-stopped
+    environment:
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./samples:/app/samples:ro

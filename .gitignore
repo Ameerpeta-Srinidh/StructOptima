@@ -57,7 +57,11 @@ demo_output.txt
 fresh_server.log
 
 # Streamlit
-.streamlit/
+.streamlit/secrets.toml
+
+# Temp uploads
+temp_*.dxf
+temp_*.ifc
 
 # Sentry
 .sentryclirc

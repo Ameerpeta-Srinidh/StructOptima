@@ -2,6 +2,7 @@ import streamlit as st
 import sys
 import os
 import math
+import tempfile
 
 # Ensure src path is visible
 sys.path.append(os.path.join(os.getcwd(), 'src'))
@@ -100,6 +101,8 @@ with st.sidebar:
     
     cad_file = None
     auto_frame = False
+    width = 0.0
+    length = 0.0
     
     if input_mode == "Import CAD (DXF)":
         cad_file = st.file_uploader("Upload DXF File", type=["dxf"])
@@ -108,7 +111,7 @@ with st.sidebar:
         # ... (Stack Config) ...
         st.subheader("Vertical Stack")
         num_stories = st.number_input("Number of Stories", min_value=1, max_value=50, value=2)
-        story_heigth = st.number_input("Story Height (m)", 2.4, 6.0, 3.0)
+        story_height = st.number_input("Story Height (m)", 2.4, 6.0, 3.0)
         
     elif input_mode == "Import BIM (IFC)":
         ifc_file = st.file_uploader("Upload IFC File", type=["ifc"])
@@ -124,7 +127,7 @@ with st.sidebar:
         
         st.subheader("Vertical Stack")
         num_stories = st.number_input("Number of Stories", min_value=1, max_value=50, value=2)
-        story_heigth = st.number_input("Story Height (m)", 2.4, 6.0, 3.0)
+        story_height = st.number_input("Story Height (m)", 2.4, 6.0, 3.0)
     
     st.subheader("Building Type (IS 875 Part 2)")
     building_type_name = st.selectbox(
@@ -242,9 +245,10 @@ if st.session_state.get('analysis_done', False):
                         st.stop()
                         
                     # ... (DXF Logic) ...
-                    temp_filename = f"temp_{cad_file.name}"
-                    with open(temp_filename, "wb") as f:
-                        f.write(cad_file.getbuffer())
+                    tmp_file = tempfile.NamedTemporaryFile(suffix='.dxf', delete=False)
+                    tmp_file.write(cad_file.getbuffer())
+                    tmp_file.close()
+                    temp_filename = tmp_file.name
                         
                     from src.cad_loader import CADLoader
                     try:
@@ -256,15 +260,15 @@ if st.session_state.get('analysis_done', False):
                                 
                         # Update GM Vertical Stack
                         gm.num_stories = num_stories
-                        gm.story_height_m = story_heigth
+                        gm.story_height_m = story_height
                         
                         # Re-create columns for upper stories (Stacking Phase 1 Logic)
                         base_cols = [c for c in gm.columns] 
                         gm.columns = [] 
                         
                         for level in range(num_stories):
-                            z_bot = level * story_heigth
-                            z_top = (level + 1) * story_heigth
+                            z_bot = level * story_height
+                            z_top = (level + 1) * story_height
                             
                             for base_c in base_cols:
                                 new_c = base_c.model_copy()
@@ -288,9 +292,10 @@ if st.session_state.get('analysis_done', False):
                         st.stop()
                         
                      # SAVE IFC
-                     temp_filename = f"temp_{ifc_file.name}"
-                     with open(temp_filename, "wb") as f:
-                        f.write(ifc_file.getbuffer())
+                     tmp_file = tempfile.NamedTemporaryFile(suffix='.ifc', delete=False)
+                     tmp_file.write(ifc_file.getbuffer())
+                     tmp_file.close()
+                     temp_filename = tmp_file.name
                      
                      from src.bim_loader import BIMLoader
                      try:
@@ -310,7 +315,7 @@ if st.session_state.get('analysis_done', False):
                         width_m=width, 
                         length_m=length, 
                         num_stories=num_stories,
-                        story_height_m=story_heigth
+                        story_height_m=story_height
                     )
                     gm.cantilever_dirs = cant_dirs # defined above
                     gm.cantilever_len_m = 1.5
@@ -414,7 +419,7 @@ if st.session_state.get('analysis_done', False):
                                         reinforcement_rule=col_data.reinforcement_rule.value,
                                         orientation_deg=col_data.orientation_deg,
                                         level=0,
-                                        z_top=story_heigth
+                                        z_top=story_height
                                     )
                                     gm.columns.append(gm_col)
 
@@ -422,8 +427,8 @@ if st.session_state.get('analysis_done', False):
                                 base_cols = [c for c in gm.columns]
                                 gm.columns = []
                                 for level in range(num_stories):
-                                    z_bot = level * story_heigth
-                                    z_top = (level + 1) * story_heigth
+                                    z_bot = level * story_height
+                                    z_top = (level + 1) * story_height
                                     for base_c in base_cols:
                                         new_c = base_c.model_copy()
                                         new_c.id = f"{base_c.id}_L{level}"
@@ -501,7 +506,7 @@ if st.session_state.get('analysis_done', False):
                                         reinforcement_rule=col_data.reinforcement_rule.value,
                                         orientation_deg=col_data.orientation_deg,
                                         level=0,
-                                        z_top=story_heigth
+                                        z_top=story_height
                                     )
                                     gm.columns.append(gm_col)
 
@@ -509,8 +514,8 @@ if st.session_state.get('analysis_done', False):
                                 base_cols = [c for c in gm.columns]
                                 gm.columns = []
                                 for level in range(num_stories):
-                                    z_bot = level * story_heigth
-                                    z_top = (level + 1) * story_heigth
+                                    z_bot = level * story_height
+                                    z_top = (level + 1) * story_height
                                     for base_c in base_cols:
                                         new_c = base_c.model_copy()
                                         new_c.id = f"{base_c.id}_L{level}"
@@ -652,7 +657,7 @@ if st.session_state.get('analysis_done', False):
             # Run optimization
             opt_columns, opt_summary = optimize_structure(
                 gm.columns,
-                story_heigth,
+                story_height,
                 num_stories,
                 fck=fck,
                 enable_optimization=True
@@ -714,7 +719,7 @@ if st.session_state.get('analysis_done', False):
             gm.columns,
             all_beams,
             num_stories,
-            story_heigth
+            story_height
         )
         
         # Fire rating info
@@ -771,7 +776,7 @@ if st.session_state.get('analysis_done', False):
         # Estimate building weight (concrete + steel + live load)
         building_weight = bom.total_concrete_vol_m3 * 25  # kN
         building_weight += bom.total_steel_weight_kg * 0.00981  # kN
-        building_weight += (width * length * num_stories * live_load) if 'width' in locals() else 1000
+        building_weight += (width * length * num_stories * live_load) if width > 0 else 1000
         
         # Get concrete grade
         fck = int(conc_grade[1:])
@@ -851,8 +856,8 @@ if st.session_state.get('analysis_done', False):
         safety_summary = run_safety_warnings_check(
             gm.columns,
             all_beams,
-            floor_width=width if 'width' in locals() else 0,
-            floor_length=length if 'length' in locals() else 0,
+            floor_width=width,
+            floor_length=length,
             fck=fck,
             seismic_zone=seismic_zone
         )
@@ -1402,7 +1407,7 @@ if st.session_state.get('analysis_done', False):
                     for c in gm.columns:
                         cobie.add_component(c.id, "ResCol", f"Level_{c.level}", "Structural Column")
                         cobie.add_attribute(c.id, "Load", f"{c.load_kn:.1f}", "kN")
-                        cobie.add_coordinate(c.id, c.x, c.y, c.level*story_heigth)
+                        cobie.add_coordinate(c.id, c.x, c.y, c.level*story_height)
                         
                     cobie_json = cobie.export_json()
                     st.success(f"Generated COBie dataset for {len(gm.columns)} components.")
