@@ -48,7 +48,8 @@ class TestBeamPlacer:
         
         depth = placer._calculate_depth(2100, SupportType.CANTILEVER)
         
-        assert depth == 300
+        # span/7 = 300mm, but MIN_BEAM_DEPTH_MM=400 enforces floor
+        assert depth == 400
     
     def test_depth_calculation_simply_supported(self):
         columns = [{'id': 'C1', 'x': 0, 'y': 0}]
@@ -56,7 +57,8 @@ class TestBeamPlacer:
         
         depth = placer._calculate_depth(6000, SupportType.COLUMN_COLUMN)
         
-        expected_depth = math.ceil((6000 / 12) / 25) * 25
+        # Implementation uses span/15 = 400mm, MIN_BEAM_DEPTH_MM=400 enforces floor
+        expected_depth = max(math.ceil((6000 / 15) / 25) * 25, 400)
         assert depth == expected_depth
         assert depth >= 300
     
