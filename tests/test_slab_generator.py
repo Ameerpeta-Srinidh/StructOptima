@@ -188,7 +188,8 @@ class TestSlabGenerator:
         data = json.loads(json_str)
         
         assert 'slabs' in data
-        assert 'loads_on_beams' in data
+        assert 'slab_loads_on_beams' in data
+        assert 'wall_loads_on_beams' in data
         assert 'warnings' in data
         assert 'stats' in data
         

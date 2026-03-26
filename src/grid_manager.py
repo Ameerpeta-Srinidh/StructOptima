@@ -122,27 +122,41 @@ class GridManager(BaseModel):
                     fx = span_x / 2 if is_edge_x else span_x
                     fy = span_y / 2 if is_edge_y else span_y
                     trib_est = fx * fy
-                else:
                     col_type = "interior"
                     trib_est = span_x * span_y
                 
                 w, d = self._estimate_initial_column_size(col_type, trib_est)
                 
-                for level in range(self.num_stories):
-                    z_bot = level * self.story_height_m
-                    z_top = (level + 1) * self.story_height_m
-                    
-                    self.columns.append(Column(
-                        id=f"C{col_index}_L{level}",
-                        x=x, 
-                        y=y,
-                        level=level,
-                        z_bottom=z_bot,
-                        z_top=z_top,
-                        type=col_type,
-                        width_nb=w,
-                        depth_nb=d
-                    ))
+                # Create a base column to pass into stack_columns
+                base_col = Column(
+                    id=f"C{col_index}",
+                    x=x, 
+                    y=y,
+                    type=col_type,
+                    width_nb=w,
+                    depth_nb=d
+                )
+                self.columns.append(base_col)
+                
+        # Stack all base columns
+        self.columns = self.stack_columns(self.columns, self.num_stories, self.story_height_m)
+        
+    def stack_columns(self, base_cols: List[Column], num_stories: int, story_height_m: float) -> List[Column]:
+        """Utility to stack a list of 2D plan columns into 3D multi-story columns."""
+        stacked = []
+        for level in range(num_stories):
+            z_bot = level * story_height_m
+            z_top = (level + 1) * story_height_m
+            for base_c in base_cols:
+                new_c = base_c.model_copy()
+                # If it already has _L[level], just use it, else append
+                if "_L" not in new_c.id:
+                    new_c.id = f"{base_c.id}_L{level}"
+                new_c.level = level
+                new_c.z_bottom = z_bot
+                new_c.z_top = z_top
+                stacked.append(new_c)
+        return stacked
 
     def calculate_trib_areas(self, staircase_bay: Optional[Tuple[int, int]] = None, void_zones: List[Tuple[int, int]] = None):
         """

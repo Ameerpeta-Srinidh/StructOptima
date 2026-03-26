@@ -38,6 +38,20 @@ from src.documentation import DesignReportGenerator
 from src.bim_interop import CobieExporter
 from src.site_inspection import SiteInspectionManager
 from src.shm_module import SHMPlanner
+from src.shm_module import SHMPlanner
+
+# --- Caching Wrappers for Expensive Operations (Phase 2) ---
+@st.cache_data(show_spinner="Optimizing structure...")
+def get_optimized_structure(columns, story_height, num_stories, fck):
+    return optimize_structure(columns, story_height, num_stories, fck=fck, enable_optimization=True)
+
+@st.cache_data(show_spinner="Running stability & fire checks...")
+def get_stability_check_results(columns, all_beams, num_stories, story_height):
+    return run_stability_check(columns, all_beams, num_stories, story_height)
+
+@st.cache_data(show_spinner="Running advanced safety checks...")
+def get_safety_warnings_results(columns, all_beams, floor_width, floor_length, fck, seismic_zone):
+    return run_safety_warnings_check(columns, all_beams, floor_width=floor_width, floor_length=floor_length, fck=fck, seismic_zone=seismic_zone)
 
 # Helper removed. Logic moved to GridManager.generate_beams()
 
@@ -253,6 +267,23 @@ with st.sidebar:
     if seismic_zone in ["III", "IV", "V"]:
         st.caption("Ductile detailing per IS 13920 will be checked")
         st.caption("Strong Column-Weak Beam verification enabled")
+        
+    st.subheader("Wind Zone (IS 875 Part 3)")
+    wind_zone_idx = st.selectbox(
+        "Zone",
+        ["1", "2", "3", "4", "5", "6"],
+        index=1,
+        help="Select Wind Zone per IS 875 Part 3 (Zone 1=33m/s, Zone 6=55m/s)"
+    )
+    from src.wind_load import WindZone, TerrainCategory
+    wind_zone = WindZone(wind_zone_idx)
+    terrain_cat = st.selectbox(
+        "Terrain Category",
+        ["1", "2", "3", "4"],
+        index=1,
+        help="Category 2: Open terrain with scattered obstructions (typical)"
+    )
+    terrain_cat_enum = TerrainCategory(terrain_cat)
     
     st.subheader("Architectural Features")
     add_staircase = st.checkbox("Add Staircase (Central Void)")
@@ -343,6 +374,13 @@ if st.session_state.get('analysis_done', False):
                         st.error("Please upload a DXF file.")
                         st.stop()
                         
+                    # Security: Validate DXF magic bytes
+                    header = cad_file.getvalue()[:100]
+                    # ASCII DXF typically has '  0' or '999'. Binary has 'AutoCAD'
+                    if not (b"AutoCAD" in header or b"SECTION" in header or b"  0" in header or b"999" in header):
+                        st.error("Invalid DXF file. Security check failed: Magic bytes do not match expected DXF format.")
+                        st.stop()
+                        
                     # ... (DXF Logic) ...
                     tmp_file = tempfile.NamedTemporaryFile(suffix='.dxf', delete=False)
                     tmp_file.write(cad_file.getbuffer())
@@ -395,6 +433,12 @@ if st.session_state.get('analysis_done', False):
                      if ifc_file is None:
                         st.error("Please upload an IFC file.")
                         st.stop()
+                        
+                     # Security: Validate IFC magic bytes (STEP format)
+                     header = ifc_file.getvalue()[:100]
+                     if b"ISO-10303-21" not in header:
+                         st.error("Invalid IFC file. Security check failed: Missing ISO-10303-21 STEP signature.")
+                         st.stop()
                         
                      # SAVE IFC
                      tmp_file = tempfile.NamedTemporaryFile(suffix='.ifc', delete=False)
@@ -535,18 +579,7 @@ if st.session_state.get('analysis_done', False):
                                     gm.columns.append(gm_col)
 
                                 # Stack for multi-story
-                                base_cols = [c for c in gm.columns]
-                                gm.columns = []
-                                for level in range(num_stories):
-                                    z_bot = level * story_height
-                                    z_top = (level + 1) * story_height
-                                    for base_c in base_cols:
-                                        new_c = base_c.model_copy()
-                                        new_c.id = f"{base_c.id}_L{level}"
-                                        new_c.level = level
-                                        new_c.z_bottom = z_bot
-                                        new_c.z_top = z_top
-                                        gm.columns.append(new_c)
+                                gm.columns = gm.stack_columns(gm.columns, num_stories, story_height)
 
                                 # Explicitly update the main session state with new columns before rerun
                                 st.session_state['gm'] = gm
@@ -622,18 +655,7 @@ if st.session_state.get('analysis_done', False):
                                     gm.columns.append(gm_col)
 
                                 # Stack for multi-story
-                                base_cols = [c for c in gm.columns]
-                                gm.columns = []
-                                for level in range(num_stories):
-                                    z_bot = level * story_height
-                                    z_top = (level + 1) * story_height
-                                    for base_c in base_cols:
-                                        new_c = base_c.model_copy()
-                                        new_c.id = f"{base_c.id}_L{level}"
-                                        new_c.level = level
-                                        new_c.z_bottom = z_bot
-                                        new_c.z_top = z_top
-                                        gm.columns.append(new_c)
+                                gm.columns = gm.stack_columns(gm.columns, num_stories, story_height)
 
                                 # Explicitly update the main session state with new columns before rerun
                                 st.session_state['gm'] = gm
@@ -831,12 +853,11 @@ if st.session_state.get('analysis_done', False):
             fck = int(conc_grade[1:])  # "M25" -> 25
             
             # Run optimization
-            opt_columns, opt_summary = optimize_structure(
+            opt_columns, opt_summary = get_optimized_structure(
                 gm.columns,
                 story_height,
                 num_stories,
-                fck=fck,
-                enable_optimization=True
+                fck
             )
             
             # Safety verification
@@ -891,7 +912,7 @@ if st.session_state.get('analysis_done', False):
         st.subheader("Stability & Fire Resistance (IS 456 Table 16A / NBC 2016)")
         
         # Run stability checks
-        stab_checks, stab_summary = run_stability_check(
+        stab_checks, stab_summary = get_stability_check_results(
             gm.columns,
             all_beams,
             num_stories,
@@ -1082,7 +1103,7 @@ if st.session_state.get('analysis_done', False):
         st.subheader("Advanced Structural Code Checks")
         
         # Run safety warnings check
-        safety_summary = run_safety_warnings_check(
+        safety_summary = get_safety_warnings_results(
             gm.columns,
             all_beams,
             floor_width=width,
@@ -1134,6 +1155,47 @@ if st.session_state.get('analysis_done', False):
             
             *Current analysis uses Gross Stiffness (Ig). Deflections may be 1.5-2x higher in reality.*
             """)
+            
+        # Wind Analysis & Load Combinations
+        st.markdown("---")
+        st.subheader("Wind Analysis & Load Combinations (IS 875 Part 3 / IS 456 Table 18)")
+        
+        from src.wind_load import calculate_wind_load
+        wind_result = calculate_wind_load(
+            zone=wind_zone,
+            height_m=num_stories * story_height,
+            width_m=gm.width_m,
+            length_m=gm.length_m,
+            terrain_category=terrain_cat_enum,
+            opening_percentage=10.0 # Default assumption
+        )
+        
+        w1, w2, w3 = st.columns(3)
+        w1.metric("Design Wind Speed (Top)", f"{wind_result.pressure_results[-1].design_wind_speed_ms:.1f} m/s")
+        w2.metric("Wind Base Shear (X)", f"{wind_result.total_base_shear_x_kn:.0f} kN")
+        w3.metric("Wind Base Shear (Y)", f"{wind_result.total_base_shear_y_kn:.0f} kN")
+        
+        if wind_result.warnings:
+            for w in wind_result.warnings:
+                st.warning(w)
+                
+        # Load Combinations Summary
+        from src.load_combinations import LoadCombinationManager, get_summary_report
+        
+        # Calculate total building loads for stability check summary
+        total_dl = building_weight - (floor_area_m2 * num_stories * live_load)
+        total_ll = floor_area_m2 * num_stories * live_load
+        total_wl = max(wind_result.total_base_shear_x_kn, wind_result.total_base_shear_y_kn)
+        total_eq = seismic_result.base_shear_kn
+        
+        combo_mgr = LoadCombinationManager(
+            include_wind=True,
+            include_seismic=True,
+            seismic_zone=seismic_zone
+        )
+        
+        with st.expander("View Governing Load Combinations & Stability Check"):
+            st.code(get_summary_report(combo_mgr, total_dl, total_ll, total_wl, total_eq), language="text")
         
         # Tabs for View Selection
         v_tab1, v_tab2 = st.tabs(["3D View", "2D Plan View"])

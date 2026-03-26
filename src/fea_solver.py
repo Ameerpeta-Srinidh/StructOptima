@@ -133,6 +133,9 @@ class FrameSolver2D:
         F_reduced = F_global[free_dofs]
         
         # Power of Numpy
+        # PERFORMANCE NOTE (Audit W8): Currently using dense numpy matrices for FEA. 
+        # For structures with > 500 nodes, it is highly recommended to switch to scipy.sparse.linalg.spsolve 
+        # to drastically reduce memory usage and improve solve times.
         try:
             d_reduced = np.linalg.solve(K_reduced, F_reduced)
         except np.linalg.LinAlgError:

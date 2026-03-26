@@ -103,18 +103,34 @@ class WallLoad:
             "source": self.source
         }
 
+@dataclass
+class BeamLineLoad:
+    beam_id: str
+    load_kn_m: float
+    source: str
+    
+    def to_dict(self) -> Dict:
+        return {
+            "beam_id": self.beam_id,
+            "type": "Line_Load",
+            "value_kn_m": round(self.load_kn_m, 2),
+            "source": self.source
+        }
+
 
 @dataclass 
 class SlabGenerationResult:
     slabs: List[SlabElement] = field(default_factory=list)
     wall_loads: List[WallLoad] = field(default_factory=list)
+    slab_loads_on_beams: List[BeamLineLoad] = field(default_factory=list)
     warnings: List[Dict] = field(default_factory=list)
     stats: Dict = field(default_factory=dict)
     
     def to_json(self) -> str:
         return json.dumps({
             "slabs": [s.to_dict() for s in self.slabs],
-            "loads_on_beams": [w.to_dict() for w in self.wall_loads],
+            "wall_loads_on_beams": [w.to_dict() for w in self.wall_loads],
+            "slab_loads_on_beams": [b.to_dict() for b in self.slab_loads_on_beams],
             "warnings": self.warnings,
             "stats": self.stats
         }, indent=2)
@@ -153,6 +169,7 @@ class SlabGenerator:
         
         self.slabs: List[SlabElement] = []
         self.wall_loads: List[WallLoad] = []
+        self.slab_loads_on_beams: List[BeamLineLoad] = []
         self.warnings: List[Dict] = []
         
         self._compute_grid()
@@ -300,6 +317,57 @@ class SlabGenerator:
             self.DEAD_LOAD_FACTOR * slab.total_dead_kn_m2 +
             self.LIVE_LOAD_FACTOR * slab.total_live_kn_m2
         )
+        
+    def _distribute_slab_loads(self, slab: SlabElement):
+        """Map slab loads to boundary beams per IS 456 Annex D."""
+        if len(slab.vertices) != 4:
+            return
+            
+        Lx = slab.Lx_mm / 1000.0
+        Ly = slab.Ly_mm / 1000.0
+        w = slab.total_factored_kn_m2
+        
+        if slab.slab_type == SlabType.TWO_WAY:
+            # IS 456 Annex D Two-Way Distribution
+            # Short span load (triangular)
+            ws = w * Lx / 3.0
+            # Long span load (trapezoidal)
+            beta = Ly / Lx if Lx > 0 else 1.0
+            wl = w * (Lx / 2.0) * (1 - 1 / (3 * beta**2))
+        else:
+            # IS 456 One-Way Distribution
+            ws = 0.0
+            wl = w * Lx / 2.0
+            
+        for i in range(4):
+            p1 = slab.vertices[i]
+            p2 = slab.vertices[(i+1)%4]
+            segment_len = math.hypot(p2[0]-p1[0], p2[1]-p1[1]) / 1000.0
+            
+            # Identify if this segment is short span or long span
+            is_short_span = abs(segment_len - Lx) < abs(segment_len - Ly)
+            load_val = ws if is_short_span else wl
+            
+            if load_val > 0.1:
+                matching_beam = None
+                for beam in self.beams:
+                    bx1, by1 = beam.get('start_x', 0), beam.get('start_y', 0)
+                    bx2, by2 = beam.get('end_x', 0), beam.get('end_y', 0)
+                    if (self._is_close(p1, (bx1, by1)) and self._is_close(p2, (bx2, by2))) or \
+                       (self._is_close(p1, (bx2, by2)) and self._is_close(p2, (bx1, by1))):
+                        matching_beam = beam
+                        break
+                
+                if matching_beam:
+                    beam_id = matching_beam.get('id', 'Unknown')
+                    if beam_id not in slab.boundary_beams:
+                        slab.boundary_beams.append(beam_id)
+                    load = BeamLineLoad(
+                        beam_id=beam_id,
+                        load_kn_m=load_val,
+                        source=f"Slab {slab.id} ({slab.slab_type.value})"
+                    )
+                    self.slab_loads_on_beams.append(load)
     
     def _generate_slabs(self):
         loops = self._find_closed_loops()
@@ -355,6 +423,7 @@ class SlabGenerator:
                 })
             
             self._calculate_loads(slab)
+            self._distribute_slab_loads(slab)
             
             self.slabs.append(slab)
             logger.info(f"Slab {slab.id}: {slab_type.value}, {Lx:.0f}×{Ly:.0f}mm, "
@@ -454,6 +523,7 @@ class SlabGenerator:
         return SlabGenerationResult(
             slabs=self.slabs,
             wall_loads=self.wall_loads,
+            slab_loads_on_beams=self.slab_loads_on_beams,
             warnings=self.warnings,
             stats=stats
         )
