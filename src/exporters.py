@@ -77,7 +77,7 @@ class ExcelExporter:
             bom_data = [
                 {"Item": "Total Concrete (m3)", "Value": bom.total_concrete_vol_m3},
                 {"Item": "Total Steel (kg)", "Value": bom.total_steel_weight_kg},
-                {"Item": "Total Cost (INR)", "Value": bom.total_cost_usd}
+                {"Item": "Total Cost (INR)", "Value": bom.total_cost_inr}
             ]
             
             # Add breakdown

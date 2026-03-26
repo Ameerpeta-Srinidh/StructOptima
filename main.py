@@ -136,7 +136,7 @@ def main():
     risk_results = risk_mgr.run_all_checks()
     
     if risk_results:
-        logger.warning("!!! RISK SAFEGUARDS TRIBBLED !!!")
+        logger.warning("RISK SAFEGUARDS TRIGGERED — %d checks failed", len(risk_results))
         for res in risk_results:
              logger.warning("[%s] %s", res.risk_level.name, res.message)
              logger.warning("    -> Recommendation: %s", res.recommendation)
@@ -154,8 +154,8 @@ def main():
     logger.info("Total Steel (Proc):   %.2f kg (incl. 4%% Wastage)", bom.total_steel_weight_kg * 1.04)
     
     logger.info("--- Cost Estimates ---")
-    logger.info("Concrete Cost:        INR %,.2f", bom.concrete_cost_usd)
-    logger.info("Steel Cost:           INR %,.2f", bom.steel_cost_usd)
+    logger.info("Concrete Cost:        INR %,.2f", bom.concrete_cost_inr)
+    logger.info("Steel Cost:           INR %,.2f", bom.steel_cost_inr)
     
     logger.info("Excavation Cost:      INR %,.2f - %,.2f", bom.excavation_cost_range['min'], bom.excavation_cost_range['max'])
     logger.info("Finishing Cost:       INR %,.2f - %,.2f", bom.finishing_cost_range['min'], bom.finishing_cost_range['max'])

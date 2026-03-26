@@ -24,7 +24,7 @@ class ReportGenerator:
             ["Total Floor Area", f"{grid_mgr.width_m * grid_mgr.length_m:.2f} m2"],
             ["Total Concrete Volume", f"{bom.total_concrete_vol_m3:.2f} m3"],
             ["Total Steel Weight", f"{bom.total_steel_weight_kg:.2f} kg"],
-            ["Total Estimated Cost", f"INR {bom.total_cost_usd:,.2f}"]
+            ["Total Estimated Cost", f"INR {bom.total_cost_inr:,.2f}"]
         ]
         t = Table(summary_data, colWidths=[200, 200])
         t.setStyle(TableStyle([
@@ -553,7 +553,7 @@ class ReportGenerator:
             ["Total Columns", f"{len(grid_mgr.columns)}"],
             ["Total Concrete", f"{bom.total_concrete_vol_m3:.2f} m³"],
             ["Total Steel", f"{bom.total_steel_weight_kg:.0f} kg"],
-            ["Estimated Cost", f"INR {bom.total_cost_usd:,.2f}"],
+            ["Estimated Cost", f"INR {bom.total_cost_inr:,.2f}"],
             ["Carbon Footprint", f"{bom.total_carbon_kg/1000:.2f} Tonnes CO2e"]
         ]
         
@@ -571,9 +571,9 @@ class ReportGenerator:
         elements.append(Paragraph("Cost Breakdown", styles["Heading1"]))
         cost_data = [
             ["Item", "Quantity", "Rate", "Amount (INR)"],
-            ["Concrete", f"{bom.total_concrete_vol_m3:.2f} m³", "₹5,000/m³", f"₹{bom.concrete_cost_usd:,.2f}"],
-            ["Steel", f"{bom.total_steel_weight_kg:.0f} kg", "₹60/kg", f"₹{bom.steel_cost_usd:,.2f}"],
-            ["TOTAL", "", "", f"₹{bom.total_cost_usd:,.2f}"]
+            ["Concrete", f"{bom.total_concrete_vol_m3:.2f} m³", "₹5,000/m³", f"₹{bom.concrete_cost_inr:,.2f}"],
+            ["Steel", f"{bom.total_steel_weight_kg:.0f} kg", "₹60/kg", f"₹{bom.steel_cost_inr:,.2f}"],
+            ["TOTAL", "", "", f"₹{bom.total_cost_inr:,.2f}"]
         ]
         
         t = Table(cost_data, colWidths=[100, 100, 100, 100])

@@ -181,8 +181,24 @@ with st.sidebar:
         story_height = st.number_input("Story Height (m)", 2.4, 6.0, 3.0)
         
     elif input_mode == "Import BIM (IFC)":
-        ifc_file = st.file_uploader("Upload IFC File", type=["ifc"])
-        st.info("BIM Mode extracts exact Material & Geometry from IfcColumn/IfcBeam.")
+        try:
+            import ifcopenshell
+            _ifc_available = True
+        except ImportError:
+            _ifc_available = False
+        
+        if _ifc_available:
+            ifc_file = st.file_uploader("Upload IFC File", type=["ifc"])
+            st.info("BIM Mode extracts exact Material & Geometry from IfcColumn/IfcBeam.")
+        else:
+            ifc_file = None
+            st.error(
+                "**IFC import requires `ifcopenshell`** which is not installed.\n\n"
+                "Install it with: `pip install ifcopenshell`\n\n"
+                "Note: ifcopenshell can be difficult to install on some platforms. "
+                "See [ifcopenshell.org](https://ifcopenshell.org/) for installation guides."
+            )
+            st.stop()
         
         # Allow override of stack or trust IFC?
         # Trust IFC for now but allow display
@@ -293,7 +309,23 @@ with st.sidebar:
         help="Deflection: Animated Deformations | Utilization: D/C Ratio | Load Path: Transfer Beams"
     )
 
-    run_btn = st.button("Run Analysis", type="primary")
+    # ========== MANDATORY PROFESSIONAL DISCLAIMER ==========
+    st.markdown("---")
+    _disclaimer_accepted = st.checkbox(
+        "I confirm that I will independently verify all outputs before use in construction. "
+        "I understand this tool provides preliminary structural designs that require review "
+        "by a licensed Structural Engineer.",
+        key="disclaimer_checkbox"
+    )
+    
+    run_btn = st.button(
+        "Run Analysis", 
+        type="primary", 
+        disabled=not _disclaimer_accepted,
+        help="Accept the professional use disclaimer above to enable analysis"
+    )
+    if not _disclaimer_accepted:
+        st.caption("☝️ Please accept the disclaimer to proceed")
 
 # Main Execution Logic
 if run_btn:
@@ -614,7 +646,7 @@ if st.session_state.get('analysis_done', False):
 
         # Common Pipeline Continued...
         
-        # Staircase selection (Auto-select a Central bay)
+        # Staircase selection (Auto-select a Central bay with validation)
         staircase_bay = None
         if add_staircase:
             # Try to pick indices near middle
@@ -625,12 +657,45 @@ if st.session_state.get('analysis_done', False):
             mid_y = max(0, min(mid_y, len(gm.y_grid_lines)-2))
             staircase_bay = (mid_x, mid_y)
             
+            # Validate staircase bay doesn't conflict with imported geometry
+            if input_mode != "Manual Dimensions":
+                # Check if the central bay has columns inside it (not just at corners)
+                bay_x_min = gm.x_grid_lines[mid_x]
+                bay_x_max = gm.x_grid_lines[mid_x + 1] if mid_x + 1 < len(gm.x_grid_lines) else bay_x_min
+                bay_y_min = gm.y_grid_lines[mid_y]
+                bay_y_max = gm.y_grid_lines[mid_y + 1] if mid_y + 1 < len(gm.y_grid_lines) else bay_y_min
+                
+                _interior_cols_in_bay = [
+                    c for c in gm.columns if c.level == 0
+                    and bay_x_min < c.x < bay_x_max
+                    and bay_y_min < c.y < bay_y_max
+                ]
+                if _interior_cols_in_bay:
+                    st.warning(
+                        f"⚠️ **Staircase bay conflict**: The auto-selected central bay "
+                        f"({bay_x_min:.1f}–{bay_x_max:.1f}m × {bay_y_min:.1f}–{bay_y_max:.1f}m) "
+                        f"contains {len(_interior_cols_in_bay)} interior column(s). "
+                        f"Staircase void will override these columns — verify this is intended "
+                        f"for your imported {input_mode.split('(')[1].rstrip(')')} layout."
+                    )
+            
         gm.calculate_trib_areas(staircase_bay=staircase_bay)
         gm.calculate_loads(floor_load_kn_m2=live_load, wall_load_kn_m=wall_load)
         
         # Advanced Analysis (FEA) — Updates beam loads with stiffness method results
         from src.analysis_integration import update_structural_analysis
         update_structural_analysis(gm, beams, use_cracked_sections=use_cracked)
+        
+        # ========== PATTERN LOADING LIMITATION WARNING ==========
+        # IS 456 Cl. 22.4.1 requires pattern loading for continuous beams
+        if len(beams) > 2:  # Multi-span beams present
+            st.info(
+                "📋 **Pattern Loading Note (IS 456 Cl. 22.4.1):** "
+                "Current analysis uses uniform loading on all spans. "
+                "IS 456 requires alternate-span pattern loading for continuous beams to capture "
+                "maximum hogging moments at supports. Actual hogging may be 20–40% higher than shown. "
+                "For critical designs, verify beam support moments with pattern loading in STAAD/ETABS."
+            )
         
         # 2. Sizing & Detailing
         m_grade = Concrete.from_grade(conc_grade)
@@ -704,7 +769,7 @@ if st.session_state.get('analysis_done', False):
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Total Concrete", f"{bom.total_concrete_vol_m3:.2f} m³")
         c2.metric("Total Steel", f"{bom.total_steel_weight_kg:.0f} kg")
-        c3.metric("Est. Cost", f"INR {bom.total_cost_usd:,.2f}")
+        c3.metric("Est. Cost", f"INR {bom.total_cost_inr:,.2f}")
         
         # Carbon Metric
         carb = bom.total_carbon_kg / 1000.0 # Tonnes
@@ -1125,11 +1190,11 @@ if st.session_state.get('analysis_done', False):
             st.subheader("Bill of Materials")
             st.caption("Per IS 456:2000 | Concrete mix design per IS 10262")
             bom_data = [
-                {"Item": "Concrete", "Quantity": f"{bom.total_concrete_vol_m3:.2f}", "Unit": "m\u00b3", "Rate (INR)": "5,000/m\u00b3", "Amount (INR)": f"{bom.concrete_cost_usd:,.2f}"},
-                {"Item": "Steel", "Quantity": f"{bom.total_steel_weight_kg:.0f}", "Unit": "kg", "Rate (INR)": "60/kg", "Amount (INR)": f"{bom.steel_cost_usd:,.2f}"},
+                {"Item": "Concrete", "Quantity": f"{bom.total_concrete_vol_m3:.2f}", "Unit": "m\u00b3", "Rate (INR)": "5,000/m\u00b3", "Amount (INR)": f"{bom.concrete_cost_inr:,.2f}"},
+                {"Item": "Steel", "Quantity": f"{bom.total_steel_weight_kg:.0f}", "Unit": "kg", "Rate (INR)": "60/kg", "Amount (INR)": f"{bom.steel_cost_inr:,.2f}"},
             ]
             st.dataframe(bom_data, use_container_width=True)
-            st.markdown(f"**Total Estimated Cost: INR {bom.total_cost_usd:,.2f}**")
+            st.markdown(f"**Total Estimated Cost: INR {bom.total_cost_inr:,.2f}**")
             
             st.markdown("---")
             st.markdown("**Carbon Footprint**")

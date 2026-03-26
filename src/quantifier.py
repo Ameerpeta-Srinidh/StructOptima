@@ -6,9 +6,9 @@ from .framing_logic import StructuralMember
 class MaterialCost(BaseModel):
     total_concrete_vol_m3: float
     total_steel_weight_kg: float
-    total_cost_usd: float
-    concrete_cost_usd: float
-    steel_cost_usd: float
+    total_cost_inr: float
+    concrete_cost_inr: float
+    steel_cost_inr: float
     total_carbon_kg: float = 0.0
     concrete_carbon_kg: float = 0.0
     concrete_carbon_kg: float = 0.0
@@ -43,8 +43,8 @@ class Quantifier:
         apply_is1200_opening_rules: bool = True,
         steel_wastage_percent: float = 4.0  # 3-5% for rolling margin + off-cut wastage
     ):
-        self.concrete_rate = concrete_rate # USD/m3
-        self.steel_rate = steel_rate # USD/kg
+        self.concrete_rate = concrete_rate # INR/m3
+        self.steel_rate = steel_rate # INR/kg
         self.apply_is1200_opening_rules = apply_is1200_opening_rules
         self.steel_wastage_percent = steel_wastage_percent
         
@@ -329,9 +329,9 @@ class Quantifier:
         return MaterialCost(
             total_concrete_vol_m3=total_conc,
             total_steel_weight_kg=total_steel,  # Includes wastage and rolling margin
-            total_cost_usd=total_cost, # Structure Only
-            concrete_cost_usd=cost_conc,
-            steel_cost_usd=cost_steel,
+            total_cost_inr=total_cost, # Structure Only
+            concrete_cost_inr=cost_conc,
+            steel_cost_inr=cost_steel,
             total_carbon_kg=total_carbon,
             concrete_carbon_kg=carbon_conc,
             steel_carbon_kg=carbon_steel,
