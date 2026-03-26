@@ -79,6 +79,7 @@ test_structure.dxf
 # One-off scripts
 analyze_*.py
 generate_*.py
+!generate_sample_report.py
 run_batch_*.py
 verify_*.py
 visualize_*.py

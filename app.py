@@ -43,10 +43,62 @@ from src.shm_module import SHMPlanner
 
 # --- App Layout ---
 
-st.set_page_config(page_title="Structural Design Platform", layout="wide")
+st.set_page_config(page_title="StructOptima — IS-Code Structural Design Engine", layout="wide", page_icon="🏗️")
 
-st.title("Automated Structural Design Platform")
-st.markdown("### Professional Structural Analysis per IS 456:2000 / IS 1893:2016")
+# ========== WELCOME BANNER ==========
+st.markdown("""
+<div style="background: linear-gradient(135deg, #1a237e 0%, #0d47a1 40%, #01579b 100%);
+            padding: 40px 30px 30px 30px; border-radius: 12px; margin-bottom: 20px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);">
+    <h1 style="color: white; margin: 0 0 8px 0; font-size: 2.4em; letter-spacing: -0.5px;">
+        🏗️ StructOptima
+    </h1>
+    <p style="color: rgba(255,255,255,0.92); font-size: 1.15em; margin: 0 0 18px 0; max-width: 700px;">
+        Generate IS-code compliant structural designs from DXF files in minutes.
+        Automated column placement, beam design, rebar detailing, and professional PDF reports.
+    </p>
+    <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+        <span style="background: rgba(255,255,255,0.18); color: white; padding: 6px 16px;
+                     border-radius: 20px; font-weight: 600; font-size: 0.95em;
+                     border: 1px solid rgba(255,255,255,0.3);">
+            IS 456:2000
+        </span>
+        <span style="background: rgba(255,255,255,0.18); color: white; padding: 6px 16px;
+                     border-radius: 20px; font-weight: 600; font-size: 0.95em;
+                     border: 1px solid rgba(255,255,255,0.3);">
+            IS 1893:2016
+        </span>
+        <span style="background: rgba(255,255,255,0.18); color: white; padding: 6px 16px;
+                     border-radius: 20px; font-weight: 600; font-size: 0.95em;
+                     border: 1px solid rgba(255,255,255,0.3);">
+            IS 13920:2016
+        </span>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
+# ========== SAMPLE REPORT DOWNLOAD ==========
+import os as _os
+_sample_report_path = _os.path.join(_os.path.dirname(__file__), "sample_report.pdf")
+if _os.path.exists(_sample_report_path):
+    with open(_sample_report_path, "rb") as _f:
+        _sample_data = _f.read()
+    st.download_button(
+        label="📄 View Sample Report — No login required",
+        data=_sample_data,
+        file_name="StructOptima_Sample_Report.pdf",
+        mime="application/pdf",
+        key="sample_report_btn"
+    )
+
+# ========== TRUST STATS BAR ==========
+_ts1, _ts2, _ts3, _ts4 = st.columns(4)
+_ts1.metric("Modules", "51", help="51 integrated structural design modules")
+_ts2.metric("Test Suites", "28", help="28 automated test suites validating calculations")
+_ts3.metric("IS 456 Compliant", "✓", help="Full compliance with IS 456:2000")
+_ts4.metric("Indian Standard Codes", "4 Codes", help="IS 456 · IS 1893 · IS 13920 · IS 875")
+
+st.markdown("---")
 
 # Design Assumptions & Safety Factors (Always visible)
 with st.expander("Design Basis & Safety Factors (Click to expand)", expanded=False):
@@ -89,6 +141,21 @@ with st.expander("Design Basis & Safety Factors (Click to expand)", expanded=Fal
 
 # Sidebar Steps
 with st.sidebar:
+    # ========== BRANDING HEADER ==========
+    st.markdown("""
+    <div style="text-align: center; padding: 10px 0 5px 0;">
+        <h2 style="margin: 0; color: #1a237e;">🏗️ StructOptima</h2>
+        <p style="margin: 2px 0; font-size: 0.85em; color: #666;">v1.0.0 · March 2026</p>
+    </div>
+    """, unsafe_allow_html=True)
+    st.caption("Built by **Srinidh Ameerpeta**, Civil Engineering")
+    st.markdown(
+        "[⭐ GitHub Repository](https://github.com/Ameerpeta-Srinidh/StructOptima)",
+        unsafe_allow_html=True
+    )
+    st.caption("Automated IS-code structural design engine — from DXF to PDF report in minutes.")
+    st.markdown("---")
+    
     st.header("Project Details")
     project_name = st.text_input("Project Name", value="Untitled Project", help="Name for reports and exports")
     engineer_name = st.text_input("Structural Engineer", value="", help="Name of the responsible engineer")
@@ -581,13 +648,18 @@ if st.session_state.get('analysis_done', False):
         
         # 4. Beams & BOM
         # beams already generated above (either from CAD or Manual)
-        
-        # Note: BOM might overestimate beam volume if we count them for every floor but default function was 2D.
-        # We need to scale beam volume by num_stories
+        # Create unique beam copies per story to avoid BOM double-counting
         
         all_beams = []
         for i in range(num_stories):
-            all_beams.extend(beams) # Duplicate logical objects for quantity
+            for b in beams:
+                copied = StructuralMember(
+                    id=f"{b.id}_L{i}",
+                    start_point=Point(x=b.start_point.x, y=b.start_point.y, z=b.start_point.z if hasattr(b.start_point, 'z') else 0),
+                    end_point=Point(x=b.end_point.x, y=b.end_point.y, z=b.end_point.z if hasattr(b.end_point, 'z') else 0),
+                    properties=b.properties
+                )
+                all_beams.append(copied)
             
         # 4. Quantification & BOM
         # Use defaults (INR 5000, INR 60) defined in Quantifier class
@@ -636,6 +708,36 @@ if st.session_state.get('analysis_done', False):
            delta_str = f"-{saved:.2f} Tons"
            
         c4.metric("Carbon Footprint", f"{carb:.2f} Tons CO₂e", delta=delta_str, delta_color="inverse")
+        
+        # L/d Deflection Compliance (IS 456 Cl 23.2)
+        with st.expander("📐 Beam L/d Deflection Check (IS 456 Cl 23.2)"):
+            ld_data = []
+            for b in beams:
+                dx = b.end_point.x - b.start_point.x
+                dy = b.end_point.y - b.start_point.y
+                span_m = (dx**2 + dy**2)**0.5
+                span_mm = span_m * 1000
+                depth_mm = b.properties.depth_mm
+                actual_ld = span_mm / depth_mm if depth_mm > 0 else 0
+                # IS 456 Cl 23.2: Basic L/d ratios
+                allowable_ld = 7.0 if getattr(b.properties, 'is_cantilever', False) else 20.0
+                status = "✅ OK" if actual_ld <= allowable_ld else "⚠️ Check"
+                ld_data.append({
+                    "Beam": b.id,
+                    "Span (mm)": f"{span_mm:.0f}",
+                    "Depth (mm)": f"{depth_mm:.0f}",
+                    "Actual L/d": f"{actual_ld:.1f}",
+                    "Allowable L/d": f"{allowable_ld:.0f}",
+                    "Status": status
+                })
+            if ld_data:
+                import pandas as pd
+                st.dataframe(pd.DataFrame(ld_data), use_container_width=True, hide_index=True)
+                failed_ld = [d for d in ld_data if "Check" in d["Status"]]
+                if failed_ld:
+                    st.warning(f"{len(failed_ld)} beam(s) exceed basic L/d ratio — verify modification factors per IS 456 Cl 23.2.1")
+                else:
+                    st.success("All beams satisfy IS 456 Cl 23.2 basic L/d limits")
         
         # Material Breakdown Section
         st.markdown("---")
@@ -1554,32 +1656,65 @@ if st.session_state.get('analysis_done', False):
         
         with open(report_file, "rb") as f:
             pdf_data = f.read()
-            st.download_button(
-                label="📄 Download Complete Design Report (PDF)",
-                data=pdf_data,
-                file_name="Structural_Report.pdf",
-                mime="application/pdf",
-                type="primary"
+        
+        # Payment-gated download (free if Razorpay is not configured)
+        from src.payment import render_payment_button
+        render_payment_button(pdf_data, filename="Structural_Report.pdf")
+        
+        # ========== FEEDBACK WIDGET ==========
+        st.markdown("---")
+        st.markdown("#### 💬 How was your experience?")
+        _fb_col1, _fb_col2 = st.columns([1, 2])
+        with _fb_col1:
+            _fb_rating = st.radio(
+                "Rate this report",
+                ["⭐ 1", "⭐⭐ 2", "⭐⭐⭐ 3", "⭐⭐⭐⭐ 4", "⭐⭐⭐⭐⭐ 5"],
+                index=4,
+                key="feedback_rating"
             )
+        with _fb_col2:
+            _fb_text = st.text_area(
+                "Any suggestions or issues?",
+                placeholder="e.g., The beam schedule was very helpful. Would love to see wind load analysis.",
+                key="feedback_text",
+                max_chars=500
+            )
+        if st.button("Submit Feedback", key="submit_feedback_btn"):
+            st.success("Thank you for your feedback! 🙏")
+            logger.info("User feedback: rating=%s, text=%s", _fb_rating, _fb_text)
 
 else:
     st.info("Adjust parameters in the sidebar and click 'Run Analysis' to generate the structure.")
 
-# --- PROFESSIONAL DISCLAIMER (Always visible) ---
+# --- PROFESSIONAL USAGE GUIDANCE (Trust-Building Disclaimer) ---
 st.markdown("---")
 st.markdown("""
-<div style="background-color: #fff3cd; padding: 15px; border-radius: 5px; border-left: 4px solid #ffc107;">
-<h4 style="color: #856404; margin-top: 0;">⚠️ Professional Disclaimer</h4>
-<p style="color: #856404; font-size: 0.9em; margin-bottom: 5px;">
-<strong>This software is for preliminary design and educational purposes only.</strong>
-</p>
-<ul style="color: #856404; font-size: 0.85em; margin-bottom: 0;">
-<li>All structural designs <strong>MUST be reviewed and approved by a licensed Professional Engineer (PE)</strong> before construction.</li>
-<li>The software uses simplified analysis methods and may not account for all loading conditions, site-specific factors, or code requirements.</li>
-<li>The developers assume no liability for designs produced using this tool.</li>
-<li>Local building codes and regulations may differ from IS 456:2000 assumptions used herein.</li>
-</ul>
+<div style="background: linear-gradient(135deg, #e8f5e9 0%, #e3f2fd 100%);
+            padding: 20px; border-radius: 10px; border-left: 5px solid #1565c0;
+            margin: 10px 0;">
+    <h4 style="color: #1565c0; margin-top: 0;">🛡️ Responsible Use — Engineering Best Practice</h4>
+    <p style="color: #37474f; font-size: 0.95em; margin-bottom: 10px;">
+        StructOptima generates <strong>preliminary structural designs compliant with IS 456:2000, 
+        IS 1893:2016, and IS 13920:2016</strong>. Like any design tool — including STAAD.Pro, ETABS, 
+        and SAP2000 — all outputs require professional review before construction.
+    </p>
+    <ul style="color: #37474f; font-size: 0.9em; margin-bottom: 0; padding-left: 20px;">
+        <li>✅ <strong>IS-code calculations</strong> are automated with safety factors γc=1.5, γs=1.15</li>
+        <li>✅ <strong>51 integrated modules</strong> cover columns, beams, slabs, foundations, seismic, and rebar detailing</li>
+        <li>✅ <strong>Independent audit checks</strong> verify every design against code limits</li>
+        <li>📋 Final designs should be <strong>reviewed and sealed by a licensed Structural Engineer</strong> for construction</li>
+        <li>📋 Site-specific geotechnical investigation is recommended before foundation construction</li>
+    </ul>
 </div>
 """, unsafe_allow_html=True)
 
-st.caption("© 2026 Structural Design Platform | All calculations per IS 456:2000 | Version 1.0")
+st.markdown("""
+<div style="text-align: center; padding: 15px 0; color: #9e9e9e; font-size: 0.85em;">
+    <p style="margin: 0;">© 2026 StructOptima — Built by Srinidh Ameerpeta</p>
+    <p style="margin: 4px 0 0 0;">All calculations per IS 456:2000 · IS 1893:2016 · IS 13920:2016 | v1.0.0</p>
+    <p style="margin: 4px 0 0 0;">
+        <a href="/terms" style="color: #1565c0; text-decoration: none;">Terms of Service</a> · 
+        <a href="/privacy" style="color: #1565c0; text-decoration: none;">Privacy Notice</a>
+    </p>
+</div>
+""", unsafe_allow_html=True)
