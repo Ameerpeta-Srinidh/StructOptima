@@ -163,7 +163,7 @@ with st.sidebar:
         <p style="margin: 2px 0; font-size: 0.85em; color: #666;">v1.0.0 · March 2026</p>
     </div>
     """, unsafe_allow_html=True)
-    st.caption("Built by **Charan Tej, Chandana, and Srinidh Ameerpeta**")
+    st.caption("Built by **Charan Tej, Chandana, and Srinidh**")
     st.markdown(
         "[⭐ GitHub Repository](https://github.com/Ameerpeta-Srinidh/StructOptima)",
         unsafe_allow_html=True
@@ -1903,7 +1903,7 @@ st.markdown("""
 
 st.markdown("""
 <div style="text-align: center; padding: 15px 0; color: #9e9e9e; font-size: 0.85em;">
-    <p style="margin: 0;">© 2026 StructOptima — Built by Srinidh Ameerpeta</p>
+    <p style="margin: 0;">© 2026 StructOptima — Built by Charan Tej, Chandana, and Srinidh</p>
     <p style="margin: 4px 0 0 0;">All calculations per IS 456:2000 · IS 1893:2016 · IS 13920:2016 | v1.0.0</p>
     <p style="margin: 4px 0 0 0;">
         <a href="/terms" style="color: #1565c0; text-decoration: none;">Terms of Service</a> · 

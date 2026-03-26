@@ -527,7 +527,7 @@ class ReportGenerator:
         IS 456:2000, IS 1893:2016, IS 13920:2016.<br/>
         All designs must be verified by a licensed Structural Engineer prior to construction.<br/>
         Safety Factors: γc = 1.5 (concrete), γs = 1.15 (steel) | Load Factor: 1.5 (DL + LL)<br/>
-        © 2026 StructOptima — Built by Srinidh Ameerpeta | v1.0.0</i>
+        © 2026 StructOptima — Built by Charan Tej, Chandana, and Srinidh | v1.0.0</i>
         """
         elements.append(Paragraph(footer_text, styles["Normal"]))
 
