@@ -138,11 +138,9 @@ class CADParser:
 
     def extract_walls(self) -> List[Tuple[Tuple[float, float], Tuple[float, float]]]:
         """Extracts wall lines from LINE and POLYLINE entities."""
-        walls = []
         if not self.msp or not self.doc:
             return []
             
-        # Discover wall layers
         layer_names = [layer.dxf.name for layer in self.doc.layers]
         wall_layers = []
         for name in layer_names:
@@ -150,33 +148,28 @@ class CADParser:
             if any(kw in upper for kw in ['WALL', 'STRUCT', 'LOAD', 'BEAR', 'MASONRY', 'BRICK']):
                 wall_layers.append(name)
                 
-        # Fallback to layer "0" if no explicit wall layer is found
-        if not wall_layers and "0" in layer_names:
-            wall_layers.append("0")
-            
-        for layer in wall_layers:
-            # 1. LINES
-            for line in self.msp.query(f'LINE[layer=="{layer}"]'):
-                walls.append((
-                    (line.dxf.start.x, line.dxf.start.y),
-                    (line.dxf.end.x, line.dxf.end.y)
-                ))
-                 
-            # 2. LWPOLYLINES
-            for ply in self.msp.query(f'LWPOLYLINE[layer=="{layer}"]'):
-                points = ply.get_points(format='xy')
-                for i in range(len(points) - 1):
-                    walls.append((points[i], points[i+1]))
-                if ply.is_closed and len(points) > 2:
-                    walls.append((points[-1], points[0]))
-                    
-            # 3. POLYLINES (2D)
-            for ply in self.msp.query(f'POLYLINE[layer=="{layer}"]'):
-                points = [v.dxf.location[:2] for v in ply.vertices]
-                for i in range(len(points) - 1):
-                    walls.append((points[i], points[i+1]))
-                if ply.is_closed and len(points) > 2:
-                    walls.append((points[-1], points[0]))
+        def _get_lines_for_layers(layers_to_check):
+            found_walls = []
+            for layer in layers_to_check:
+                for line in self.msp.query(f'LINE[layer=="{layer}"]'):
+                    found_walls.append(((line.dxf.start.x, line.dxf.start.y), (line.dxf.end.x, line.dxf.end.y)))
+                for ply in self.msp.query(f'LWPOLYLINE[layer=="{layer}"]'):
+                    points = ply.get_points(format='xy')
+                    for i in range(len(points) - 1): found_walls.append((points[i], points[i+1]))
+                    if ply.is_closed and len(points) > 2: found_walls.append((points[-1], points[0]))
+                for ply in self.msp.query(f'POLYLINE[layer=="{layer}"]'):
+                    points = [v.dxf.location[:2] for v in ply.vertices]
+                    for i in range(len(points) - 1): found_walls.append((points[i], points[i+1]))
+                    if ply.is_closed and len(points) > 2: found_walls.append((points[-1], points[0]))
+            return found_walls
+
+        # First pass: try explicit matched layers
+        walls = _get_lines_for_layers(wall_layers)
+        
+        # Deep Fallback: if STILL no lines found (e.g. wall layer exists but is empty/blocks), scan all layers
+        if not walls:
+            logger.warning("No line geometry found on explicit wall layers. Doing deep fallback to ALL layers.")
+            walls = _get_lines_for_layers(layer_names)
 
         return walls
 
