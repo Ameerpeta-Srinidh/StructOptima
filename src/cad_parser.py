@@ -89,88 +89,94 @@ class CADParser:
          return (width, depth)
 
     def extract_columns(self) -> List[Dict]:
-        """Extracts column data from the specified column layer."""
-        layer = self.layer_map['columns']
+        """Extracts column data from column layers."""
         columns = []
-        
-        if not self.msp:
+        if not self.msp or not self.doc:
             return []
 
-        # Find polylines on the column layer
-        # Support both LWPOLYLINE and POLYLINE
-        query = f'*[layer=="{layer}"]'
-        
-        # We search explicitly for polylines which usually represent column boundaries
-        for entity in self.msp.query(f'LWPOLYLINE[layer=="{layer}"]'):
-             cx, cy = self._get_entity_center(entity)
-             w, d = self._get_dims(entity)
-             columns.append({
-                 'x': cx,
-                 'y': cy,
-                 'width': w,
-                 'depth': d,
-                 'id': f"C{len(columns)+1}" # Auto-generate ID if not text tag found
-             })
-             
+        layer_names = [layer.dxf.name for layer in self.doc.layers]
+        col_layers = [n for n in layer_names if any(kw in n.upper() for kw in ['COL', 'PILLAR', 'STANCHION'])]
+        if not col_layers and self.layer_map['columns'] in layer_names:
+            col_layers.append(self.layer_map['columns'])
+
+        for layer in col_layers:
+            for entity in self.msp.query(f'LWPOLYLINE[layer=="{layer}"]'):
+                 cx, cy = self._get_entity_center(entity)
+                 w, d = self._get_dims(entity)
+                 columns.append({
+                     'x': cx,
+                     'y': cy,
+                     'width': w,
+                     'depth': d,
+                     'id': f"C{len(columns)+1}"
+                 })
+                 
         return columns
 
     def extract_beams(self) -> List[Dict]:
         """Extracts beams, typically represented as lines or polylines."""
-        layer = self.layer_map['beams']
         beams = []
-         
-        if not self.msp:
+        if not self.msp or not self.doc:
              return []
 
-        # Beams might be LINES (centerlines) or POLYLINES (outlines)
-        for entity in self.msp.query(f'LINE[layer=="{layer}"]'):
-            start = entity.dxf.start
-            end = entity.dxf.end
-            beams.append({
-                'start': (start.x, start.y),
-                'end': (end.x, end.y),
-                'id': f"B{len(beams)+1}"
-            })
+        layer_names = [layer.dxf.name for layer in self.doc.layers]
+        beam_layers = [n for n in layer_names if 'BEAM' in n.upper()]
+        if not beam_layers and self.layer_map['beams'] in layer_names:
+            beam_layers.append(self.layer_map['beams'])
+
+        for layer in beam_layers:
+            for entity in self.msp.query(f'LINE[layer=="{layer}"]'):
+                start = entity.dxf.start
+                end = entity.dxf.end
+                beams.append({
+                    'start': (start.x, start.y),
+                    'end': (end.x, end.y),
+                    'id': f"B{len(beams)+1}"
+                })
             
         return beams
 
     def extract_walls(self) -> List[Tuple[Tuple[float, float], Tuple[float, float]]]:
         """Extracts wall lines from LINE and POLYLINE entities."""
-        layer = 'WALLS' 
         walls = []
-        
-        if not self.msp:
+        if not self.msp or not self.doc:
             return []
             
-        # 1. LINES
-        for line in self.msp.query(f'LINE[layer=="{layer}"]'):
-            walls.append((
-                (line.dxf.start.x, line.dxf.start.y),
-                (line.dxf.end.x, line.dxf.end.y)
-            ))
-             
-        # 2. LWPOLYLINES
-        for ply in self.msp.query(f'LWPOLYLINE[layer=="{layer}"]'):
-            if ply.has_dxf_attrib('elevation'):
-                z = ply.dxf.elevation
-            else:
-                z = 0
-            
-            points = ply.get_points(format='xy')
-            # Create segments from points
-            for i in range(len(points) - 1):
-                walls.append((points[i], points[i+1]))
-            # Close loop if closed
-            if ply.is_closed and len(points) > 2:
-                walls.append((points[-1], points[0]))
+        # Discover wall layers
+        layer_names = [layer.dxf.name for layer in self.doc.layers]
+        wall_layers = []
+        for name in layer_names:
+            upper = name.upper()
+            if any(kw in upper for kw in ['WALL', 'STRUCT', 'LOAD', 'BEAR', 'MASONRY', 'BRICK']):
+                wall_layers.append(name)
                 
-        # 3. POLYLINES (2D)
-        for ply in self.msp.query(f'POLYLINE[layer=="{layer}"]'):
-            points = [v.dxf.location[:2] for v in ply.vertices]
-            for i in range(len(points) - 1):
-                walls.append((points[i], points[i+1]))
-            if ply.is_closed and len(points) > 2:
-                walls.append((points[-1], points[0]))
+        # Fallback to layer "0" if no explicit wall layer is found
+        if not wall_layers and "0" in layer_names:
+            wall_layers.append("0")
+            
+        for layer in wall_layers:
+            # 1. LINES
+            for line in self.msp.query(f'LINE[layer=="{layer}"]'):
+                walls.append((
+                    (line.dxf.start.x, line.dxf.start.y),
+                    (line.dxf.end.x, line.dxf.end.y)
+                ))
+                 
+            # 2. LWPOLYLINES
+            for ply in self.msp.query(f'LWPOLYLINE[layer=="{layer}"]'):
+                points = ply.get_points(format='xy')
+                for i in range(len(points) - 1):
+                    walls.append((points[i], points[i+1]))
+                if ply.is_closed and len(points) > 2:
+                    walls.append((points[-1], points[0]))
+                    
+            # 3. POLYLINES (2D)
+            for ply in self.msp.query(f'POLYLINE[layer=="{layer}"]'):
+                points = [v.dxf.location[:2] for v in ply.vertices]
+                for i in range(len(points) - 1):
+                    walls.append((points[i], points[i+1]))
+                if ply.is_closed and len(points) > 2:
+                    walls.append((points[-1], points[0]))
 
         return walls
 
