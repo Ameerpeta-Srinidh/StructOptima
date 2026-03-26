@@ -49,9 +49,10 @@ def get_optimized_structure(columns, story_height, num_stories, fck):
 def get_stability_check_results(columns, all_beams, num_stories, story_height):
     return run_stability_check(columns, all_beams, num_stories, story_height)
 
-@st.cache_data(show_spinner="Running advanced safety checks...")
+@st.cache_data(show_spinner=False) # Changed spinner behavior as per instruction
 def get_safety_warnings_results(columns, all_beams, floor_width, floor_length, fck, seismic_zone):
-    return run_safety_warnings_check(columns, all_beams, floor_width=floor_width, floor_length=floor_length, fck=fck, seismic_zone=seismic_zone)
+    from src.safety_warnings import run_safety_warnings_check # Added import as per instruction
+    return run_safety_warnings_check(columns, all_beams, footings_or_width=floor_width, floor_length=floor_length, fck=fck, seismic_zone=seismic_zone)
 
 # Helper removed. Logic moved to GridManager.generate_beams()
 
