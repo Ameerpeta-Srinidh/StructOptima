@@ -163,7 +163,7 @@ with st.sidebar:
         <p style="margin: 2px 0; font-size: 0.85em; color: #666;">v1.0.0 · March 2026</p>
     </div>
     """, unsafe_allow_html=True)
-    st.caption("Built by **Srinidh Ameerpeta**, Civil Engineering")
+    st.caption("Built by **Charan Tej, Chandana, and Srinidh Ameerpeta**")
     st.markdown(
         "[⭐ GitHub Repository](https://github.com/Ameerpeta-Srinidh/StructOptima)",
         unsafe_allow_html=True
