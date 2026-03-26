@@ -1846,9 +1846,12 @@ if st.session_state.get('analysis_done', False):
         with open(report_file, "rb") as f:
             pdf_data = f.read()
         
-        # Payment-gated download (free if Razorpay is not configured)
-        from src.payment import render_payment_button
-        render_payment_button(pdf_data, filename="Structural_Report.pdf")
+        st.download_button(
+            label="📄 Download Structural Report (Free Beta)",
+            data=pdf_data,
+            file_name="Structural_Report.pdf",
+            mime="application/pdf"
+        )
         
         # ========== FEEDBACK WIDGET ==========
         st.markdown("---")
