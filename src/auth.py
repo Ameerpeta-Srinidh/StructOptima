@@ -38,9 +38,13 @@ except ImportError:
     STREAMLIT_AVAILABLE = False
 
 
-# Default admin credentials (should be changed in production)
+# Default admin credentials — MUST be overridden in production via env vars
 DEFAULT_USERNAME = "admin"
-DEFAULT_PASSWORD_HASH = hashlib.sha256("structural2024".encode()).hexdigest()
+# No hardcoded password — force operator to set credentials
+# If env vars are not set, generate a one-time random password and warn
+_DEFAULT_RANDOM_PASSWORD = secrets.token_urlsafe(16)
+DEFAULT_PASSWORD_HASH = hashlib.sha256(_DEFAULT_RANDOM_PASSWORD.encode()).hexdigest()
+_USING_DEFAULT_CREDENTIALS = True
 
 # Environment variable names for credentials
 ENV_USERNAME = "STRUCT_APP_USERNAME"
@@ -73,9 +77,34 @@ def get_credentials() -> Tuple[str, str]:
     Returns:
         Tuple of (username, password_hash)
     """
-    username = os.environ.get(ENV_USERNAME, DEFAULT_USERNAME)
-    password_hash = os.environ.get(ENV_PASSWORD_HASH, DEFAULT_PASSWORD_HASH)
-    return username, password_hash
+    global _USING_DEFAULT_CREDENTIALS
+    username = os.environ.get(ENV_USERNAME)
+    password_hash = os.environ.get(ENV_PASSWORD_HASH)
+    
+    if username and password_hash:
+        _USING_DEFAULT_CREDENTIALS = False
+        return username, password_hash
+    
+    # Try Streamlit secrets
+    if STREAMLIT_AVAILABLE:
+        try:
+            username = st.secrets.get(ENV_USERNAME, None)
+            password_hash = st.secrets.get(ENV_PASSWORD_HASH, None)
+            if username and password_hash:
+                _USING_DEFAULT_CREDENTIALS = False
+                return username, password_hash
+        except Exception:
+            pass
+    
+    # No credentials configured — return defaults with warning
+    _USING_DEFAULT_CREDENTIALS = True
+    import logging
+    logging.getLogger(__name__).warning(
+        "No credentials configured. Set %s and %s environment variables. "
+        "Authentication is disabled for this session.", ENV_USERNAME, ENV_PASSWORD_HASH
+    )
+    return DEFAULT_USERNAME, DEFAULT_PASSWORD_HASH
+
 
 
 def check_authentication() -> bool:

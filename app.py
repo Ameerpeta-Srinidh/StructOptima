@@ -352,6 +352,12 @@ if st.session_state.get('analysis_done', False):
                         capture_exception(e)
                         st.error(f"Failed to load CAD: {e}")
                         st.stop()
+                    finally:
+                        # Clean up temp file — avoids PermissionError on read-only PaaS hosts
+                        try:
+                            os.unlink(temp_filename)
+                        except OSError:
+                            pass
                 
                 elif input_mode == "Import BIM (IFC)":
                      if ifc_file is None:
@@ -375,6 +381,12 @@ if st.session_state.get('analysis_done', False):
                          capture_exception(e)
                          st.error(f"Failed to load IFC: {e}")
                          st.stop()
+                     finally:
+                         # Clean up temp file — avoids PermissionError on read-only PaaS hosts
+                         try:
+                             os.unlink(temp_filename)
+                         except OSError:
+                             pass
     
                 else:
                     # Manual Generation
@@ -648,17 +660,14 @@ if st.session_state.get('analysis_done', False):
         
         # 4. Beams & BOM
         # beams already generated above (either from CAD or Manual)
-        # Create unique beam copies per story to avoid BOM double-counting
+        # Create deep-copied beam objects per story to avoid shared reference mutations
         
         all_beams = []
         for i in range(num_stories):
             for b in beams:
-                copied = StructuralMember(
-                    id=f"{b.id}_L{i}",
-                    start_point=Point(x=b.start_point.x, y=b.start_point.y, z=b.start_point.z if hasattr(b.start_point, 'z') else 0),
-                    end_point=Point(x=b.end_point.x, y=b.end_point.y, z=b.end_point.z if hasattr(b.end_point, 'z') else 0),
-                    properties=b.properties
-                )
+                # Deep copy to prevent shared mutations across stories
+                copied = b.model_copy(deep=True)
+                copied.id = f"{b.id}_L{i}"
                 all_beams.append(copied)
             
         # 4. Quantification & BOM
@@ -876,9 +885,12 @@ if st.session_state.get('analysis_done', False):
         st.subheader("Seismic Analysis — IS 1893:2016 / IS 13920:2016")
         
         # Estimate building weight (concrete + steel + live load)
+        # Use gm bounding box for all input modes (DXF/IFC/Manual) instead of
+        # undefined width/length variables which silently fall back to 1000 kN
+        floor_area_m2 = gm.width_m * gm.length_m
         building_weight = bom.total_concrete_vol_m3 * 25  # kN
         building_weight += bom.total_steel_weight_kg * 0.00981  # kN
-        building_weight += (width * length * num_stories * live_load) if width > 0 else 1000
+        building_weight += floor_area_m2 * num_stories * live_load
         
         # Get concrete grade
         fck = int(conc_grade[1:])
@@ -931,6 +943,56 @@ if st.session_state.get('analysis_done', False):
                 st.caption(fc.warning)
         else:
             st.success("✅ No floating columns - load path continuous")
+        
+        # Torsional Irregularity Check (IS 1893 Cl. 7.1)
+        # FEA solver is 2D (3 DOF/node) — cannot capture 3D torsional response.
+        # Detect torsional irregularity: CoM vs CoR offset > 5% of plan dimension.
+        _level_0_cols_torsion = [c for c in gm.columns if c.level == 0]
+        if _level_0_cols_torsion:
+            # Centre of Mass (weighted by tributary load)
+            _total_load = sum(c.load_kn for c in _level_0_cols_torsion)
+            if _total_load > 0:
+                _com_x = sum(c.x * c.load_kn for c in _level_0_cols_torsion) / _total_load
+                _com_y = sum(c.y * c.load_kn for c in _level_0_cols_torsion) / _total_load
+            else:
+                _com_x = sum(c.x for c in _level_0_cols_torsion) / len(_level_0_cols_torsion)
+                _com_y = sum(c.y for c in _level_0_cols_torsion) / len(_level_0_cols_torsion)
+            
+            # Centre of Rigidity (weighted by column stiffness ∝ I = bd³/12)
+            _total_stiffness = sum(c.width_nb * c.depth_nb**3 for c in _level_0_cols_torsion)
+            if _total_stiffness > 0:
+                _cor_x = sum(c.x * c.width_nb * c.depth_nb**3 for c in _level_0_cols_torsion) / _total_stiffness
+                _cor_y = sum(c.y * c.width_nb * c.depth_nb**3 for c in _level_0_cols_torsion) / _total_stiffness
+            else:
+                _cor_x, _cor_y = _com_x, _com_y
+            
+            _offset_x = abs(_com_x - _cor_x)
+            _offset_y = abs(_com_y - _cor_y)
+            _plan_x = gm.width_m
+            _plan_y = gm.length_m
+            
+            _torsion_ratio_x = _offset_x / _plan_x if _plan_x > 0 else 0
+            _torsion_ratio_y = _offset_y / _plan_y if _plan_y > 0 else 0
+            _is_torsionally_irregular = _torsion_ratio_x > 0.05 or _torsion_ratio_y > 0.05
+            
+            if _is_torsionally_irregular:
+                st.error(
+                    f"🚨 **TORSIONAL IRREGULARITY DETECTED** (IS 1893 Cl. 7.1)\n\n"
+                    f"CoM–CoR offset: X = {_offset_x:.3f}m ({_torsion_ratio_x:.1%} of plan), "
+                    f"Y = {_offset_y:.3f}m ({_torsion_ratio_y:.1%} of plan)\n\n"
+                    f"**The current 2D frame analysis cannot capture torsional response.** "
+                    f"Story drift estimates may be unconservative by 2–3×. "
+                    f"A full 3D analysis (ETABS/STAAD) is required for this layout."
+                )
+                st.warning(
+                    "⚠️ **Drift-based checks are unreliable** for this configuration. "
+                    "Do NOT use drift values from this analysis for compliance verification."
+                )
+            else:
+                st.success(
+                    f"✅ No torsional irregularity — CoM–CoR offset within 5% "
+                    f"(X: {_torsion_ratio_x:.1%}, Y: {_torsion_ratio_y:.1%})"
+                )
         
         # Ductile detailing requirements
         with st.expander("View Ductile Detailing Requirements (IS 13920)"):
