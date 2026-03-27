@@ -1567,6 +1567,42 @@ if st.session_state.get('analysis_done', False):
                 file_name="Structural_Plan.dxf",
                 mime="application/dxf"
             )
+
+        # Professional DXF Export (Foundation Plan & Beam Schedule)
+        from src.dxf_exporter import ProfessionalDXFExporter
+        import datetime
+        prof_dxf_filename = "Foundation_Plan_Professional.dxf"
+        design_info = {
+            "project_name": project_name if 'project_name' in locals() and project_name else "PROPOSED BUILDING",
+            "engineer": engineer_name if 'engineer_name' in locals() and engineer_name else "STRUCTURAL ENGINEER",
+            "date": datetime.datetime.now().strftime("%d-%m-%Y"),
+            "sheet": "S-1",
+            "scale": "1:100"
+        }
+        
+        try:
+            prof_exporter = ProfessionalDXFExporter(gm, beams, design_info, drawing_type="FOUNDATION")
+            prof_exporter.export(prof_dxf_filename)
+            with open(prof_dxf_filename, "rb") as f:
+                c_d2.download_button(
+                    label="🏗️ Prof. Foundation Plan (.dxf)",
+                    data=f.read(),
+                    file_name="Foundation_Plan_Professional.dxf",
+                    mime="application/dxf"
+                )
+                
+            beam_sched_filename = "Beam_Schedule.dxf"
+            prof_exporter.export_beam_schedule_table(beam_sched_filename)
+            with open(beam_sched_filename, "rb") as f:
+                c_d2.download_button(
+                    label="📋 Download Beam Schedule (.dxf)",
+                    data=f.read(),
+                    file_name="Beam_Schedule.dxf",
+                    mime="application/dxf"
+                )
+        except Exception as e:
+            logger.error("Failed to generate Professional DXF: %s", e)
+            c_d2.error("Prof. DXF export failed.")
         
         # Layer-wise Exports Section
         st.markdown("---")
