@@ -1539,6 +1539,97 @@ if st.session_state.get('analysis_done', False):
             else:
                 st.success("✅ Steel consumption within normal range (70-130 kg/m³).")
 
+        # --- LAYOUT NEGOTIATION ---
+        st.markdown("---")
+        st.subheader("🏗️ Layout Negotiation — Architect ↔ Engineer")
+        st.caption("Dual-objective optimization: find column placements that satisfy both structural safety AND architectural aesthetics.")
+
+        try:
+            from src.layout_scorer import LayoutScorer, ColumnCandidate
+            from src.layout_optimizer import LayoutOptimizer, OptimizationConfig
+
+            # Convert GridManager columns to ColumnCandidates
+            base_cols = []
+            level_0_cols = [c for c in gm.columns if c.level == 0]
+            xs_all = [c.x for c in level_0_cols]
+            ys_all = [c.y for c in level_0_cols]
+
+            for col in level_0_cols:
+                is_corner = (
+                    (col.x == min(xs_all) or col.x == max(xs_all)) and
+                    (col.y == min(ys_all) or col.y == max(ys_all))
+                )
+                is_edge = (
+                    col.x == min(xs_all) or col.x == max(xs_all) or
+                    col.y == min(ys_all) or col.y == max(ys_all)
+                ) and not is_corner
+
+                base_cols.append(ColumnCandidate(
+                    id=col.id, x=col.x, y=col.y,
+                    width_mm=col.width_nb, depth_mm=col.depth_nb,
+                    is_corner=is_corner, is_edge=is_edge
+                ))
+
+            # Build wall segments for scorer
+            wall_segments = []
+            if hasattr(gm, 'x_grid_lines') and hasattr(gm, 'y_grid_lines'):
+                for x in gm.x_grid_lines:
+                    wall_segments.append(((x, min(gm.y_grid_lines)), (x, max(gm.y_grid_lines))))
+                for y in gm.y_grid_lines:
+                    wall_segments.append(((min(gm.x_grid_lines), y), (max(gm.x_grid_lines), y)))
+
+            scorer = LayoutScorer(walls=wall_segments)
+            optimizer = LayoutOptimizer(
+                scorer=scorer,
+                baseline_columns=base_cols,
+                config=OptimizationConfig(max_candidates=30, top_n=3)
+            )
+
+            results = optimizer.optimize()
+
+            if results:
+                import pandas as pd
+                table_data = []
+                for r in results:
+                    table_data.append({
+                        "Layout": r.layout_id,
+                        "Structural Score": f"{r.structural_score:.1f}/100",
+                        "Aesthetic Score": f"{r.aesthetic_score:.1f}/100",
+                        "Composite Score": f"{r.composite_score:.1f}/100",
+                        "Columns": len(r.columns),
+                    })
+
+                df = pd.DataFrame(table_data)
+                st.dataframe(df, use_container_width=True, hide_index=True)
+
+                # Best layout recommendation
+                best = results[0]
+                if best.layout_id == "Baseline":
+                    st.success(f"✅ **Recommendation:** Your current layout is already optimal! (Composite: {best.composite_score:.1f}/100)")
+                else:
+                    st.info(f"💡 **Recommendation:** Layout **{best.layout_id}** offers the best balance. (Composite: {best.composite_score:.1f}/100)")
+
+                # Per-column detail expander
+                with st.expander("📊 Detailed Per-Column Scores (Best Layout)"):
+                    detail_data = []
+                    for sc in best.columns:
+                        detail_data.append({
+                            "Column": sc.column.id,
+                            "X (m)": f"{sc.column.x:.2f}",
+                            "Y (m)": f"{sc.column.y:.2f}",
+                            "Structural": f"{sc.structural_score:.0f}",
+                            "Aesthetic": f"{sc.aesthetic_score:.0f}",
+                            "Wall Proximity": sc.aesthetic_details.get("wall_concealability", "N/A"),
+                            "Room Avoidance": sc.aesthetic_details.get("room_centroid_avoidance", "N/A"),
+                        })
+                    st.dataframe(pd.DataFrame(detail_data), use_container_width=True, hide_index=True)
+            else:
+                st.warning("No alternative layouts found. The baseline is the only viable option.")
+
+        except Exception as e:
+            logger.error("Layout negotiation failed: %s", e)
+            st.warning(f"Layout negotiation could not run: {e}")
+
         # --- EXPORTS ---
         st.markdown("---")
         st.subheader("Downloads & Reporting")
