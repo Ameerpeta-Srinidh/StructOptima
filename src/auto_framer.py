@@ -78,7 +78,7 @@ class AutoFramer:
         return centerlines
 
     def identify_structural_nodes(self):
-        walls = self.parser.extract_walls()
+        walls = self.parser.extract_walls_normalized()
         if not walls:
              logger.warning("No walls found on 'WALLS' layer.")
              return
@@ -328,7 +328,7 @@ class AutoFramer:
         if use_is_code:
             return self._generate_is_code_beams(seismic_zone)
         
-        walls = self.parser.extract_walls()
+        walls = self.parser.extract_walls_normalized()
         beams = []
         beam_count = 0
         beam_pairs_added = set()
@@ -540,7 +540,7 @@ class AutoFramer:
         """
         from .beam_placer import BeamPlacer, BeamType
         
-        walls = self.parser.extract_walls()
+        walls = self.parser.extract_walls_normalized()
         
         placer = BeamPlacer(
             columns=self.columns,

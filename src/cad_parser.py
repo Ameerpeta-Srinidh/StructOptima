@@ -137,41 +137,208 @@ class CADParser:
         return beams
 
     def extract_walls(self) -> List[Tuple[Tuple[float, float], Tuple[float, float]]]:
-        """Extracts wall lines from LINE and POLYLINE entities."""
+        """
+        Extracts wall lines using a 3-tier fallback strategy:
+          Tier 1: Explicit keyword layer matching (WALL, STRUCT, etc.)
+          Tier 2: Fuzzy scan of ALL layers for line geometry
+          Tier 3: Geometric detection — find parallel line pairs (walls)
+        """
         if not self.msp or not self.doc:
             return []
             
         layer_names = [layer.dxf.name for layer in self.doc.layers]
-        wall_layers = []
-        for name in layer_names:
-            upper = name.upper()
-            if any(kw in upper for kw in ['WALL', 'STRUCT', 'LOAD', 'BEAR', 'MASONRY', 'BRICK']):
-                wall_layers.append(name)
-                
+        
+        # Keywords for wall layers (broad enough to catch any convention)
+        WALL_KW = ['WALL', 'STRUCT', 'LOAD', 'BEAR', 'MASONRY', 'BRICK',
+                    'OUTLINE', 'BOUNDARY', 'A-WALL', 'S-WALL', 'ARCH']
+        
+        wall_layers = [n for n in layer_names if any(kw in n.upper() for kw in WALL_KW)]
+        
         def _get_lines_for_layers(layers_to_check):
-            found_walls = []
+            found = []
             for layer in layers_to_check:
                 for line in self.msp.query(f'LINE[layer=="{layer}"]'):
-                    found_walls.append(((line.dxf.start.x, line.dxf.start.y), (line.dxf.end.x, line.dxf.end.y)))
+                    found.append(((line.dxf.start.x, line.dxf.start.y), (line.dxf.end.x, line.dxf.end.y)))
                 for ply in self.msp.query(f'LWPOLYLINE[layer=="{layer}"]'):
                     points = ply.get_points(format='xy')
-                    for i in range(len(points) - 1): found_walls.append((points[i], points[i+1]))
-                    if ply.is_closed and len(points) > 2: found_walls.append((points[-1], points[0]))
+                    for i in range(len(points) - 1): found.append((points[i], points[i+1]))
+                    if ply.is_closed and len(points) > 2: found.append((points[-1], points[0]))
                 for ply in self.msp.query(f'POLYLINE[layer=="{layer}"]'):
                     points = [v.dxf.location[:2] for v in ply.vertices]
-                    for i in range(len(points) - 1): found_walls.append((points[i], points[i+1]))
-                    if ply.is_closed and len(points) > 2: found_walls.append((points[-1], points[0]))
-            return found_walls
+                    for i in range(len(points) - 1): found.append((points[i], points[i+1]))
+                    if ply.is_closed and len(points) > 2: found.append((points[-1], points[0]))
+            return found
 
-        # First pass: try explicit matched layers
+        # Tier 1: Explicit keyword-matched layers
         walls = _get_lines_for_layers(wall_layers)
+        if walls:
+            logger.info("Tier 1 wall extraction: %d segments from %d layers", len(walls), len(wall_layers))
+            return walls
         
-        # Deep Fallback: if STILL no lines found (e.g. wall layer exists but is empty/blocks), scan all layers
-        if not walls:
-            logger.warning("No line geometry found on explicit wall layers. Doing deep fallback to ALL layers.")
-            walls = _get_lines_for_layers(layer_names)
+        # Tier 2: Scan ALL layers for any line geometry
+        logger.warning("Tier 1 failed. Tier 2: scanning ALL layers for line geometry.")
+        walls = _get_lines_for_layers(layer_names)
+        if walls:
+            logger.info("Tier 2 wall extraction: %d segments from all layers", len(walls))
+            return walls
 
+        # Tier 3: Geometric detection — find ANY lines in modelspace
+        logger.warning("Tier 2 failed. Tier 3: geometric entity scan.")
+        walls = []
+        for entity in self.msp:
+            if entity.dxftype() == 'LINE':
+                s = (entity.dxf.start.x, entity.dxf.start.y)
+                e = (entity.dxf.end.x, entity.dxf.end.y)
+                length = math.hypot(e[0]-s[0], e[1]-s[1])
+                if length > 300:  # Ignore tiny lines (dimensions, hatches)
+                    walls.append((s, e))
+            elif entity.dxftype() in ('LWPOLYLINE', 'POLYLINE'):
+                try:
+                    if entity.dxftype() == 'LWPOLYLINE':
+                        pts = list(entity.get_points(format='xy'))
+                    else:
+                        pts = [v.dxf.location[:2] for v in entity.vertices]
+                    for i in range(len(pts)-1):
+                        seg_len = math.hypot(pts[i+1][0]-pts[i][0], pts[i+1][1]-pts[i][1])
+                        if seg_len > 300:
+                            walls.append((pts[i], pts[i+1]))
+                except Exception:
+                    pass
+
+        logger.info("Tier 3 geometric extraction: %d segments", len(walls))
         return walls
+
+    def normalize_to_centerlines(
+        self,
+        walls: List[Tuple[Tuple[float, float], Tuple[float, float]]],
+        thickness_range: Tuple[float, float] = (100.0, 400.0),
+        angle_tol_deg: float = 8.0,
+    ) -> List[Tuple[Tuple[float, float], Tuple[float, float]]]:
+        """
+        Merges double-wall parallel line pairs into single centerlines.
+        
+        This is the key normalizer: whether an architect draws walls as
+        single lines OR double lines (offset by wall thickness), the output
+        is always a clean list of wall centerlines.
+
+        Args:
+            walls: Raw wall segments from extract_walls()
+            thickness_range: (min, max) perpendicular distance to consider as wall pair
+            angle_tol_deg: Max angle difference to treat lines as parallel
+        
+        Returns:
+            List of centerline segments (merged where pairs found, passthrough for singles)
+        """
+        if not walls:
+            return []
+
+        n = len(walls)
+        used = [False] * n
+        centerlines = []
+
+        # Precompute wall midpoints and directions
+        wall_info = []
+        for (sx, sy), (ex, ey) in walls:
+            dx, dy = ex - sx, ey - sy
+            length = math.hypot(dx, dy)
+            mx, my = (sx+ex)/2, (sy+ey)/2
+            wall_info.append({
+                'dx': dx, 'dy': dy, 'length': length,
+                'mx': mx, 'my': my,
+            })
+
+        for i in range(n):
+            if used[i]:
+                continue
+            
+            w1 = walls[i]
+            info1 = wall_info[i]
+            if info1['length'] < 100:
+                used[i] = True
+                continue
+
+            best_j = -1
+            best_dist = float('inf')
+
+            for j in range(i+1, n):
+                if used[j]:
+                    continue
+                
+                info2 = wall_info[j]
+                if info2['length'] < 100:
+                    continue
+
+                # Check parallelism via angle between direction vectors
+                dot = (info1['dx']*info2['dx'] + info1['dy']*info2['dy'])
+                denom = info1['length'] * info2['length']
+                if denom < 1:
+                    continue
+                cos_angle = max(-1.0, min(1.0, abs(dot / denom)))
+                angle_diff = math.degrees(math.acos(cos_angle))
+                
+                if angle_diff > angle_tol_deg:
+                    continue
+
+                # Check similar length (within 30%)
+                len_ratio = min(info1['length'], info2['length']) / max(info1['length'], info2['length'])
+                if len_ratio < 0.6:
+                    continue
+
+                # Check perpendicular distance between midpoints
+                # Project midpoint2 onto the line through wall1
+                perp_dist = self._point_to_line_dist(
+                    info2['mx'], info2['my'],
+                    w1[0][0], w1[0][1], w1[1][0], w1[1][1]
+                )
+
+                if thickness_range[0] <= perp_dist <= thickness_range[1]:
+                    if perp_dist < best_dist:
+                        best_dist = perp_dist
+                        best_j = j
+
+            if best_j >= 0:
+                # Merge pair into centerline
+                w2 = walls[best_j]
+                cx1 = (w1[0][0] + w2[0][0]) / 2
+                cy1 = (w1[0][1] + w2[0][1]) / 2
+                cx2 = (w1[1][0] + w2[1][0]) / 2
+                cy2 = (w1[1][1] + w2[1][1]) / 2
+                centerlines.append(((cx1, cy1), (cx2, cy2)))
+                used[i] = True
+                used[best_j] = True
+                logger.debug("Merged wall pair (thickness=%.0fmm): [%d]+[%d]", best_dist, i, best_j)
+            else:
+                # Unpaired wall — treat as single-line centerline
+                centerlines.append(w1)
+                used[i] = True
+
+        logger.info(
+            "Wall normalization: %d raw segments -> %d centerlines (%d pairs merged)",
+            n, len(centerlines), n - len(centerlines)
+        )
+        return centerlines
+
+    def extract_walls_normalized(self) -> List[Tuple[Tuple[float, float], Tuple[float, float]]]:
+        """
+        The universal entry point: extract walls and normalize to centerlines.
+        
+        Works with ANY DXF format:
+          - Single-line walls -> passed through
+          - Double-line walls -> merged into centerlines
+          - Named layers -> detected by keyword
+          - Unnamed layers -> detected by geometry
+        """
+        raw = self.extract_walls()
+        return self.normalize_to_centerlines(raw)
+
+    @staticmethod
+    def _point_to_line_dist(px, py, x1, y1, x2, y2) -> float:
+        """Perpendicular distance from point to infinite line through (x1,y1)-(x2,y2)."""
+        dx, dy = x2 - x1, y2 - y1
+        length = math.hypot(dx, dy)
+        if length < 1e-9:
+            return math.hypot(px - x1, py - y1)
+        return abs(dy * px - dx * py + x2 * y1 - y2 * x1) / length
 
     def classify_layers(self) -> Dict[str, str]:
         """Classifies layers as load_bearing, partition, or boundary based on naming conventions."""

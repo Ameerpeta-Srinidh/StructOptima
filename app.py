@@ -115,6 +115,23 @@ _ts4.metric("Indian Standard Codes", "4 Codes", help="IS 456 · IS 1893 · IS 13
 
 st.markdown("---")
 
+with st.expander("📐 DXF Input Guide — How to Prepare Your Architectural DXF", expanded=False):
+    st.markdown("""
+**StructOptima's universal parser handles almost any DXF format**, but for best results:
+
+| Element | Recommended Format |
+|---------|-------------------|
+| **Walls** | `LINE` or `LWPOLYLINE` entities on a layer named `WALL`, `WALLS`, `A-WALL`, or similar |
+| **Units** | Millimeters (mm) — this is the Indian standard |
+| **Double walls** | Accepted! Both double-line walls (230mm offset) and single centerlines are auto-normalized |
+| **Layer names** | Put walls on layers containing keywords: `WALL`, `STRUCT`, `BOUNDARY`, `ARCH` |
+| **No layers?** | That's OK — the parser auto-detects wall geometry from line patterns |
+
+**What NOT to include on wall layers:** Dimensions, text, furniture, annotations, hatches.
+
+**Supported building shapes:** Rectangular, L-shape, C-shape, T-shape, H-shape, stepped, irregular.
+    """)
+
 # Design Assumptions & Safety Factors (Always visible)
 with st.expander("Design Basis & Safety Factors (Click to expand)", expanded=False):
     col_a, col_b = st.columns(2)
