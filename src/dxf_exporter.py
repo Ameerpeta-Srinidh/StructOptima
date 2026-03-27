@@ -195,9 +195,9 @@ class StructuralDXFExporter:
                 msp.add_text(beam.id, dxfattribs={'layer': 'S-TEXT', 'height': 120}).set_placement((mid[0], mid[1]+100))
         
         doc.saveas(filename)
+
         logger.info("DXF Exported for Level %d: %s", level, filename)
 
-import ezdxf
 
 class ProfessionalDXFExporter:
     """
