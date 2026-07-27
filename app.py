@@ -180,7 +180,7 @@ with st.sidebar:
         <p style="margin: 2px 0; font-size: 0.85em; color: #666;">v1.0.0 · March 2026</p>
     </div>
     """, unsafe_allow_html=True)
-    st.caption("Built by **Charan Tej, Chandana, and Srinidh**")
+    st.caption("Built by **Charan Tej, Chandana, and Vamshi**")
     st.markdown(
         "[⭐ GitHub Repository](https://github.com/Ameerpeta-Srinidh/StructOptima)",
         unsafe_allow_html=True
@@ -409,6 +409,8 @@ if st.session_state.get('analysis_done', False):
                     try:
                         loader = CADLoader(temp_filename)
                         gm, beams = loader.load_grid_manager(auto_frame=auto_frame)
+                        
+                        st.session_state['arch_walls'] = loader.get_architectural_walls()
                         
                         if auto_frame and not beams: # Only generate valid grid beams if auto-framer returned nothing
                             beams = gm.generate_beams()
@@ -796,7 +798,14 @@ if st.session_state.get('analysis_done', False):
         viz = Visualizer()
         v_mode_str = view_mode # Pass generic mode directly ("Deflection", "Use...", etc)
         # Verify mapping if needed, but Visualizer handles these strings now.
-        fig = viz.create_structure_figure(gm, beams, footings, m_grade, view_mode=v_mode_str) 
+        fig = viz.create_structure_figure(
+            grid_mgr=gm, 
+            beams=beams, 
+            footings=footings, 
+            concrete=m_grade, 
+            view_mode=v_mode_str,
+            arch_walls=st.session_state.get('arch_walls')
+        )
         
 
                 
@@ -2047,7 +2056,7 @@ st.markdown("""
 
 st.markdown("""
 <div style="text-align: center; padding: 15px 0; color: #9e9e9e; font-size: 0.85em;">
-    <p style="margin: 0;">© 2026 StructOptima — Built by Charan Tej, Chandana, and Srinidh</p>
+    <p style="margin: 0;">© 2026 StructOptima — Built by Charan Tej, Chandana, and Vamshi</p>
     <p style="margin: 4px 0 0 0;">All calculations per IS 456:2000 · IS 1893:2016 · IS 13920:2016 | v1.0.0</p>
     <p style="margin: 4px 0 0 0;">
         <a href="/terms" style="color: #1565c0; text-decoration: none;">Terms of Service</a> · 
