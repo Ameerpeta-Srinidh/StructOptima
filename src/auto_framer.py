@@ -22,7 +22,7 @@ class AutoFramer:
 
     def _is_close(self, p1, p2, tol=None):
         if tol is None:
-            tol = self.cluster_tolerance_mm
+            tol = getattr(self, 'cluster_tolerance', self.cluster_tolerance_mm)
         return math.hypot(p1[0]-p2[0], p1[1]-p2[1]) < tol
 
     def _walls_are_parallel(self, w1, w2, angle_tol_deg=10.0):
@@ -59,7 +59,8 @@ class AutoFramer:
                     continue
                 if self._walls_are_parallel(w1, w2):
                     dist = self._wall_perpendicular_distance(w1, w2)
-                    if dist < self.double_wall_tolerance_mm:
+                    current_double_wall_tol = getattr(self, 'double_wall_tolerance', self.double_wall_tolerance_mm)
+                    if dist < current_double_wall_tol:
                         group.append(w2)
                         used[j] = True
             
@@ -83,10 +84,25 @@ class AutoFramer:
              logger.warning("No walls found on 'WALLS' layer.")
              return
 
+        # Determine scale (mm vs meters)
+        max_coord = 0
+        for s, e in walls:
+            max_coord = max(max_coord, abs(s[0]), abs(s[1]), abs(e[0]), abs(e[1]))
+        
+        is_mm = max_coord > 300
+        scale = 1.0 if is_mm else 0.001
+        
+        # Override tolerances for this run
+        self.cluster_tolerance = self.cluster_tolerance_mm * scale
+        self.double_wall_tolerance = self.double_wall_tolerance_mm * scale
+        self.min_wall_len = self.min_wall_len_mm * scale
+        self.snap_tolerance = self.snap_tolerance_mm * scale
+        self.max_span = self.max_span_mm * scale
+
         valid_walls = []
         for start, end in walls:
             length = math.hypot(end[0]-start[0], end[1]-start[1])
-            if length > self.min_wall_len_mm:
+            if length > self.min_wall_len:
                 valid_walls.append((start, end))
         
         self.centerlines = self._extract_wall_centerlines(valid_walls)

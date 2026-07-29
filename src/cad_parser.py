@@ -184,13 +184,22 @@ class CADParser:
 
         # Tier 3: Geometric detection — find ANY lines in modelspace
         logger.warning("Tier 2 failed. Tier 3: geometric entity scan.")
+        
+        # Detect scale
+        max_coord = 0
+        for entity in self.msp:
+            if entity.dxftype() == 'LINE':
+                max_coord = max(max_coord, abs(entity.dxf.start.x), abs(entity.dxf.end.x))
+        is_mm = max_coord > 300
+        min_len = 300.0 if is_mm else 0.3
+
         walls = []
         for entity in self.msp:
             if entity.dxftype() == 'LINE':
                 s = (entity.dxf.start.x, entity.dxf.start.y)
                 e = (entity.dxf.end.x, entity.dxf.end.y)
                 length = math.hypot(e[0]-s[0], e[1]-s[1])
-                if length > 300:  # Ignore tiny lines (dimensions, hatches)
+                if length > min_len:  # Ignore tiny lines (dimensions, hatches)
                     walls.append((s, e))
             elif entity.dxftype() in ('LWPOLYLINE', 'POLYLINE'):
                 try:
@@ -200,7 +209,7 @@ class CADParser:
                         pts = [v.dxf.location[:2] for v in entity.vertices]
                     for i in range(len(pts)-1):
                         seg_len = math.hypot(pts[i+1][0]-pts[i][0], pts[i+1][1]-pts[i][1])
-                        if seg_len > 300:
+                        if seg_len > min_len:
                             walls.append((pts[i], pts[i+1]))
                 except Exception:
                     pass
@@ -329,7 +338,18 @@ class CADParser:
           - Unnamed layers -> detected by geometry
         """
         raw = self.extract_walls()
-        return self.normalize_to_centerlines(raw)
+        if not raw:
+            return []
+            
+        # Detect scale to adapt thickness thresholds
+        max_coord = 0
+        for s, e in raw:
+            max_coord = max(max_coord, abs(s[0]), abs(s[1]), abs(e[0]), abs(e[1]))
+        is_mm = max_coord > 300
+        thickness = (100.0, 500.0) if is_mm else (0.1, 0.5)
+
+        # 2. Normalize
+        return self.normalize_to_centerlines(raw, thickness_range=thickness)
 
     @staticmethod
     def _point_to_line_dist(px, py, x1, y1, x2, y2) -> float:
