@@ -60,278 +60,278 @@ class Visualizer:
             # Design Strength
             fcd = 0.4 * concrete.fck if getattr(concrete, 'fck', None) is not None else 10.0
         
-        # View Mode Logic
-        # "Engineering": Standard heat map
-        # "Architectural": Neutral
-        # "Deflection": Exaggerated deformed shape
-        # "Utilization": D/C Ratio heat map (same as Engineering but explicit)
-        # "Load Path": Highlight load transfer elements
+            # View Mode Logic
+            # "Engineering": Standard heat map
+            # "Architectural": Neutral
+            # "Deflection": Exaggerated deformed shape
+            # "Utilization": D/C Ratio heat map (same as Engineering but explicit)
+            # "Load Path": Highlight load transfer elements
 
-        deflection_scale = 100.0 if view_mode == "Deflection" else 0.0
+            deflection_scale = 100.0 if view_mode == "Deflection" else 0.0
         
-        # 1. Beams (Horizontal Lines)
-        num_stories = grid_mgr.num_stories if hasattr(grid_mgr, 'num_stories') else 1
-        story_height = grid_mgr.story_height_m if hasattr(grid_mgr, 'story_height_m') else 3.0
+            # 1. Beams (Horizontal Lines)
+            num_stories = grid_mgr.num_stories if hasattr(grid_mgr, 'num_stories') else 1
+            story_height = grid_mgr.story_height_m if hasattr(grid_mgr, 'story_height_m') else 3.0
         
-        beam_x = []
-        beam_y = []
-        beam_z = []
-        beam_hover = []
-        beam_colors = []
+            beam_x = []
+            beam_y = []
+            beam_z = []
+            beam_hover = []
+            beam_colors = []
         
-        # Collect beam labels
-        beam_labels_x = []
-        beam_labels_y = []
-        beam_labels_z = []
-        beam_labels_text = []
+            # Collect beam labels
+            beam_labels_x = []
+            beam_labels_y = []
+            beam_labels_z = []
+            beam_labels_text = []
 
-        load_path_highlight_ids = []
-        if view_mode == "Load Path":
-            # Highlight main transfer beams or heavy beams?
-            # For now, all connected beams participating in frame
-            pass
+            load_path_highlight_ids = []
+            if view_mode == "Load Path":
+                # Highlight main transfer beams or heavy beams?
+                # For now, all connected beams participating in frame
+                pass
         
-        for level in range(num_stories):
-            z_nominal = (level + 1) * story_height
+            for level in range(num_stories):
+                z_nominal = (level + 1) * story_height
             
-            for beam in beams:
-                # Calculate color based on mode
-                color = 'darkorange'
-                
-                # Check utilization for color
-                util_ratio = 0.0
-                if hasattr(beam, 'analysis_result') and isinstance(beam.analysis_result, dict):
-                     util_ratio = beam.analysis_result.get('usage_ratio', 0.5)
-                     if util_ratio is None: util_ratio = 0.5
-                elif hasattr(beam, 'properties') and beam.properties:
-                     length = ((beam.end_point.x - beam.start_point.x)**2 + (beam.end_point.y - beam.start_point.y)**2)**0.5
-                     util_ratio = min(1.0, length / 7.0)
-                
-                if util_ratio is None or math.isnan(util_ratio):
-                     util_ratio = 0.0
-
-                if view_mode in ["Engineering", "Utilization"]:
-                     color = self.get_color_by_stress(util_ratio)
-                elif view_mode == "Architectural":
-                     color = 'grey'
-                elif view_mode == "Load Path":
-                     color = 'blue' # Default gravity
-                
-                # Calculate Deformed Shape (Parabolic approximation)
-                x0, y0 = beam.start_point.x, beam.start_point.y
-                x1, y1 = beam.end_point.x, beam.end_point.y
-                
-                # Base Z
-                z0 = z_nominal
-                z1 = z_nominal
-                
-                if view_mode == "Deflection":
-                    # Simulate Sag: max at mid-span
-                    # delta = L^2/scale * load_factor
-                    L = ((x1-x0)**2 + (y1-y0)**2)**0.5
-                    mid_sag = (L**2) * 0.002 * deflection_scale * -1 # Downward
-                    
-                    # Discretize beam into 5 segments for smooth curve
-                    steps = 5
-                    for i in range(steps):
-                        t1 = i / steps
-                        t2 = (i+1) / steps
-                        
-                        bx0 = x0 + (x1-x0)*t1
-                        by0 = y0 + (y1-y0)*t1
-                        bz0 = z0 + 4*mid_sag*t1*(1-t1) # Parabola
-                        
-                        bx1 = x0 + (x1-x0)*t2
-                        by1 = y0 + (y1-y0)*t2
-                        bz1 = z1 + 4*mid_sag*t2*(1-t2)
-                        
-                        beam_x.extend([bx0, bx1, None])
-                        beam_y.extend([by0, by1, None])
-                        beam_z.extend([bz0, bz1, None])
-                        
-                        # Fix Color array for line segments - easier to add seperate traces if colors vary
-                        # For single trace, we can't easily vary line color per segment in plotly without line_color array
-                        # We will use 'darkorange' global or split traces.
-                        # Optimization: Use Mesh3d strip or just simple lines. 
-                        # Simple: Just one color per trace.
-                else:
-                    # Straight Line
-                    beam_x.extend([x0, x1, None])
-                    beam_y.extend([y0, y1, None])
-                    beam_z.extend([z0, z1, None])
-
-                # Hover Text
-                beam_id = getattr(beam, 'id', 'Beam')
-                hover = f"ID: {beam_id}<br>Util: {util_ratio:.2f}"
-                if view_mode == "Deflection":
-                     hover += "<br>Deflection: Simulated"
-                
-                beam_hover.extend([hover, hover, None])
-                
-                # Label
-                if level == 0 and view_mode != "Deflection":
-                    mid_x = (x0 + x1) / 2
-                    mid_y = (y0 + y1) / 2
-                    beam_labels_x.append(mid_x)
-                    beam_labels_y.append(mid_y)
-                    beam_labels_z.append(z_nominal + 0.3)
-                    beam_labels_text.append(beam_id)
-            
-        # Add Beams Trace
-        # ISSUE: We calculated specific colors per beam, but trying to plot as one trace.
-        # To support per-element coloring (Utilization), we must group by color OR rely on plotting individual lines (slow).
-        # Compromise: For "Utilization", use `scatter3d` with `line=dict(color=array)` if supported, 
-        # OR separate traces for High/Med/Low.
-        
-        # Let's split into 3 buckets for performance if Utilization mode
-        if view_mode in ["Engineering", "Utilization"]:
-             # Re-loop and group
-             traces = {'Low': ([],[],[]), 'Med': ([],[],[]), 'High': ([],[],[])}
-             colors = {'Low': 'green', 'Med': 'gold', 'High': 'red'}
-             
-             for level in range(num_stories):
-                z_lev = (level+1) * story_height
                 for beam in beams:
-                     # Calculate utilization - match logic above line 100
-                     u = 0.0
-                     if hasattr(beam, 'analysis_result') and beam.analysis_result:
-                         u = beam.analysis_result.get('usage_ratio', 0.5)
-                     elif hasattr(beam, 'properties'):
+                    # Calculate color based on mode
+                    color = 'darkorange'
+                
+                    # Check utilization for color
+                    util_ratio = 0.0
+                    if hasattr(beam, 'analysis_result') and isinstance(beam.analysis_result, dict):
+                         util_ratio = beam.analysis_result.get('usage_ratio', 0.5)
+                         if util_ratio is None: util_ratio = 0.5
+                    elif hasattr(beam, 'properties') and beam.properties:
                          length = ((beam.end_point.x - beam.start_point.x)**2 + (beam.end_point.y - beam.start_point.y)**2)**0.5
-                         u = min(1.0, length / 7.0) # Increased threshold to 7m to match IS code max span better
-                     
-                     bucket = 'Low' if u < 0.5 else ('Med' if u < 0.9 else 'High')
-                     
-                     traces[bucket][0].extend([beam.start_point.x, beam.end_point.x, None])
-                     traces[bucket][1].extend([beam.start_point.y, beam.end_point.y, None])
-                     traces[bucket][2].extend([z_lev, z_lev, None])
-
-             for b in ['Low', 'Med', 'High']:
-                 if traces[b][0]:
-                     fig.add_trace(go.Scatter3d(
-                         x=traces[b][0], y=traces[b][1], z=traces[b][2],
-                         mode='lines',
-                         line=dict(color=colors[b], width=8),
-                         name=f'Beam {b} Stress',
-                         hoverinfo='skip'
-                     ))
-        else:
-            # Standard single color trace (Deflection Mode or Architectural)
-            line_color = 'darkorange' if view_mode != "Architectural" else 'grey'
-            
-            # Filter None from hovertext to avoid Plotly JSON serialization issues in some versions
-            clean_hover = [h if h is not None else "" for h in beam_hover]
-            
-            fig.add_trace(go.Scatter3d(
-                x=beam_x, y=beam_y, z=beam_z,
-                mode='lines',
-                line=dict(color=line_color, width=8),
-                name='Beams',
-                hovertext=clean_hover,
-                hoverinfo='text'
-            ))
-
-        # Add beam ID labels
-        if beam_labels_text:
-            fig.add_trace(go.Scatter3d(
-                x=beam_labels_x, y=beam_labels_y, z=beam_labels_z,
-                mode='text', text=beam_labels_text,
-                textfont=dict(size=8, color='darkblue'),
-                showlegend=False
-            ))
-            
-        # 1.5 Draw Architectural Trace Layers at Z=-0.05
-        if arch_walls:
-            w_x, w_y, w_z = [], [], []
-            for (p1, p2) in arch_walls:
-                w_x.extend([p1[0], p2[0], None])
-                w_y.extend([p1[1], p2[1], None])
-                w_z.extend([-0.05, -0.05, None])
+                         util_ratio = min(1.0, length / 7.0)
                 
-            fig.add_trace(go.Scatter3d(
-                x=w_x, y=w_y, z=w_z,
-                mode='lines',
-                line=dict(color='rgba(100, 149, 237, 0.4)', width=3), # Cornflower blue, transparent
-                name='Architectural Trace',
-                hoverinfo='skip',
-                showlegend=True
-            ))
-        
-        # 2. Columns
-        # Apply similar deflection/color logic
-        col_x, col_y, col_z = [], [], []
-        
-        for col in grid_mgr.columns:
-            z_b = getattr(col, 'z_bottom', 0)
-            z_t = getattr(col, 'z_top', height_m)
+                    if util_ratio is None or math.isnan(util_ratio):
+                         util_ratio = 0.0
+
+                    if view_mode in ["Engineering", "Utilization"]:
+                         color = self.get_color_by_stress(util_ratio)
+                    elif view_mode == "Architectural":
+                         color = 'grey'
+                    elif view_mode == "Load Path":
+                         color = 'blue' # Default gravity
+                
+                    # Calculate Deformed Shape (Parabolic approximation)
+                    x0, y0 = beam.start_point.x, beam.start_point.y
+                    x1, y1 = beam.end_point.x, beam.end_point.y
+                
+                    # Base Z
+                    z0 = z_nominal
+                    z1 = z_nominal
+                
+                    if view_mode == "Deflection":
+                        # Simulate Sag: max at mid-span
+                        # delta = L^2/scale * load_factor
+                        L = ((x1-x0)**2 + (y1-y0)**2)**0.5
+                        mid_sag = (L**2) * 0.002 * deflection_scale * -1 # Downward
+                    
+                        # Discretize beam into 5 segments for smooth curve
+                        steps = 5
+                        for i in range(steps):
+                            t1 = i / steps
+                            t2 = (i+1) / steps
+                        
+                            bx0 = x0 + (x1-x0)*t1
+                            by0 = y0 + (y1-y0)*t1
+                            bz0 = z0 + 4*mid_sag*t1*(1-t1) # Parabola
+                        
+                            bx1 = x0 + (x1-x0)*t2
+                            by1 = y0 + (y1-y0)*t2
+                            bz1 = z1 + 4*mid_sag*t2*(1-t2)
+                        
+                            beam_x.extend([bx0, bx1, None])
+                            beam_y.extend([by0, by1, None])
+                            beam_z.extend([bz0, bz1, None])
+                        
+                            # Fix Color array for line segments - easier to add seperate traces if colors vary
+                            # For single trace, we can't easily vary line color per segment in plotly without line_color array
+                            # We will use 'darkorange' global or split traces.
+                            # Optimization: Use Mesh3d strip or just simple lines. 
+                            # Simple: Just one color per trace.
+                    else:
+                        # Straight Line
+                        beam_x.extend([x0, x1, None])
+                        beam_y.extend([y0, y1, None])
+                        beam_z.extend([z0, z1, None])
+
+                    # Hover Text
+                    beam_id = getattr(beam, 'id', 'Beam')
+                    hover = f"ID: {beam_id}<br>Util: {util_ratio:.2f}"
+                    if view_mode == "Deflection":
+                         hover += "<br>Deflection: Simulated"
+                
+                    beam_hover.extend([hover, hover, None])
+                
+                    # Label
+                    if level == 0 and view_mode != "Deflection":
+                        mid_x = (x0 + x1) / 2
+                        mid_y = (y0 + y1) / 2
+                        beam_labels_x.append(mid_x)
+                        beam_labels_y.append(mid_y)
+                        beam_labels_z.append(z_nominal + 0.3)
+                        beam_labels_text.append(beam_id)
             
-            # Utilization Color
-            load_n = (getattr(col, 'load_kn', 0) or 0) * 1000.0
-            area = getattr(col, 'area_mm2', 0) or 0
-            stress = load_n / area if area > 0 else 0
-            ratio = stress / fcd if fcd > 0 else 0
-            
-            c_color = 'lightgrey'
+            # Add Beams Trace
+            # ISSUE: We calculated specific colors per beam, but trying to plot as one trace.
+            # To support per-element coloring (Utilization), we must group by color OR rely on plotting individual lines (slow).
+            # Compromise: For "Utilization", use `scatter3d` with `line=dict(color=array)` if supported, 
+            # OR separate traces for High/Med/Low.
+        
+            # Let's split into 3 buckets for performance if Utilization mode
             if view_mode in ["Engineering", "Utilization"]:
-                 c_color = self.get_color_by_stress(ratio)
-                 col_width = 10
-            elif view_mode == "Load Path":
-                 # Highlight Vertical Load Path
-                 if col.level <= 1: # Foundation/Ground columns
-                     c_color = 'magenta' # Foundation transfer (Glowing)
-                     col_width = 15
-                 else:
-                     c_color = 'blue'
-                     col_width = 5
+                 # Re-loop and group
+                 traces = {'Low': ([],[],[]), 'Med': ([],[],[]), 'High': ([],[],[])}
+                 colors = {'Low': 'green', 'Med': 'gold', 'High': 'red'}
+             
+                 for level in range(num_stories):
+                    z_lev = (level+1) * story_height
+                    for beam in beams:
+                         # Calculate utilization - match logic above line 100
+                         u = 0.0
+                         if hasattr(beam, 'analysis_result') and beam.analysis_result:
+                             u = beam.analysis_result.get('usage_ratio', 0.5)
+                         elif hasattr(beam, 'properties'):
+                             length = ((beam.end_point.x - beam.start_point.x)**2 + (beam.end_point.y - beam.start_point.y)**2)**0.5
+                             u = min(1.0, length / 7.0) # Increased threshold to 7m to match IS code max span better
+                     
+                         bucket = 'Low' if u < 0.5 else ('Med' if u < 0.9 else 'High')
+                     
+                         traces[bucket][0].extend([beam.start_point.x, beam.end_point.x, None])
+                         traces[bucket][1].extend([beam.start_point.y, beam.end_point.y, None])
+                         traces[bucket][2].extend([z_lev, z_lev, None])
+
+                 for b in ['Low', 'Med', 'High']:
+                     if traces[b][0]:
+                         fig.add_trace(go.Scatter3d(
+                             x=traces[b][0], y=traces[b][1], z=traces[b][2],
+                             mode='lines',
+                             line=dict(color=colors[b], width=8),
+                             name=f'Beam {b} Stress',
+                             hoverinfo='skip'
+                         ))
             else:
-                 col_width = 10
-                 
-            # Deflection: Slight buckling curve? 
-            # For simplicity, keep columns straight but color-coded.
-            # 3D lines
-            fig.add_trace(go.Scatter3d(
-                x=[col.x, col.x], y=[col.y, col.y], z=[z_b, z_t],
-                mode='lines',
-                line=dict(color=c_color, width=col_width),
-                name=f'{col.id}',
-                showlegend=False,
-                hovertext=f"ID: {col.id}<br>Util: {ratio:.2f}"
-            ))
+                # Standard single color trace (Deflection Mode or Architectural)
+                line_color = 'darkorange' if view_mode != "Architectural" else 'grey'
+            
+                # Filter None from hovertext to avoid Plotly JSON serialization issues in some versions
+                clean_hover = [h if h is not None else "" for h in beam_hover]
+            
+                fig.add_trace(go.Scatter3d(
+                    x=beam_x, y=beam_y, z=beam_z,
+                    mode='lines',
+                    line=dict(color=line_color, width=8),
+                    name='Beams',
+                    hovertext=clean_hover,
+                    hoverinfo='text'
+                ))
 
-        # Animation Frames Logic for Deflection
-        if view_mode == "Deflection":
-            # Animate Camera Rotation to simulate dynamic inspection
-            frames = []
-            for k in range(36):
-                theta = k * 10 * (3.14159 / 180)
-                x_eye = 1.5 * math.cos(theta) - 1.5 * math.sin(theta)
-                y_eye = 1.5 * math.sin(theta) + 1.5 * math.cos(theta)
+            # Add beam ID labels
+            if beam_labels_text:
+                fig.add_trace(go.Scatter3d(
+                    x=beam_labels_x, y=beam_labels_y, z=beam_labels_z,
+                    mode='text', text=beam_labels_text,
+                    textfont=dict(size=8, color='darkblue'),
+                    showlegend=False
+                ))
+            
+            # 1.5 Draw Architectural Trace Layers at Z=-0.05
+            if arch_walls:
+                w_x, w_y, w_z = [], [], []
+                for (p1, p2) in arch_walls:
+                    w_x.extend([p1[0], p2[0], None])
+                    w_y.extend([p1[1], p2[1], None])
+                    w_z.extend([-0.05, -0.05, None])
                 
-                frames.append(go.Frame(layout=dict(scene=dict(camera=dict(eye=dict(x=x_eye, y=y_eye, z=1.5))))))
+                fig.add_trace(go.Scatter3d(
+                    x=w_x, y=w_y, z=w_z,
+                    mode='lines',
+                    line=dict(color='rgba(100, 149, 237, 0.4)', width=3), # Cornflower blue, transparent
+                    name='Architectural Trace',
+                    hoverinfo='skip',
+                    showlegend=True
+                ))
+        
+            # 2. Columns
+            # Apply similar deflection/color logic
+            col_x, col_y, col_z = [], [], []
+        
+            for col in grid_mgr.columns:
+                z_b = getattr(col, 'z_bottom', 0)
+                z_t = getattr(col, 'z_top', height_m)
             
-            fig.frames = frames
+                # Utilization Color
+                load_n = (getattr(col, 'load_kn', 0) or 0) * 1000.0
+                area = getattr(col, 'area_mm2', 0) or 0
+                stress = load_n / area if area > 0 else 0
+                ratio = stress / fcd if fcd > 0 else 0
             
-            fig.update_layout(
-                updatemenus=[
-                    dict(
-                        type="buttons",
-                        showactive=False,
-                        x=0.1, y=0.9,
-                        buttons=[dict(
-                            label="▶️ Orbit View",
-                            method="animate",
-                            args=[None, dict(frame=dict(duration=100, redraw=True), fromcurrent=True, mode="immediate")]
-                        )]
-                    )
-                ]
-            )
+                c_color = 'lightgrey'
+                if view_mode in ["Engineering", "Utilization"]:
+                     c_color = self.get_color_by_stress(ratio)
+                     col_width = 10
+                elif view_mode == "Load Path":
+                     # Highlight Vertical Load Path
+                     if col.level <= 1: # Foundation/Ground columns
+                         c_color = 'magenta' # Foundation transfer (Glowing)
+                         col_width = 15
+                     else:
+                         c_color = 'blue'
+                         col_width = 5
+                else:
+                     col_width = 10
+                 
+                # Deflection: Slight buckling curve? 
+                # For simplicity, keep columns straight but color-coded.
+                # 3D lines
+                fig.add_trace(go.Scatter3d(
+                    x=[col.x, col.x], y=[col.y, col.y], z=[z_b, z_t],
+                    mode='lines',
+                    line=dict(color=c_color, width=col_width),
+                    name=f'{col.id}',
+                    showlegend=False,
+                    hovertext=f"ID: {col.id}<br>Util: {ratio:.2f}"
+                ))
 
-            fig.update_layout(
-                scene=dict(
-                    xaxis_title='Width (m)',
-                    yaxis_title='Length (m)',
-                    zaxis_title='Height (m)',
-                    aspectmode='data'
+            # Animation Frames Logic for Deflection
+            if view_mode == "Deflection":
+                # Animate Camera Rotation to simulate dynamic inspection
+                frames = []
+                for k in range(36):
+                    theta = k * 10 * (3.14159 / 180)
+                    x_eye = 1.5 * math.cos(theta) - 1.5 * math.sin(theta)
+                    y_eye = 1.5 * math.sin(theta) + 1.5 * math.cos(theta)
+                
+                    frames.append(go.Frame(layout=dict(scene=dict(camera=dict(eye=dict(x=x_eye, y=y_eye, z=1.5))))))
+            
+                fig.frames = frames
+            
+                fig.update_layout(
+                    updatemenus=[
+                        dict(
+                            type="buttons",
+                            showactive=False,
+                            x=0.1, y=0.9,
+                            buttons=[dict(
+                                label="▶️ Orbit View",
+                                method="animate",
+                                args=[None, dict(frame=dict(duration=100, redraw=True), fromcurrent=True, mode="immediate")]
+                            )]
+                        )
+                    ]
+                )
+
+                fig.update_layout(
+                    scene=dict(
+                        xaxis_title='Width (m)',
+                        yaxis_title='Length (m)',
+                        zaxis_title='Height (m)',
+                        aspectmode='data'
                 ),
                 margin=dict(r=0, l=0, b=0, t=0),
                 title=f"Structural 3D View - {view_mode} Mode",
