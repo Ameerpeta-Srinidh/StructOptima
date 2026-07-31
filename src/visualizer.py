@@ -1,7 +1,7 @@
 import plotly.graph_objects as go
 import numpy as np
 import math
-from typing import List
+from typing import List, Tuple, Optional
 from .grid_manager import GridManager, Column
 from .foundation_eng import Footing
 from .materials import Concrete
@@ -50,13 +50,15 @@ class Visualizer:
         footings: List[Footing], 
         concrete: Concrete,
         height_m: float = 3.0,
-        view_mode: str = "Engineering" # "Engineering" or "Architectural"
+        view_mode: str = "Engineering", # "Engineering" or "Architectural"
+        arch_walls: Optional[List[Tuple[Tuple[float, float], Tuple[float, float]]]] = None
     ) -> go.Figure:
         
-        fig = go.Figure()
-        
-        # Design Strength
-        fcd = 0.4 * concrete.fck
+        try:
+            fig = go.Figure()
+            
+            # Design Strength
+            fcd = 0.4 * concrete.fck if getattr(concrete, 'fck', None) is not None else 10.0
         
         # View Mode Logic
         # "Engineering": Standard heat map
@@ -98,13 +100,16 @@ class Visualizer:
                 
                 # Check utilization for color
                 util_ratio = 0.0
-                if hasattr(beam, 'analysis_result') and beam.analysis_result:
+                if hasattr(beam, 'analysis_result') and isinstance(beam.analysis_result, dict):
                      util_ratio = beam.analysis_result.get('usage_ratio', 0.5)
-                elif hasattr(beam, 'properties'):
-                     # Fake approximation based on length
+                     if util_ratio is None: util_ratio = 0.5
+                elif hasattr(beam, 'properties') and beam.properties:
                      length = ((beam.end_point.x - beam.start_point.x)**2 + (beam.end_point.y - beam.start_point.y)**2)**0.5
-                     util_ratio = min(1.0, length / 7.0) # Heuristic for viz if analysis results are missing
+                     util_ratio = min(1.0, length / 7.0)
                 
+                if util_ratio is None or math.isnan(util_ratio):
+                     util_ratio = 0.0
+
                 if view_mode in ["Engineering", "Utilization"]:
                      color = self.get_color_by_stress(util_ratio)
                 elif view_mode == "Architectural":
@@ -213,12 +218,16 @@ class Visualizer:
         else:
             # Standard single color trace (Deflection Mode or Architectural)
             line_color = 'darkorange' if view_mode != "Architectural" else 'grey'
+            
+            # Filter None from hovertext to avoid Plotly JSON serialization issues in some versions
+            clean_hover = [h if h is not None else "" for h in beam_hover]
+            
             fig.add_trace(go.Scatter3d(
                 x=beam_x, y=beam_y, z=beam_z,
                 mode='lines',
                 line=dict(color=line_color, width=8),
                 name='Beams',
-                hovertext=beam_hover,
+                hovertext=clean_hover,
                 hoverinfo='text'
             ))
 
@@ -230,6 +239,23 @@ class Visualizer:
                 textfont=dict(size=8, color='darkblue'),
                 showlegend=False
             ))
+            
+        # 1.5 Draw Architectural Trace Layers at Z=-0.05
+        if arch_walls:
+            w_x, w_y, w_z = [], [], []
+            for (p1, p2) in arch_walls:
+                w_x.extend([p1[0], p2[0], None])
+                w_y.extend([p1[1], p2[1], None])
+                w_z.extend([-0.05, -0.05, None])
+                
+            fig.add_trace(go.Scatter3d(
+                x=w_x, y=w_y, z=w_z,
+                mode='lines',
+                line=dict(color='rgba(100, 149, 237, 0.4)', width=3), # Cornflower blue, transparent
+                name='Architectural Trace',
+                hoverinfo='skip',
+                showlegend=True
+            ))
         
         # 2. Columns
         # Apply similar deflection/color logic
@@ -240,9 +266,10 @@ class Visualizer:
             z_t = getattr(col, 'z_top', height_m)
             
             # Utilization Color
-            load_n = col.load_kn * 1000.0
-            stress = load_n / col.area_mm2 if col.area_mm2 > 0 else 0
-            ratio = stress / fcd
+            load_n = (getattr(col, 'load_kn', 0) or 0) * 1000.0
+            area = getattr(col, 'area_mm2', 0) or 0
+            stress = load_n / area if area > 0 else 0
+            ratio = stress / fcd if fcd > 0 else 0
             
             c_color = 'lightgrey'
             if view_mode in ["Engineering", "Utilization"]:
@@ -299,32 +326,43 @@ class Visualizer:
                 ]
             )
 
-        fig.update_layout(
-            scene=dict(
-                xaxis_title='Width (m)',
-                yaxis_title='Length (m)',
-                zaxis_title='Height (m)',
-                aspectmode='data'
-            ),
-            margin=dict(r=0, l=0, b=0, t=0),
-            title=f"Structural 3D View - {view_mode} Mode",
-            legend=dict(x=0.7, y=0.9),
-            # Camera default view
-            scene_camera=dict(
-                up=dict(x=0, y=0, z=1),
-                center=dict(x=0, y=0, z=0),
-                eye=dict(x=1.5, y=1.5, z=1.5)
+            fig.update_layout(
+                scene=dict(
+                    xaxis_title='Width (m)',
+                    yaxis_title='Length (m)',
+                    zaxis_title='Height (m)',
+                    aspectmode='data'
+                ),
+                margin=dict(r=0, l=0, b=0, t=0),
+                title=f"Structural 3D View - {view_mode} Mode",
+                legend=dict(x=0.7, y=0.9),
+                # Camera default view
+                scene_camera=dict(
+                    up=dict(x=0, y=0, z=1),
+                    center=dict(x=0, y=0, z=0),
+                    eye=dict(x=1.5, y=1.5, z=1.5)
+                )
             )
-        )
-        
-        return fig
+            
+            return fig
+        except Exception as e:
+            import traceback
+            err_msg = traceback.format_exc()
+            err_fig = go.Figure()
+            err_fig.add_annotation(
+                text=f"Visualizer Error: {str(e)}<br>{err_msg.replace(chr(10), '<br>')}",
+                xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False,
+                font=dict(color="red", size=10)
+            )
+            return err_fig
 
     def create_2d_plan(
         self,
         grid_mgr: GridManager,
         beams: List[StructuralMember],
         view_mode: str = "Engineering",
-        level: int = 1
+        level: int = 1,
+        arch_walls: Optional[List[Tuple[Tuple[float, float], Tuple[float, float]]]] = None
     ) -> go.Figure:
         """
         Creates a 2D Plan View of the structure at a specific level.
@@ -353,6 +391,22 @@ class Visualizer:
                     hoverinfo='skip',
                     showlegend=False
                 ))
+
+        # 1.5 Draw Architectural Traces
+        if arch_walls and level == 1: # Usually we show foundation trace primarily
+            w_x, w_y = [], []
+            for (p1, p2) in arch_walls:
+                w_x.extend([p1[0], p2[0], None])
+                w_y.extend([p1[1], p2[1], None])
+                
+            fig.add_trace(go.Scatter(
+                x=w_x, y=w_y,
+                mode='lines',
+                line=dict(color='rgba(100, 149, 237, 0.5)', width=2, dash='solid'),
+                name='Architectural Blueprint',
+                hoverinfo='skip',
+                showlegend=True
+            ))
 
         # 2. Draw Columns (Rectangles)
         # Filter columns that exist at this level
