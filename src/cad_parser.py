@@ -46,43 +46,49 @@ class CADParser:
     def _lwpoly_xy(ply) -> List[Tuple[float, float]]:
         """Safe LWPOLYLINE point extractor compatible with ALL ezdxf versions.
 
-        Never uses get_points(format=...) because the internal lambda that
-        implements the format filter is broken in several ezdxf builds.
+        Never uses get_points() because the internal lambda that implements the 
+        format filter is broken in several ezdxf builds on python 3.12+.
         Tries 4 progressively safer approaches instead.
         """
-        # Method 1: lwpoints stores raw tuples (x, y, start_width, end_width, bulge)
+        pts = []
+        
+        # Method 1: direct iteration over the entity (supported in most ezdxf versions)
+        try:
+            pts = [(pt[0], pt[1]) for pt in ply]
+            if pts: return pts
+        except Exception:
+            pass
+
+        # Method 2: lwpoints stores raw tuples (newer ezdxf)
         try:
             pts = [(pt[0], pt[1]) for pt in ply.lwpoints]
-            if pts:
-                return pts
+            if pts: return pts
         except Exception:
             pass
 
-        # Method 2: get_points() with NO format argument — returns raw 5-tuples
+        # Method 3: vertices() method (generator in some ezdxf versions)
         try:
-            pts = [(pt[0], pt[1]) for pt in ply.get_points()]
-            if pts:
-                return pts
+            if callable(getattr(ply, 'vertices', None)):
+                pts = list(ply.vertices())
+                if pts: return pts
         except Exception:
             pass
 
-        # Method 3: iterate vertices directly (very old ezdxf versions)
+        # Method 4: iterate vertices directly (very old ezdxf versions)
         try:
             pts = [(v.dxf.location.x, v.dxf.location.y) for v in ply.vertices]
-            if pts:
-                return pts
+            if pts: return pts
         except Exception:
             pass
 
-        # Method 4: access dxf.points attribute
+        # Method 5: access dxf.points attribute fallback
         try:
             pts = [(p[0], p[1]) for p in ply.dxf.points]
-            if pts:
-                return pts
+            if pts: return pts
         except Exception:
             pass
 
-        return []
+        return pts
 
     def get_layers(self) -> List[str]:
         """Returns a list of all layer names in the file."""
