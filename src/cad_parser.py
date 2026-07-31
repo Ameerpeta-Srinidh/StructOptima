@@ -42,6 +42,10 @@ class CADParser:
             logger.error("Invalid or corrupted DXF file: %s", self.filepath)
             raise
 
+    def _by_type_and_layer(self, dxftype, layer_name):
+        """Filter entities directly — avoids ezdxf's query()/pyparsing dependency entirely."""
+        return [e for e in self.msp if e.dxftype() == dxftype and e.dxf.layer == layer_name]
+
     @staticmethod
     def _lwpoly_xy(ply) -> List[Tuple[float, float]]:
         """Safe LWPOLYLINE point extractor compatible with ALL ezdxf versions.
@@ -148,7 +152,7 @@ class CADParser:
             col_layers.append(self.layer_map['columns'])
 
         for layer in col_layers:
-            for entity in self.msp.query(f'LWPOLYLINE[layer=="{layer}"]'):
+            for entity in self._by_type_and_layer('LWPOLYLINE', layer):
                  cx, cy = self._get_entity_center(entity)
                  w, d = self._get_dims(entity)
                  columns.append({
@@ -173,7 +177,7 @@ class CADParser:
             beam_layers.append(self.layer_map['beams'])
 
         for layer in beam_layers:
-            for entity in self.msp.query(f'LINE[layer=="{layer}"]'):
+            for entity in self._by_type_and_layer('LINE', layer):
                 start = entity.dxf.start
                 end = entity.dxf.end
                 beams.append({
@@ -205,13 +209,13 @@ class CADParser:
         def _get_lines_for_layers(layers_to_check):
             found = []
             for layer in layers_to_check:
-                for line in self.msp.query(f'LINE[layer=="{layer}"]'):
+                for line in self._by_type_and_layer('LINE', layer):
                     found.append(((line.dxf.start.x, line.dxf.start.y), (line.dxf.end.x, line.dxf.end.y)))
-                for ply in self.msp.query(f'LWPOLYLINE[layer=="{layer}"]'):
+                for ply in self._by_type_and_layer('LWPOLYLINE', layer):
                     points = self._lwpoly_xy(ply)
                     for i in range(len(points) - 1): found.append((points[i], points[i+1]))
                     if ply.is_closed and len(points) > 2: found.append((points[-1], points[0]))
-                for ply in self.msp.query(f'POLYLINE[layer=="{layer}"]'):
+                for ply in self._by_type_and_layer('POLYLINE', layer):
                     points = [v.dxf.location[:2] for v in ply.vertices]
                     for i in range(len(points) - 1): found.append((points[i], points[i+1]))
                     if ply.is_closed and len(points) > 2: found.append((points[-1], points[0]))
@@ -450,12 +454,12 @@ class CADParser:
             layer_name = layer.dxf.name
             wall_type = classification.get(layer_name, 'load_bearing')
             
-            for line in self.msp.query(f'LINE[layer=="{layer_name}"]'):
+            for line in self._by_type_and_layer('LINE', layer_name):
                 start = (line.dxf.start.x, line.dxf.start.y)
                 end = (line.dxf.end.x, line.dxf.end.y)
                 result[wall_type].append((start, end))
             
-            for ply in self.msp.query(f'LWPOLYLINE[layer=="{layer_name}"]'):
+            for ply in self._by_type_and_layer('LWPOLYLINE', layer_name):
                 points = self._lwpoly_xy(ply)
                 for i in range(len(points) - 1):
                     result[wall_type].append((points[i], points[i+1]))
