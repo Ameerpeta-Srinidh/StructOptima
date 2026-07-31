@@ -44,19 +44,45 @@ class CADParser:
 
     @staticmethod
     def _lwpoly_xy(ply) -> List[Tuple[float, float]]:
-        """Safe LWPOLYLINE point extractor compatible with all ezdxf versions.
-        
-        get_points(format='xy') uses an internal lambda that fails on some builds.
-        Reading lwpoints directly (each point is a tuple: x, y, s, e, b) is stable.
+        """Safe LWPOLYLINE point extractor compatible with ALL ezdxf versions.
+
+        Never uses get_points(format=...) because the internal lambda that
+        implements the format filter is broken in several ezdxf builds.
+        Tries 4 progressively safer approaches instead.
         """
+        # Method 1: lwpoints stores raw tuples (x, y, start_width, end_width, bulge)
         try:
-            return [(pt[0], pt[1]) for pt in ply.lwpoints]
+            pts = [(pt[0], pt[1]) for pt in ply.lwpoints]
+            if pts:
+                return pts
         except Exception:
-            # Final fallback: iterate vertices
-            try:
-                return list(ply.get_points(format='xy'))
-            except Exception:
-                return []
+            pass
+
+        # Method 2: get_points() with NO format argument — returns raw 5-tuples
+        try:
+            pts = [(pt[0], pt[1]) for pt in ply.get_points()]
+            if pts:
+                return pts
+        except Exception:
+            pass
+
+        # Method 3: iterate vertices directly (very old ezdxf versions)
+        try:
+            pts = [(v.dxf.location.x, v.dxf.location.y) for v in ply.vertices]
+            if pts:
+                return pts
+        except Exception:
+            pass
+
+        # Method 4: access dxf.points attribute
+        try:
+            pts = [(p[0], p[1]) for p in ply.dxf.points]
+            if pts:
+                return pts
+        except Exception:
+            pass
+
+        return []
 
     def get_layers(self) -> List[str]:
         """Returns a list of all layer names in the file."""
