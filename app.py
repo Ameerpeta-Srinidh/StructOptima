@@ -798,14 +798,39 @@ if st.session_state.get('analysis_done', False):
         viz = Visualizer()
         v_mode_str = view_mode # Pass generic mode directly ("Deflection", "Use...", etc)
         # Verify mapping if needed, but Visualizer handles these strings now.
-        fig = viz.create_structure_figure(
+        from src.geometry_exporter import GeometryExporter
+        scene = GeometryExporter.create_structure_scene(
             grid_mgr=gm, 
             beams=beams, 
             footings=footings, 
-            concrete=m_grade, 
             view_mode=v_mode_str,
             arch_walls=st.session_state.get('arch_walls')
         )
+        glb_data = GeometryExporter.export_to_glb_base64(scene)
+        
+        # Build the HTML for model-viewer
+        html_code = f"""
+        <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.1.1/model-viewer.min.js"></script>
+        <style>
+          model-viewer {{
+            width: 100%;
+            height: 600px;
+            background-color: #f5f5f5;
+            border-radius: 8px;
+          }}
+        </style>
+        <model-viewer 
+          src="{glb_data}" 
+          camera-controls 
+          auto-rotate 
+          ar
+          shadow-intensity="1"
+          exposure="1.0"
+          interaction-prompt="auto"
+          camera-orbit="-45deg 55deg 20m"
+        >
+        </model-viewer>
+        """
         
 
                 
@@ -1229,7 +1254,8 @@ if st.session_state.get('analysis_done', False):
         
         with v_tab1:
              # Use pre-calculated 3D figure
-             st.plotly_chart(fig, use_container_width=True)
+             import streamlit.components.v1 as components
+             components.html(html_code, height=620)
              
         with v_tab2:
              # Level Selector

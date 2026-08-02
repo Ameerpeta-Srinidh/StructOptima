@@ -381,7 +381,7 @@ class Visualizer:
                     showlegend=False
                 ))
         
-        if hasattr(grid_mgr, 'y_grid_lines'):
+        if hasattr(grid_mgr, 'y_grid_lines') and grid_mgr.y_grid_lines:
             for y in grid_mgr.y_grid_lines:
                 fig.add_trace(go.Scatter(
                     x=[min(grid_mgr.x_grid_lines), max(grid_mgr.x_grid_lines)],
@@ -391,6 +391,31 @@ class Visualizer:
                     hoverinfo='skip',
                     showlegend=False
                 ))
+
+        # Add Engineering Dimensions
+        if hasattr(grid_mgr, 'x_grid_lines') and len(grid_mgr.x_grid_lines) > 1:
+            x_grids = sorted(grid_mgr.x_grid_lines)
+            y_dim = min(grid_mgr.y_grid_lines) - 1.5 # offset below
+            for i in range(len(x_grids)-1):
+                x_start = x_grids[i]
+                x_end = x_grids[i+1]
+                mid_x = (x_start + x_end) / 2
+                dist = x_end - x_start
+                if dist > 0.1:
+                    fig.add_trace(go.Scatter(x=[x_start, x_end], y=[y_dim, y_dim], mode='lines+markers', marker=dict(symbol='line-ns', size=10), line=dict(color='black', width=1), showlegend=False))
+                    fig.add_annotation(x=mid_x, y=y_dim-0.5, text=f"{dist:.2f}m", showarrow=False, font=dict(size=10, color="black"))
+
+        if hasattr(grid_mgr, 'y_grid_lines') and len(grid_mgr.y_grid_lines) > 1:
+            y_grids = sorted(grid_mgr.y_grid_lines)
+            x_dim = min(grid_mgr.x_grid_lines) - 1.5 # offset left
+            for i in range(len(y_grids)-1):
+                y_start = y_grids[i]
+                y_end = y_grids[i+1]
+                mid_y = (y_start + y_end) / 2
+                dist = y_end - y_start
+                if dist > 0.1:
+                    fig.add_trace(go.Scatter(x=[x_dim, x_dim], y=[y_start, y_end], mode='lines+markers', marker=dict(symbol='line-ew', size=10), line=dict(color='black', width=1), showlegend=False))
+                    fig.add_annotation(x=x_dim-0.5, y=mid_y, text=f"{dist:.2f}m", textangle=-90, showarrow=False, font=dict(size=10, color="black"))
 
         # 1.5 Draw Architectural Traces
         if arch_walls and level == 1: # Usually we show foundation trace primarily
