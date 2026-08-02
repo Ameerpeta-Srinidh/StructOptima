@@ -832,7 +832,15 @@ if st.session_state.get('analysis_done', False):
         </model-viewer>
         """
         
-
+        # Also generate old Plotly fig for comparison
+        old_fig = viz.create_structure_figure(
+            grid_mgr=gm, 
+            beams=beams, 
+            footings=footings, 
+            concrete=m_grade, 
+            view_mode=v_mode_str,
+            arch_walls=st.session_state.get('arch_walls')
+        )
                 
         # --- RESULTS ---
         
@@ -1253,10 +1261,13 @@ if st.session_state.get('analysis_done', False):
         v_tab1, v_tab2 = st.tabs(["3D View", "2D Plan View"])
         
         with v_tab1:
-             # Use pre-calculated 3D figure
+             st.markdown("### New Engineering 3D Viewer (Mobile & AR Ready)")
              import streamlit.components.v1 as components
              components.html(html_code, height=620)
              
+             st.markdown("---")
+             st.markdown("### Legacy Plotly 3D Viewer (For Comparison)")
+             st.plotly_chart(old_fig, use_container_width=True)
         with v_tab2:
              # Level Selector
              level_sel = st.slider("Select Level", 1, num_stories, 1)
