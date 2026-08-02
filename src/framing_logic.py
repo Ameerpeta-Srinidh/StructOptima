@@ -35,6 +35,7 @@ class StructuralMember(BaseModel):
     design_moment_knm: float = 0.0
     design_shear_kn: float = 0.0
     analysis_status: str = "PENDING"
+    level: int = 0 # To track story level
 
 class GridSystem(BaseModel):
     width_m: float
