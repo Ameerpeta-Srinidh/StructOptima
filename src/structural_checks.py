@@ -94,7 +94,17 @@ class SoftStoreyChecker:
             upper_walls = floor_wall_lengths[i + 1] if i + 1 < len(floor_wall_lengths) else 0
             wall_ratio = lower_walls / max(upper_walls, 1)
             
-            is_soft = stiffness_ratio < self.SOFT_STOREY_STIFFNESS_RATIO
+            # Check 1: 70% of storey above
+            is_soft_1 = stiffness_ratio < self.SOFT_STOREY_STIFFNESS_RATIO
+            
+            # Check 2: 80% of average of 3 storeys above (IS 1893 Table 5)
+            if i + 3 < len(floor_stiffnesses):
+                avg_3_above = sum(floor_stiffnesses[i+1:i+4]) / 3.0
+                is_soft_2 = floor_stiffnesses[i] < 0.80 * avg_3_above
+            else:
+                is_soft_2 = False
+                
+            is_soft = is_soft_1 or is_soft_2
             is_extreme = stiffness_ratio < self.EXTREME_SOFT_STOREY_RATIO
             
             if is_soft:
@@ -176,10 +186,11 @@ class ShortColumnChecker:
                 is_captive = slenderness < self.MIN_SLENDERNESS_FOR_SHORT
                 
                 if is_captive:
+                    # Note: This is a simplified beam-based proxy. Actual captive column behavior requires mapping infill wall heights.
                     recommendation = (
                         f"CAPTIVE COLUMN: {col.get('id', 'Unknown')} has clear height {clear_height:.0f}mm "
                         f"(slenderness {slenderness:.1f}). Provide special confining reinforcement "
-                        "over FULL HEIGHT per IS 13920 Clause 10."
+                        "over FULL HEIGHT per IS 13920 Clause 10. WARNING: Simplified beam proxy used; verify infill wall heights."
                     )
                 else:
                     recommendation = (

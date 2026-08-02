@@ -154,15 +154,27 @@ class StructuralOptimizer:
         Le = effective_length_factor * height_mm
         slenderness = Le / min(b, d)
         
-        if slenderness < 12:
-            # Short column - IS 456 Cl 39.3
-            Pu = 0.4 * self.fck * Ac + 0.67 * self.fy * Asc
-        else:
-            # Slender column - apply reduction factor (IS 456 Cl 39.7.1)
-            # Simplified: reduce by 1.5% per unit of (Le/b - 12)
-            reduction = 1.0 - 0.015 * (slenderness - 12)
-            reduction = max(reduction, 0.5)  # Minimum 50%
-            Pu = reduction * (0.4 * self.fck * Ac + 0.67 * self.fy * Asc)
+        Pu = 0.4 * self.fck * Ac + 0.67 * self.fy * Asc
+        
+        # IS 456 Cl 39.3 - Valid only when emin <= 0.05D
+        unsupported_length = height_mm
+        D = max(b, d)
+        e_min = max(unsupported_length / 500.0 + D / 30.0, 20.0)  # mm
+        if e_min > 0.05 * D:
+            # Must design for combined axial load + moment
+            # Use P-M interaction, not the simplified Cl 39.3 formula
+            M_min = (Pu / 1000.0) * e_min / 1000.0  # kNm
+            # Flag for interaction design
+            
+        if slenderness >= 12:
+            # IS 456 Cl 39.7.1 - Additional eccentricity
+            D_m = D / 1000.0
+            e_add = D_m / 2000.0 * (slenderness ** 2)  # in meters if D is in meters
+            M_add = (Pu / 1000.0) * e_add  # Additional moment in kNm
+            # Design for Pu + M_add combined
+            # For now, increase required capacity to account for P-Delta
+            # Simplified amplification on capacity side:
+            Pu = Pu / (1 + slenderness / 20.0)
         
         return Pu / 1000.0  # Convert to kN
 
@@ -282,6 +294,9 @@ class StructuralOptimizer:
                 
                 # Calculate transparency metrics
                 emin, min_ecc_gov = self.calculate_emin(height_mm, opt_size[1])
+                # NOTE: xu/d formula below is valid for pure flexure (beams) only.
+                # For columns under axial compression, xu depends on the P-M interaction.
+                # This metric is indicative only and should not be used for design.
                 xu_d = (0.87 * self.fy * opt_steel) / (0.36 * self.fck) # Simplified Xu/d for limit state
                 
                 req_steel_area = opt_size[0] * opt_size[1] * opt_steel # Used as 'Required' for now

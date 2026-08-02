@@ -143,10 +143,10 @@ class AnchorageCalculator:
         # Compression: 0.8 × Ld or 24Φ, whichever is greater
         if stress_type == StressType.TENSION:
             lap_tension = max(Ld, 30 * phi)
-            lap_compression = max(0.8 * Ld, 24 * phi)
+            lap_compression = max(Ld, 24 * phi)
         else:
             lap_tension = max(Ld, 30 * phi)
-            lap_compression = max(0.8 * Ld, 24 * phi)
+            lap_compression = max(Ld, 24 * phi)
         
         # Round to nearest 50mm
         lap_tension = ((int(lap_tension) // 50) + 1) * 50
@@ -154,8 +154,8 @@ class AnchorageCalculator:
         
         # Standard hook equivalent (IS 456 Cl 26.2.2.1)
         # 90° bend: 8Φ beyond bend + hook
-        # Equivalent anchorage = 8Φ for 45° bend, 16Φ for 90° bend
-        standard_hook = 16 * phi
+        # Equivalent anchorage = 8Φ for 45° bend, 8Φ for 90° bend
+        standard_hook = 8 * phi
         
         formula = f"Ld = (Φ × 0.87fy) / (4 × τbd) = ({phi} × {sigma_s:.0f}) / (4 × {tau_bd:.2f})"
         

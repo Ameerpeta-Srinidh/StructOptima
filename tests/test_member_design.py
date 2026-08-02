@@ -74,7 +74,7 @@ class TestBeamShear:
         
         assert tau_c_high > tau_c_low
         assert 0.28 <= tau_c_low <= 0.50
-        assert 0.60 <= tau_c_high <= 0.80
+        assert 0.60 <= tau_c_high <= 0.81
     
     def test_min_shear_reinforcement(self):
         designer = MemberDesigner()

@@ -366,6 +366,7 @@ class SeismicDesignChecker:
         Mu ≈ 0.87 × fy × Ast × (d - 0.42*xu)
         
         For simplicity, use interaction curve point at ~0.4Pu.
+        Note: This is a simplified approximation. Rigorous P-M interaction analysis is needed for final design.
         """
         d = depth_mm - 50  # Effective depth
         
@@ -494,7 +495,8 @@ class SeismicDesignChecker:
         self,
         dead_load_kn: float,
         live_load_kn: float,
-        live_load_intensity_kn_m2: float
+        live_load_intensity_kn_m2: float,
+        is_roof_level: bool = False
     ) -> SeismicWeightResult:
         """
         Calculate seismic weight per IS 1893 Cl. 7.4.3.
@@ -502,6 +504,7 @@ class SeismicDesignChecker:
         Seismic Weight W = Full DL + (Reduction Factor × LL)
         
         Live Load Reduction:
+        - 0% for roof level
         - 25% of LL if live load intensity ≤ 3.0 kN/m²
         - 50% of LL if live load intensity > 3.0 kN/m²
         
@@ -509,11 +512,15 @@ class SeismicDesignChecker:
             dead_load_kn: Total dead load in kN
             live_load_kn: Total live load in kN
             live_load_intensity_kn_m2: Live load per unit area
+            is_roof_level: Whether this calculation is for the roof
             
         Returns:
             SeismicWeightResult with calculation details
         """
-        if live_load_intensity_kn_m2 <= 3.0:
+        if is_roof_level:
+            ll_factor = 0.0
+            code_ref = "IS 1893 Table 10: Roof LL not included (0%)"
+        elif live_load_intensity_kn_m2 <= 3.0:
             ll_factor = 0.25
             code_ref = "IS 1893 Cl. 7.4.3: 25% LL (intensity ≤ 3.0 kN/m²)"
         else:
@@ -598,7 +605,7 @@ class SeismicDesignChecker:
             ))
         
         # 3. Soft Storey Check (IS 1893 Table 6, Item 1)
-        # Irregular if storey stiffness < 60% of storey above
+        # Irregular if storey stiffness < 70% of storey above
         if storey_stiffnesses and len(storey_stiffnesses) > 1:
             for i in range(len(storey_stiffnesses) - 1):
                 k_current = storey_stiffnesses[i]
@@ -606,7 +613,7 @@ class SeismicDesignChecker:
                 
                 if k_above > 0:
                     ratio = (k_current / k_above) * 100
-                    is_irregular = ratio < 60.0
+                    is_irregular = ratio < 70.0  # IS 1893:2016 Table 6
                     severity = "Severe" if ratio < 40 else ("Moderate" if is_irregular else "None")
                     
                     if is_irregular:
@@ -615,7 +622,7 @@ class SeismicDesignChecker:
                             is_irregular=True,
                             severity=severity,
                             value=ratio,
-                            limit=60.0,
+                            limit=70.0,
                             recommendation=f"Storey {i}: Increase stiffness or use 3D analysis"
                         ))
         

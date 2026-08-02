@@ -363,7 +363,7 @@ class GridManager(BaseModel):
         for col in self.columns:
             # Factored Load Input? The engine usually works with factored load.
             # Assuming col.load_kn is Pu.
-            pu_n = col.load_kn * 1000.0 # Convert kN to N
+            pu_n = col.load_kn * 1.5 * 1000.0 # IS 456 Table 18: 1.5DL + 1.5LL, Convert kN to N
             
             # Start small, e.g. 230x230 (Min code requirement)
             width = 230.0
@@ -496,7 +496,7 @@ class GridManager(BaseModel):
                     b.properties.width_mm = 300.0
                 
                 # Update SW Load based on current depth
-                sw = 0.23 * (b.properties.depth_mm/1000.0) * (b.properties.width_mm/1000.0) * 25.0 # Corrected SW volume
+                sw = (b.properties.width_mm / 1000.0) * (b.properties.depth_mm / 1000.0) * 25.0 # Corrected SW volume
                 # Note: Previous code hardcoded 0.23 width. Now dynamic.
                 total_load = 20.0 + sw
                 

@@ -352,8 +352,9 @@ class WindLoadCalculator:
             
             tributary_height = min(storey_height_m, height_m - i * storey_height_m)
             
-            force_x_windward = net_pressure_windward * width_m * tributary_height
-            force_x_leeward = abs(net_pressure_leeward) * width_m * tributary_height
+            # Base shear uses external coefficients only (Cpi cancels globally)
+            force_x_windward = pz * cpe_ww_x * width_m * tributary_height
+            force_x_leeward = abs(pz * cpe_lw_x) * width_m * tributary_height
             force_x = force_x_windward + force_x_leeward
             
             total_base_shear_x += force_x
@@ -362,8 +363,8 @@ class WindLoadCalculator:
             cpe_ww_y, cpe_lw_y = self.get_external_pressure_coefficients(
                 height_m, width_m, length_m, "along_width"
             )
-            force_y_windward = pz * (cpe_ww_y - (-cpi)) * length_m * tributary_height
-            force_y_leeward = abs(pz * (cpe_lw_y - cpi)) * length_m * tributary_height
+            force_y_windward = pz * cpe_ww_y * length_m * tributary_height
+            force_y_leeward = abs(pz * cpe_lw_y) * length_m * tributary_height
             force_y = force_y_windward + force_y_leeward
             
             total_base_shear_y += force_y

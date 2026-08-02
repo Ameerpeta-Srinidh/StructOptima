@@ -167,11 +167,11 @@ class SafetyWarningsChecker:
         
         # Joint shear capacity (IS 13920 Cl 9.2)
         # For confined joints: 1.2 × √fck × Aj
-        # Capacity factors by joint type
+        # Capacity factors by joint type per IS 13920:2016 Cl 9.2.1
         capacity_factors = {
-            "interior": 1.2,
-            "exterior": 1.0,
-            "corner": 0.8
+            "interior": 1.5,  # Confined on all 4 faces
+            "exterior": 1.2,  # Confined on 3 faces
+            "corner": 1.0     # Confined on 2 faces
         }
         factor = capacity_factors.get(joint_type, 1.0)
         

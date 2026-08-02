@@ -76,7 +76,8 @@ class Quantifier:
             # Simple distance calc for length
             dx = beam.end_point.x - beam.start_point.x
             dy = beam.end_point.y - beam.start_point.y
-            length = (dx**2 + dy**2)**0.5
+            dz = (beam.end_point.z - beam.start_point.z) if hasattr(beam.start_point, 'z') else 0.0
+            length = (dx**2 + dy**2 + dz**2)**0.5
             
             w_m = beam.properties.width_mm / 1000.0
             d_m = beam.properties.depth_mm / 1000.0
@@ -288,10 +289,13 @@ class Quantifier:
         #   Aggregate (20mm): ~0.88 m³
         #   Water: ~180 liters (w/c ratio 0.45)
         
-        cement_kg = total_conc * 400.0
-        cement_bags = cement_kg / 50.0
-        sand_m3 = total_conc * 0.44
-        aggregate_m3 = total_conc * 0.88
+        ratio_sand = 1.0
+        ratio_agg = 2.0
+        dry_volume_factor = 1.54
+        cement_bags = total_conc * dry_volume_factor / (1 + ratio_sand + ratio_agg) / 0.035
+        cement_kg = cement_bags * 50.0
+        sand_m3 = total_conc * dry_volume_factor * ratio_sand / (1 + ratio_sand + ratio_agg)
+        aggregate_m3 = total_conc * dry_volume_factor * ratio_agg / (1 + ratio_sand + ratio_agg)
         water_liters = total_conc * 180.0
         
         # Recalculate costs with wastage-adjusted steel

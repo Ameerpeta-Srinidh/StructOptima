@@ -53,8 +53,9 @@ class StructuralAuditor:
                 asc = res.main_steel_area_mm2
                 
             # Capacity Formula
-            term1 = 0.4 * fck * ag
-            term2 = 0.67 * fy * asc
+            ac = ag - asc  # Net concrete area
+            term1 = 0.4 * fck * ac  # Concrete contribution
+            term2 = 0.67 * fy * asc  # Steel contribution
             pu_cap_n = term1 + term2
             pu_cap_kn = pu_cap_n / 1000.0
             
@@ -117,7 +118,8 @@ class StructuralAuditor:
             
             # 1. Pressure Check
             # Load + 10% self weight assumed in design
-            total_load = col.load_kn * 1.1
+            service_load = col.load_kn / 1.5  # Convert from factored to service
+            total_load = service_load * 1.1
             area = ft.length_m * ft.width_m
             pressure = total_load / area
             
@@ -191,7 +193,13 @@ class StructuralAuditor:
             
             # Inertia (Rectangle)
             # I = b * d^3 / 12
-            I_mm4 = (b_mm * (d_mm**3)) / 12.0
+            Igross = (b_mm * (d_mm**3)) / 12.0
+            # IS 456 Cl 23.2(a) - Effective moment of inertia
+            # Simplified: use 0.5 * Igross as cracked section approximation
+            # (rigorous approach requires Mcr, Mr calculation)
+            Ieff = 0.5 * Igross  # Conservative cracked-section approximation
+            # TODO: Implement full Branson's formula: Ieff = Icr + (Ig - Icr) * (Mcr/M)^3
+            I_mm4 = Ieff
             
             # Load (Simplified UDL assumption matched with detail_beams)
             # 20 kN/m imposed + SW

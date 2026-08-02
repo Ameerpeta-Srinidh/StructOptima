@@ -250,6 +250,9 @@ class AnalysisConfigGenerator:
         return modifiers
     
     def _configure_p_delta(self) -> PDeltaSettings:
+        # IS 16700 Cl 5.5: P-Delta required when stability index theta > 0.04
+        # Simplified proxy: enable for buildings > 4 storeys (conservative)
+        # TODO: Implement stability index calculation
         enabled = self.num_storeys > 4
         
         if enabled:
@@ -331,6 +334,10 @@ class AnalysisConfigGenerator:
         combinations = []
         combo_id = 1
         
+        ll_intensity = max([fm.live_load_intensity_kn_m2 for fm in self.floor_masses]) if self.floor_masses else 3.0
+        # IS 1893 Cl 6.3.2.1 - LL reduction for seismic
+        ll_reduction = 0.25 if ll_intensity <= 3.0 else 0.50
+        
         combinations.append({
             "id": f"UDCON{combo_id}",
             "name": "1.5(DL+LL)",
@@ -344,8 +351,8 @@ class AnalysisConfigGenerator:
             for sign in [1.0, -1.0]:
                 combinations.append({
                     "id": f"UDCON{combo_id}",
-                    "name": f"1.2(DL+LL{'+' if sign > 0 else '-'}{eq_dir})",
-                    "factors": {"DL": 1.2, "LL": 1.2, eq_dir: 1.2 * sign},
+                    "name": f"1.2(DL+{ll_reduction}LL{'+' if sign > 0 else '-'}{eq_dir})",
+                    "factors": {"DL": 1.2, "LL": 1.2 * ll_reduction, eq_dir: 1.2 * sign},
                     "type": "Strength",
                     "code_ref": "IS 456 Table 18"
                 })
@@ -400,8 +407,8 @@ class AnalysisConfigGenerator:
         if self.include_vertical_seismic:
             combinations.append({
                 "id": f"UDCON{combo_id}",
-                "name": "1.2(DL+LL+EQX+EQZ)",
-                "factors": {"DL": 1.2, "LL": 1.2, "EQX": 1.2, "EQZ": 1.2},
+                "name": f"1.2(DL+{ll_reduction}LL+EQX+EQZ)",
+                "factors": {"DL": 1.2, "LL": 1.2 * ll_reduction, "EQX": 1.2, "EQZ": 1.2},
                 "type": "Strength",
                 "code_ref": "IS 1893 - Vertical seismic"
             })

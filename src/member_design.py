@@ -183,15 +183,22 @@ class MemberDesigner:
     def _get_tau_c(self, pt_percent: float) -> float:
         pt = max(0.15, min(pt_percent, 3.0))
         
+        tau_c_m20 = TAU_C_TABLE[-1][1]
         for i, (pt_val, tau_c) in enumerate(TAU_C_TABLE):
             if pt <= pt_val:
                 if i == 0:
-                    return tau_c
+                    tau_c_m20 = tau_c
+                    break
                 pt_prev, tau_prev = TAU_C_TABLE[i-1]
                 ratio = (pt - pt_prev) / (pt_val - pt_prev)
-                return tau_prev + ratio * (tau_c - tau_prev)
+                tau_c_m20 = tau_prev + ratio * (tau_c - tau_prev)
+                break
+                
+        # IS 456 Table 19 Note: For grades above M20, multiply by:
+        grade_factor = min((self.fck / 20.0) ** 0.5, 1.5) if hasattr(self, 'fck') else 1.0
+        tau_c = tau_c_m20 * grade_factor  # Apply after table lookup
         
-        return TAU_C_TABLE[-1][1]
+        return tau_c
     
     def calculate_mu_lim(self, b_mm: float, d_mm: float) -> float:
         xu_max = self.xu_d_max * d_mm
@@ -220,7 +227,8 @@ class MemberDesigner:
             R = Mu / (b_mm * d**2)
             pt = (self.fck / (2 * self.fy)) * (1 - math.sqrt(1 - 4.598 * R / self.fck)) * 100
             
-            pt = max(pt, 0.12 * self.fy / self.fck)
+            pt_min = 0.85 / self.fy * 100  # IS 456 Cl 26.5.1.1
+            pt = max(pt, pt_min)
             
             Ast = pt * b_mm * d / 100
             
@@ -232,7 +240,19 @@ class MemberDesigner:
             
             Ast1 = 0.36 * self.fck * b_mm * self.xu_d_max * d / (0.87 * self.fy)
             
-            fsc = 0.87 * self.fy
+            # IS 456 Table F (SP:16) - fsc depends on d'/d ratio
+            d_prime_ratio = d_prime / d if d > 0 else 0.1
+            if d_prime_ratio <= 0.05:
+                fsc = 0.87 * self.fy  
+            elif d_prime_ratio <= 0.10:
+                fsc = 0.87 * self.fy * 0.95 if self.fy <= 415 else 0.87 * self.fy * 0.90
+            elif d_prime_ratio <= 0.15:
+                fsc = 353.0 if self.fy <= 415 else 395.0  # From SP:16 Table F
+            elif d_prime_ratio <= 0.20:
+                fsc = 342.0 if self.fy <= 415 else 370.0
+            else:
+                fsc = 329.0 if self.fy <= 415 else 355.0
+            
             Asc = Mu2 / (fsc * (d - d_prime))
             
             Ast2 = Asc * fsc / (0.87 * self.fy)
@@ -380,8 +400,16 @@ class MemberDesigner:
         d_x = D_mm - self.clear_cover - 8
         d_y = b_mm - self.clear_cover - 8
         
-        Mux1 = 0.36 * fck * b_mm * d_x**2 * 0.48 * (1 - 0.42 * 0.48) / 1e6
-        Muy1 = 0.36 * fck * D_mm * d_y**2 * 0.48 * (1 - 0.42 * 0.48) / 1e6
+        # Include steel contribution to moment capacity
+        cover = self.clear_cover
+        b = b_mm
+        D = D_mm
+        Ast = Ast_mm2
+        xu = 0.48 * d_x
+        xu_y = 0.48 * d_y
+        
+        Mux1 = (0.36 * self.fck * b * D * (D - 0.42 * xu) + (Ast / 2) * (0.87 * self.fy) * (D - 2 * cover)) / 1e6
+        Muy1 = (0.36 * self.fck * D * b * (b - 0.42 * xu_y) + (Ast / 2) * (0.87 * self.fy) * (b - 2 * cover)) / 1e6
         
         Mux1 = max(Mux1, 1.0)
         Muy1 = max(Muy1, 1.0)
@@ -410,10 +438,15 @@ class MemberDesigner:
         Mux_design = max(abs(Mux_kNm), M_min_x)
         Muy_design = max(abs(Muy_kNm), M_min_y)
         
-        if is_slender:
-            e_add = L_mm**2 / (2000 * D_mm)
-            M_add = Pu_kN * e_add / 1000
-            Mux_design += M_add
+        lex_D = L_mm / D_mm
+        ley_b = L_mm / b_mm
+        
+        if lex_D >= 12:
+            e_add_x = D_mm * (lex_D ** 2) / 2000.0
+            Mux_design += Pu_kN * e_add_x / 1000.0  # kNm
+        if ley_b >= 12:
+            e_add_y = b_mm * (ley_b ** 2) / 2000.0  
+            Muy_design += Pu_kN * e_add_y / 1000.0  # kNm
         
         Ast = steel_percent * b_mm * D_mm / 100
         

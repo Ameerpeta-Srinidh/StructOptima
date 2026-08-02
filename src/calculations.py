@@ -97,7 +97,8 @@ def analyze_beam(
         denom = (384 * elastic_modulus_mpa * section_props.ix) # E in MPa(N/mm2), I in mm4
         # w in N/mm -> w_kn_m = w N/mm
         # L in mm
-        w_newton_mm = w # 1 kN/m = 1 N/mm
+        service_load = load_kn_m / 1.5  # Approximate service load for deflection
+        w_newton_mm = service_load # 1 kN/m = 1 N/mm
         
         deflection = (5 * w_newton_mm * (span_mm**4)) / denom # mm
         
@@ -110,7 +111,8 @@ def analyze_beam(
         
         # Deflection approximate: wL^4 / 384EI (Reduced due to continuity, often taken as 1/5th of simple)
         # Or standard approximation 1/384... let's use 1/384 coefficient for continuous approx
-        w_newton_mm = w
+        service_load = load_kn_m / 1.5  # Approximate service load for deflection
+        w_newton_mm = service_load
         denom = (384 * elastic_modulus_mpa * section_props.ix)
         deflection = (1 * w_newton_mm * (span_mm**4)) / denom # significantly less than 5/384
         
@@ -171,11 +173,10 @@ def check_column_capacity(
     p_u = (0.4 * fck * ac + 0.67 * fy * asc) / 1000.0 # Convert N to kN
     
     # Slenderness check
-    # Lambda = Le / r_min
-    # r_min = sqrt(I_min / A)
-    i_min = min(section_props.ix, section_props.iy)
-    r_min = np.sqrt(i_min / gross_area_mm2)
-    slenderness = effective_length_mm / r_min
+    depth_mm = np.sqrt(12.0 * section_props.ix / gross_area_mm2)
+    width_mm = np.sqrt(12.0 * section_props.iy / gross_area_mm2)
+    larger_dimension = max(width_mm, depth_mm)
+    slenderness = effective_length_mm / larger_dimension
     
     msg = []
     is_safe = True
@@ -185,6 +186,11 @@ def check_column_capacity(
     # For Phase 1 simplified, we will warn if > 12.
     if slenderness > 12:
         msg.append(f"Warning: Slenderness {slenderness:.2f} > 12 (Long Column functionality not fully implemented).")
+        
+    # IS 456 Cl 25.4 - Minimum eccentricity check
+    e_min_mm = max(effective_length_mm / 500.0 + max(width_mm, depth_mm) / 30.0, 20.0)
+    if e_min_mm > 0.05 * max(width_mm, depth_mm):
+        msg.append("Minimum eccentricity exceeds 0.05D - design for combined axial + bending required")
         
     if load_kN > p_u:
         is_safe = False

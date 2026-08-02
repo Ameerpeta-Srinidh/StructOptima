@@ -105,7 +105,7 @@ def design_footing(
         # Conservative: Pu (Factored load ideally, using axial_load_kn here as 'load')
         # Check: Is input load Factored or Service? Phase 2 used 'load' from trib area * 50kN/m2.
         # Assuming Factored Input Load.
-        punching_load_kn = axial_load_kn # Simplifying -> Total load punches through
+        punching_load_kn = axial_load_kn * 1.5 # Ultimate limit state
         
         # Shear Stress = Load / (Perimeter * d)
         # Convert kN to N, mm to mm2

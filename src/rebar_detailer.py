@@ -57,8 +57,7 @@ class RebarDetailer:
         percentage = (ast_mm2 / ag_mm2) * 100.0
         
         limit = 4.0 # Practical limit for pouring
-        if percentage > 6.0: return "FAIL"
-        if percentage > 4.0: return "WARN: CONGESTED"
+        if percentage > 4.0: return "FAIL"
         return "PASS"
 
     @staticmethod
@@ -207,7 +206,8 @@ class RebarDetailer:
         span_m: float, 
         load_kn_m: float,
         design_moment_knm: float = 0.0,
-        design_shear_kn: float = 0.0
+        design_shear_kn: float = 0.0,
+        fck: float = 25.0
     ) -> BeamRebarResult:
         """
         Simplified Beam Design.
@@ -226,8 +226,26 @@ class RebarDetailer:
         cover = 25
         deff = d_mm - cover - 10 
         
-        min_ast = (0.85 / 415.0) * b_mm * deff
-        ast_req = mu_Nmm / (0.87 * 415.0 * 0.9 * deff)
+        fy = 415.0
+        min_ast = (0.85 / fy) * b_mm * deff
+        
+        # IS 456 Cl 38.1 - Limiting moment of resistance
+        xu_max_d = 0.48 if fy <= 415 else 0.46  # Fe415: 0.48, Fe500: 0.46
+        Mu_lim = 0.36 * fck * b_mm * (deff ** 2) * xu_max_d * (1 - 0.42 * xu_max_d) * 1e-6  # kNm
+
+        if mu_kNm <= Mu_lim:
+            # Singly reinforced
+            ast_req = mu_kNm * 1e6 / (0.87 * fy * deff * (1 - 0.42 * xu_max_d))
+        else:
+            # Doubly reinforced
+            Mu2 = mu_kNm - Mu_lim
+            ast1 = Mu_lim * 1e6 / (0.87 * fy * deff * (1 - 0.42 * xu_max_d))
+            d_prime = 0.1 * deff  # Assume cover ratio
+            fsc = 0.87 * fy  # Conservative for now
+            ast2 = Mu2 * 1e6 / (fsc * (deff - d_prime))
+            asc = Mu2 * 1e6 / (fsc * (deff - d_prime))  # Compression steel
+            ast_req = ast1 + ast2
+            
         ast = max(ast_req, min_ast)
         
         # Bottom Steel
@@ -264,7 +282,32 @@ class RebarDetailer:
         
         # Stirrups
         stirrup_phi = 8
-        stirrup_desc = "2L-8# @ 150 c/c"
+        
+        # IS 456 Cl 40 - Shear design
+        tau_v = design_shear_kn * 1000.0 / (b_mm * deff)  # N/mm²
+
+        # IS 456 Table 19 - tau_c (simplified for pt% ~ 0.5-1.0%)
+        ast_provided = num * a_bar
+        pt = 100.0 * ast_provided / (b_mm * deff)
+        if pt <= 0.15: tau_c = 0.28
+        elif pt <= 0.25: tau_c = 0.36
+        elif pt <= 0.50: tau_c = 0.48
+        elif pt <= 0.75: tau_c = 0.56
+        elif pt <= 1.00: tau_c = 0.62
+        elif pt <= 1.50: tau_c = 0.72
+        elif pt <= 2.00: tau_c = 0.79
+        else: tau_c = 0.82
+
+        if tau_v <= tau_c:
+            sv = min(300, int(0.75 * deff), int(b_mm))  # Nominal stirrups
+            stirrup_desc = f"2L-8# @ {sv} c/c"
+        else:
+            Vus = (tau_v - tau_c) * b_mm * deff / 1000.0  # kN
+            Asv = 2 * 50.27  # 2-legged 8mm stirrups
+            sv = int(0.87 * fy * Asv * deff / (Vus * 1000.0))
+            sv = max(sv, 75)  # Minimum practical spacing
+            sv = min(sv, int(0.75 * deff), 300)  # IS 456 max spacing
+            stirrup_desc = f"2L-8# @ {sv} c/c"
         
         # Congestion
         total_steel_area = (num * a_bar) + top_ast
@@ -410,16 +453,29 @@ class RebarDetailer:
         )
 
     @staticmethod
-    def detail_slab(lx_m: float, ly_m: float, slab_thk_mm: float = 125.0) -> SlabRebarResult:
+    def detail_slab(lx_m: float, ly_m: float, slab_thk_mm: float = 125.0, load_kn_m2: float = 5.0, fck: float = 25.0) -> SlabRebarResult:
         ratio = max(lx_m, ly_m) / min(lx_m, ly_m)
         is_two_way = ratio < 2.0
+        fy = 415.0
+        d_eff = slab_thk_mm - 20 - 5
         
-        min_ast = 0.0012 * 1000 * slab_thk_mm
+        # Calculate BM for slab
+        lx = min(lx_m, ly_m)
+        ly = max(lx_m, ly_m)
+        if ly / lx > 2:  # One-way
+            Mu = load_kn_m2 * 1.5 * lx**2 / 8.0  # kNm per m width
+        else:  # Two-way - use IS 456 Table 26 coefficients (simplified)
+            alpha_x = 0.087  # Approximate for ly/lx ~ 1.5
+            Mu = alpha_x * load_kn_m2 * 1.5 * lx**2  # kNm per m width
+        
+        ast_req = Mu * 1e6 / (0.87 * fy * 0.9 * d_eff)
+        min_ast = 0.0012 * 1000 * slab_thk_mm  # 0.12% for HYSD
+        ast = max(ast_req, min_ast)
         
         # Main
         phi_main = 10
         a_bar = 78.5
-        spacing_main = (1000 * a_bar) / min_ast
+        spacing_main = (1000 * a_bar) / ast
         spacing_main = min(spacing_main, 300.0)
         spacing_main = math.floor(spacing_main/25)*25
         main_desc = f"10# @ {int(spacing_main)} c/c"

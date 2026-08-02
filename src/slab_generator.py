@@ -333,11 +333,12 @@ class SlabGenerator:
             ws = w * Lx / 3.0
             # Long span load (trapezoidal)
             beta = Ly / Lx if Lx > 0 else 1.0
-            wl = w * (Lx / 2.0) * (1 - 1 / (3 * beta**2))
+            wl = (w * Lx / 6.0) * (3.0 - 1.0 / (beta ** 2))
         else:
             # IS 456 One-Way Distribution
-            ws = 0.0
-            wl = w * Lx / 2.0
+            # One-way slab: load transfers to beams along the LONG span
+            ws = w * Lx / 2.0  # Load on long beams (per unit length)
+            wl = 0.0  # No load on short beams
             
         for i in range(4):
             p1 = slab.vertices[i]

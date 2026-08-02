@@ -445,18 +445,20 @@ def check_uplift_stability(
     Returns:
         (is_stable, factor_of_safety, message)
     """
-    resisting = 0.9 * dead_load_kn
-    overturning = 1.5 * max(wind_load_kn, seismic_load_kn)
+    resisting_factored = 0.9 * dead_load_kn
+    overturning_factored = 1.5 * max(wind_load_kn, seismic_load_kn)
+    max_lateral = max(wind_load_kn, seismic_load_kn)
     
-    if overturning <= 0:
+    if max_lateral <= 0:
         return True, float('inf'), "No lateral load - stable"
     
-    fos = resisting / overturning
+    fos = dead_load_kn / max_lateral
+    is_stable = (resisting_factored > overturning_factored)
     
-    if fos >= 1.0:
-        return True, fos, f"Stable: FoS = {fos:.2f} ≥ 1.0"
+    if is_stable:
+        return True, fos, f"Stable: 0.9DL > 1.5WL (Unfactored FoS = {fos:.2f})"
     else:
-        return False, fos, f"UNSTABLE: FoS = {fos:.2f} < 1.0 - Foundation may uplift!"
+        return False, fos, f"UNSTABLE: 0.9DL < 1.5WL - Foundation may uplift! (Unfactored FoS = {fos:.2f})"
 
 
 def get_summary_report(
