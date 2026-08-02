@@ -775,6 +775,7 @@ if st.session_state.get('analysis_done', False):
                 # Deep copy to prevent shared mutations across stories
                 copied = b.model_copy(deep=True)
                 copied.id = f"{b.id}_L{i}"
+                copied.level = i  # Add this so beams render at correct heights
                 all_beams.append(copied)
             
         # 4. Quantification & BOM
@@ -801,7 +802,7 @@ if st.session_state.get('analysis_done', False):
         from src.geometry_exporter import GeometryExporter
         scene = GeometryExporter.create_structure_scene(
             grid_mgr=gm, 
-            beams=beams, 
+            beams=all_beams, 
             footings=footings, 
             view_mode=v_mode_str,
             arch_walls=st.session_state.get('arch_walls')
@@ -835,7 +836,7 @@ if st.session_state.get('analysis_done', False):
         # Also generate old Plotly fig for comparison
         old_fig = viz.create_structure_figure(
             grid_mgr=gm, 
-            beams=beams, 
+            beams=all_beams, 
             footings=footings, 
             concrete=m_grade, 
             view_mode=v_mode_str,
