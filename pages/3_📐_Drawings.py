@@ -74,7 +74,7 @@ with v_tab2:
         viz = Visualizer()
         level_sel = st.slider("Select Level", 1, max(1, num_stories), 1)
         fig_2d = viz.create_2d_plan(gm, all_beams, view_mode=v_mode_str, level=level_sel)
-        st.plotly_chart(fig_2d, use_container_width=True)
+        st.plotly_chart(fig_2d, width="stretch")
 
 st.markdown("---")
 st.subheader("DXF Downloads")

@@ -419,16 +419,18 @@ def render_dc_ratio_bar(ratio, show_pct=True):
     """
 
 
-def render_metric_card(label, value, subtitle="", color="blue"):
+def render_metric_card(label, value, subtitle="", color="blue", icon=""):
     """Render a glassmorphism metric card."""
     color_class = {
         "blue": "", "green": "mc-green", "amber": "mc-amber", "red": "mc-red"
     }.get(color, "")
     
     sub_html = f'<div class="mc-sub">{subtitle}</div>' if subtitle else ""
+    icon_html = f'<span style="margin-right: 5px;">{icon}</span>' if icon else ""
+    
     st.markdown(f"""
     <div class="metric-card {color_class}">
-        <div class="mc-label">{label}</div>
+        <div class="mc-label">{icon_html}{label}</div>
         <div class="mc-value">{value}</div>
         {sub_html}
     </div>

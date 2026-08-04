@@ -38,11 +38,8 @@ if not gm or not all_beams:
 
 st.markdown("### 📦 Export Package")
 
-# Ensure required attributes for reports
-if not hasattr(gm, 'footings'):
-    gm.footings = st.session_state.get('footings', [])
-if not hasattr(gm, 'project_name'):
-    gm.project_name = project_name
+# Note: GridManager is a strict Pydantic model — don't set arbitrary attributes on it.
+# project_name and footings are passed explicitly to generators via kwargs (already done below).
 
 def generate_zip_package():
     zip_buffer = io.BytesIO()

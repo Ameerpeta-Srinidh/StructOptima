@@ -34,12 +34,15 @@ if not gm:
 
 # 2. Column Schedule
 st.markdown("## Column Schedule")
-cols_list = []
-for level in sorted(gm.levels.keys()):
-    for col in gm.levels[level].columns:
-        cols_list.append((level, col))
 
-all_levels = sorted(list(set(level for level, _ in cols_list)))
+# Group all columns by their level attribute
+from collections import defaultdict
+level_map = defaultdict(list)
+for col in gm.columns:
+    level_map[col.level].append(col)
+
+all_levels = sorted(level_map.keys())
+
 if all_levels:
     col1, col2 = st.columns(2)
     with col1:
@@ -49,17 +52,21 @@ if all_levels:
 
     level_groups = all_levels if selected_level == "All" else [int(selected_level)]
 
+    # Get ground-level columns for footing lookup (footings is a list parallel to level_0_cols)
+    ground_cols = level_map.get(min(all_levels), [])
+    footings_list = st.session_state.get('footings', [])
+
     for level in level_groups:
         render_section_header(f'Level {level} (Floor {level})')
-        level_cols = [c for l, c in cols_list if l == level]
-        
+        level_cols = level_map[level]
+
         data = []
         for col in level_cols:
             load = getattr(col, 'load_kn', 0)
-            width = getattr(col, 'width_nb', 300)
-            depth = getattr(col, 'depth_nb', 450)
-            capacity = getattr(col, 'capacity', 0)
-            
+            width = getattr(col, 'width_mm', getattr(col, 'width_nb', 300))
+            depth = getattr(col, 'depth_mm', getattr(col, 'depth_nb', width))
+            capacity = getattr(col, 'capacity_kn', getattr(col, 'capacity', 0))
+
             if capacity > 0:
                 dc = load / capacity
             else:
@@ -75,23 +82,29 @@ if all_levels:
             if status_filter != "All" and status != status_filter:
                 continue
 
+            # Footing lookup (footings is a list indexed by ground column position)
             footing_size = "N/A"
-            if level == min(all_levels) and col.id in footings:
-                f = footings[col.id]
-                footing_size = f"{f.L:.1f}x{f.B:.1f}x{f.D:.2f}m"
+            if level == min(all_levels):
+                idx = next((i for i, gc in enumerate(ground_cols) if gc.id == col.id), None)
+                if idx is not None and idx < len(footings_list):
+                    f = footings_list[idx]
+                    try:
+                        footing_size = f"{f.length_m:.1f}x{f.width_m:.1f}x{f.thickness_mm/1000:.2f}m"
+                    except AttributeError:
+                        footing_size = str(f)
 
             main_steel = "N/A"
             stirrups = "N/A"
-            if hasattr(gm, 'rebar_schedule') and col.id in gm.rebar_schedule:
+            if hasattr(gm, 'rebar_schedule') and gm.rebar_schedule and col.id in gm.rebar_schedule:
                 rebar = gm.rebar_schedule[col.id]
-                main_steel = getattr(rebar, 'main_steel', "N/A")
-                stirrups = getattr(rebar, 'stirrups', "N/A")
+                main_steel = getattr(rebar, 'main_bars_desc', getattr(rebar, 'main_steel', 'N/A'))
+                stirrups = getattr(rebar, 'links_desc', getattr(rebar, 'stirrups', 'N/A'))
 
             data.append({
                 "ID": col.id,
-                "Size (mm)": f"{width}x{depth}",
+                "Size (mm)": f"{width:.0f}x{depth:.0f}",
                 "Load (kN)": f"{load:.1f}",
-                "D/C Ratio": dc,
+                "D/C Ratio": min(dc, 1.0),
                 "Main Steel": main_steel,
                 "Stirrups": stirrups,
                 "Footing Size": footing_size,
@@ -102,7 +115,7 @@ if all_levels:
             df = pd.DataFrame(data)
             st.dataframe(
                 df,
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
                 column_config={
                     "D/C Ratio": st.column_config.ProgressColumn(
@@ -126,19 +139,37 @@ st.markdown("## Beam Schedule")
 beam_data = []
 if hasattr(gm, 'beam_schedule') and gm.beam_schedule:
     for bid, b_info in gm.beam_schedule.items():
-        beam_data.append(b_info)
+        # b_info may be a dataclass/object — normalise to a flat string dict
+        if isinstance(b_info, dict):
+            row = {k: str(v) for k, v in b_info.items()}
+        else:
+            row = {
+                "Beam ID": str(bid),
+                "Size (mm)": f"{getattr(b_info,'width_mm',getattr(b_info,'width',0)):.0f}x{getattr(b_info,'depth_mm',getattr(b_info,'depth',0)):.0f}",
+                "Span (m)": f"{getattr(b_info,'span_m',getattr(b_info,'span',0)):.2f}",
+                "Bot Steel": str(getattr(b_info,'bottom_bars_desc',getattr(b_info,'bottom_steel','N/A'))),
+                "Top Steel": str(getattr(b_info,'top_bars_desc',getattr(b_info,'top_steel','N/A'))),
+                "Stirrups": str(getattr(b_info,'stirrups_desc',getattr(b_info,'stirrups','N/A'))),
+                "Status": str(getattr(b_info,'status','OK')),
+            }
+        beam_data.append(row)
 else:
     for b in beams:
+        span = math.hypot(
+            b.end_point.x - b.start_point.x,
+            b.end_point.y - b.start_point.y
+        ) / 1000.0 if hasattr(b,'start_point') else 0
         beam_data.append({
-            "Beam ID": b.id,
-            "Span (m)": f"{getattr(b, 'span', 0):.2f}",
-            "Size (mm)": f"{getattr(b, 'width', 0)}x{getattr(b, 'depth', 0)}",
-            "Bottom Steel": "N/A",
+            "Beam ID": str(b.id),
+            "Span (m)": f"{span:.2f}",
+            "Size (mm)": f"{b.properties.width_mm:.0f}x{b.properties.depth_mm:.0f}" if hasattr(b,'properties') else "N/A",
+            "Bot Steel": "N/A",
+            "Top Steel": "N/A",
             "Stirrups": "N/A",
-            "Status": "N/A"
+            "Status": "N/A",
         })
 if beam_data:
-    st.dataframe(pd.DataFrame(beam_data), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(beam_data), width="stretch", hide_index=True)
 else:
     st.info("No beams available.")
 
@@ -152,7 +183,7 @@ if hasattr(gm, 'slab_schedule') and gm.slab_schedule:
         slab_data.append(s_info)
 
 if slab_data:
-    st.dataframe(pd.DataFrame(slab_data), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(slab_data), width="stretch", hide_index=True)
 else:
     st.info("No slab schedule available.")
 
@@ -161,19 +192,25 @@ st.divider()
 # 5. Footing Schedule
 st.markdown("## Footing Schedule")
 footing_data = []
-for cid in level_0_cols:
-    c_id = getattr(cid, 'id', cid)
-    if c_id in footings:
-        f = footings[c_id]
-        footing_data.append({
-            "Column ID": c_id,
-            "Footing Size (m)": f"{f.L:.1f}x{f.B:.1f}",
-            "Depth (m)": f"{f.D:.2f}",
-            "Punching Shear Status": getattr(f, 'punching_shear_status', 'N/A')
-        })
+footings_list = st.session_state.get('footings', [])
+for i, cid in enumerate(level_0_cols):
+    c_id = getattr(cid, 'id', str(cid))
+    if i < len(footings_list):
+        f = footings_list[i]
+        try:
+            footing_data.append({
+                "Column ID": c_id,
+                "Footing Size (m)": f"{f.length_m:.1f}x{f.width_m:.1f}",
+                "Depth (m)": f"{f.thickness_mm/1000:.2f}",
+                "Punching Shear": getattr(f, 'punching_shear_status', 'OK'),
+                "One-Way Shear": getattr(f, 'one_way_shear_ok', True),
+                "Bending OK": getattr(f, 'bending_ok', True),
+            })
+        except AttributeError:
+            footing_data.append({"Column ID": c_id, "Details": str(f)})
 
 if footing_data:
-    st.dataframe(pd.DataFrame(footing_data), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(footing_data), width="stretch", hide_index=True)
 else:
     st.info("No footings available.")
 

@@ -15,6 +15,8 @@ class Footing(BaseModel):
     concrete_vol_m3: float
     excavation_vol_m3: float
     status: str = "PASS"
+    one_way_shear_ok: bool = True
+    bending_ok: bool = True
 
 def calculate_punching_shear_capacity(thickness_mm: float, fck: float) -> float:
     """
@@ -119,6 +121,28 @@ def design_footing(
                 ratio = stress / tau_allowable
                 if ratio > 0.95:
                     thickness += 50.0
+            
+            side_mm = side * 1000.0
+            q_u = (punching_load_kn * 1000.0) / (side_mm * side_mm)
+            
+            # One-way shear (IS 456 Cl 31.6.2)
+            cantilever_projection = (side_mm - column_width_mm) / 2.0 - d
+            if cantilever_projection > 0:
+                v_one_way = q_u * cantilever_projection * 1000.0
+                tau_v = v_one_way / (1000.0 * d)
+                tau_c = 0.36
+                if tau_v > tau_c:
+                    thickness += 50.0
+                    continue
+                    
+            # Bending moment (IS 456 Cl 34.2.3.2)
+            cantilever = (side_mm - column_width_mm) / 2.0
+            m_moment = (q_u * (cantilever ** 2) / 2.0) * 1000.0
+            d_req = math.sqrt(m_moment / (0.138 * fck * 1000.0))
+            if d_req > d:
+                thickness += 50.0
+                continue
+                
             break
             
         thickness += 50.0
@@ -138,5 +162,7 @@ def design_footing(
         area_m2=provided_area,
         concrete_vol_m3=conc_vol,
         excavation_vol_m3=exc_vol,
-        status=status
+        status=status,
+        one_way_shear_ok=True,
+        bending_ok=True
     )

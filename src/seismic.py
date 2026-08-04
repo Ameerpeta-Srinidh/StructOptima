@@ -77,7 +77,7 @@ RESPONSE_REDUCTION = {
 # Importance Factors (IS 1893 Table 8)
 IMPORTANCE_FACTORS = {
     "residential": 1.0,
-    "commercial": 1.0,
+    "commercial": 1.2,
     "school": 1.5,
     "hospital": 1.5,
     "emergency": 1.5,
@@ -737,8 +737,10 @@ class SeismicDesignChecker:
                     col.width_nb, col.depth_nb, col.load_kn, ast_col
                 )
                 
-                # Estimate beam capacity (assume similar beams at joint)
-                Mb = Mc * 0.6  # Assume beams are ~60% of column capacity for typical design
+                # Estimate beam capacity (simplified check, real beam capacities should be used)
+                b_beam = 230.0  # mm
+                d_beam = 450.0  # mm
+                Mb = 0.138 * self.fck * b_beam * (d_beam ** 2) / 1e6  # kNm (IS 456 balanced section)
                 
                 check = self.check_strong_column_weak_beam(
                     Mc * 2,  # Two columns at joint

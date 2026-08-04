@@ -44,12 +44,45 @@ STEEL_GRADES = {
     "Fe500": {"fy": 500, "xu_d_max": 0.46}
 }
 
-TAU_C_TABLE = [
+# IS 456:2000 Table 19 — Design shear strength of concrete tau_c (MPa)
+# These values are for M20. For other grades, separate tables apply.
+# Note: IS 456 Table 19 does NOT allow sqrt(fck/20) scaling.
+TAU_C_TABLE_M20 = [
     (0.15, 0.28), (0.25, 0.36), (0.50, 0.48), (0.75, 0.56),
     (1.00, 0.62), (1.25, 0.67), (1.50, 0.72), (1.75, 0.75),
     (2.00, 0.79), (2.25, 0.81), (2.50, 0.82), (2.75, 0.82),
     (3.00, 0.82)
 ]
+
+# Grade-specific tau_c tables (IS 456 Table 19)
+# Values for M25, M30, M35, M40 at key pt% values
+TAU_C_TABLES = {
+    20: TAU_C_TABLE_M20,
+    25: [
+        (0.15, 0.29), (0.25, 0.36), (0.50, 0.49), (0.75, 0.57),
+        (1.00, 0.64), (1.25, 0.70), (1.50, 0.74), (1.75, 0.78),
+        (2.00, 0.82), (2.25, 0.85), (2.50, 0.88), (2.75, 0.90),
+        (3.00, 0.92)
+    ],
+    30: [
+        (0.15, 0.29), (0.25, 0.37), (0.50, 0.50), (0.75, 0.59),
+        (1.00, 0.66), (1.25, 0.71), (1.50, 0.76), (1.75, 0.80),
+        (2.00, 0.84), (2.25, 0.88), (2.50, 0.91), (2.75, 0.94),
+        (3.00, 0.96)
+    ],
+    35: [
+        (0.15, 0.29), (0.25, 0.37), (0.50, 0.50), (0.75, 0.59),
+        (1.00, 0.67), (1.25, 0.73), (1.50, 0.78), (1.75, 0.82),
+        (2.00, 0.86), (2.25, 0.90), (2.50, 0.93), (2.75, 0.96),
+        (3.00, 0.99)
+    ],
+    40: [
+        (0.15, 0.30), (0.25, 0.38), (0.50, 0.51), (0.75, 0.60),
+        (1.00, 0.68), (1.25, 0.74), (1.50, 0.79), (1.75, 0.84),
+        (2.00, 0.88), (2.25, 0.92), (2.50, 0.95), (2.75, 0.98),
+        (3.00, 1.01)
+    ],
+}
 
 
 @dataclass
@@ -181,24 +214,36 @@ class MemberDesigner:
                    f"{steel_grade} (fy={self.fy})")
     
     def _get_tau_c(self, pt_percent: float) -> float:
+        """IS 456:2000 Table 19 — Design shear strength tau_c.
+        
+        Uses grade-specific tables directly (NOT scaled from M20).
+        IS 456 Table 19 provides separate values for each concrete grade.
+        """
         pt = max(0.15, min(pt_percent, 3.0))
         
-        tau_c_m20 = TAU_C_TABLE[-1][1]
-        for i, (pt_val, tau_c) in enumerate(TAU_C_TABLE):
+        # Select the correct grade-specific table
+        fck_int = int(self.fck) if hasattr(self, 'fck') else 20
+        # Find nearest available grade table
+        available_grades = sorted(TAU_C_TABLES.keys())
+        grade_key = available_grades[0]
+        for g in available_grades:
+            if g <= fck_int:
+                grade_key = g
+        
+        table = TAU_C_TABLES[grade_key]
+        
+        tau_c_val = table[-1][1]  # Default to max
+        for i, (pt_val, tau_c) in enumerate(table):
             if pt <= pt_val:
                 if i == 0:
-                    tau_c_m20 = tau_c
+                    tau_c_val = tau_c
                     break
-                pt_prev, tau_prev = TAU_C_TABLE[i-1]
+                pt_prev, tau_prev = table[i-1]
                 ratio = (pt - pt_prev) / (pt_val - pt_prev)
-                tau_c_m20 = tau_prev + ratio * (tau_c - tau_prev)
+                tau_c_val = tau_prev + ratio * (tau_c - tau_prev)
                 break
-                
-        # IS 456 Table 19 Note: For grades above M20, multiply by:
-        grade_factor = min((self.fck / 20.0) ** 0.5, 1.5) if hasattr(self, 'fck') else 1.0
-        tau_c = tau_c_m20 * grade_factor  # Apply after table lookup
         
-        return tau_c
+        return tau_c_val
     
     def calculate_mu_lim(self, b_mm: float, d_mm: float) -> float:
         xu_max = self.xu_d_max * d_mm
@@ -385,7 +430,11 @@ class MemberDesigner:
         fck = self.fck
         fy = self.fy
         
-        Puz = 0.45 * fck * b_mm * D_mm + 0.75 * fy * Ast_mm2
+        # IS 456:2000 Cl 39.6 — Puz = 0.45 fck (Ag - Asc) + 0.75 fy Asc
+        # Net concrete area = Gross area minus steel area
+        Ag = b_mm * D_mm
+        Ac = Ag - Ast_mm2  # Net concrete area
+        Puz = 0.45 * fck * Ac + 0.75 * fy * Ast_mm2
         Puz_kN = Puz / 1000
         
         Pu_Puz = Pu_kN / Puz_kN if Puz_kN > 0 else 1.0
@@ -400,16 +449,22 @@ class MemberDesigner:
         d_x = D_mm - self.clear_cover - 8
         d_y = b_mm - self.clear_cover - 8
         
-        # Include steel contribution to moment capacity
+        # IS 456:2000 Cl 39.6 — Biaxial bending interaction
+        # Moment capacity about each axis using balanced section
         cover = self.clear_cover
         b = b_mm
         D = D_mm
         Ast = Ast_mm2
-        xu = 0.48 * d_x
-        xu_y = 0.48 * d_y
         
-        Mux1 = (0.36 * self.fck * b * D * (D - 0.42 * xu) + (Ast / 2) * (0.87 * self.fy) * (D - 2 * cover)) / 1e6
-        Muy1 = (0.36 * self.fck * D * b * (b - 0.42 * xu_y) + (Ast / 2) * (0.87 * self.fy) * (b - 2 * cover)) / 1e6
+        # Use xu_d_max from steel grade (NOT hardcoded 0.48)
+        # Fe250: 0.53, Fe415: 0.48, Fe500: 0.46
+        xu_x = self.xu_d_max * d_x  # Neutral axis depth for X-bending
+        xu_y = self.xu_d_max * d_y  # Neutral axis depth for Y-bending
+        
+        # FIXED: Concrete compression uses xu (neutral axis depth), NOT D (full depth)
+        # Mu = 0.36 fck b xu (d - 0.42 xu) + Asc * fsc * (d - d')
+        Mux1 = (0.36 * self.fck * b * xu_x * (d_x - 0.42 * xu_x) + (Ast / 2) * (0.87 * self.fy) * (D - 2 * cover)) / 1e6
+        Muy1 = (0.36 * self.fck * D * xu_y * (d_y - 0.42 * xu_y) + (Ast / 2) * (0.87 * self.fy) * (b - 2 * cover)) / 1e6
         
         Mux1 = max(Mux1, 1.0)
         Muy1 = max(Muy1, 1.0)
@@ -431,9 +486,11 @@ class MemberDesigner:
     ) -> ColumnDesignResult:
         slenderness, is_slender = self.check_column_slenderness(L_mm, min(b_mm, D_mm))
         
-        e_min = self.calculate_min_eccentricity(L_mm, D_mm)
-        M_min_x = Pu_kN * e_min / 1000
-        M_min_y = Pu_kN * e_min / 1000
+        # IS 456 Cl 25.4 — Minimum eccentricity for EACH axis independently
+        e_min_x = self.calculate_min_eccentricity(L_mm, D_mm)  # About major axis
+        e_min_y = self.calculate_min_eccentricity(L_mm, b_mm)  # About minor axis (uses b, not D)
+        M_min_x = Pu_kN * e_min_x / 1000
+        M_min_y = Pu_kN * e_min_y / 1000
         
         Mux_design = max(abs(Mux_kNm), M_min_x)
         Muy_design = max(abs(Muy_kNm), M_min_y)
@@ -477,7 +534,7 @@ class MemberDesigner:
             Muy_kNm=Muy_design,
             slenderness_ratio=slenderness,
             is_slender=is_slender,
-            e_min_mm=e_min,
+            e_min_mm=max(e_min_x, e_min_y),  # Governing eccentricity
             M_design_kNm=max(Mux_design, Muy_design),
             interaction_ratio=interaction_ratio,
             Ast_mm2=Ast,

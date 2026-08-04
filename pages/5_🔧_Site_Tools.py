@@ -15,7 +15,7 @@ from src.bim_interop import CobieExporter
 from src.site_inspection import SiteInspectionManager
 from src.shm_viz import SHMDashboard
 from src.digital_twin import DigitalTwinExplorer
-from src.reports import DesignReportGenerator
+from src.documentation import DesignReportGenerator
 
 st.set_page_config(page_title='StructOptima — Site Tools', layout='wide', page_icon='🔧')
 inject_css()
@@ -231,18 +231,18 @@ with tab2:
                 st.success(f"Total Weight: **{wt:.2f} kg**")
             
             if st.checkbox("Show Rebar Unit Weight Table (IS 1786)"):
-                st.dataframe(rebar_weight_table(), use_container_width=True)
+                st.dataframe(rebar_weight_table(), width="stretch")
 
         with st.expander("🧪 Concrete Mix Design (IS 10262)"):
             grade = st.selectbox("Concrete Grade", ["M15", "M20", "M25", "M30", "M35", "M40"], index=2)
             if st.button("Get Proportions"):
                 mix = mix_design_table(grade)
                 st.write(f"**Proportions for {grade}**")
-                st.dataframe(mix, use_container_width=True)
+                st.dataframe(mix, width="stretch")
 
         with st.expander("💧 Curing Schedule"):
             c_grade = st.selectbox("Grade for Curing", ["M15", "M20", "M25", "M30", "M35", "M40"], index=2)
-            st.dataframe(curing_schedule(c_grade), use_container_width=True)
+            st.dataframe(curing_schedule(c_grade), width="stretch")
 
     with calc_c2:
         with st.expander("🚛 Concrete Pour Planner", expanded=True):

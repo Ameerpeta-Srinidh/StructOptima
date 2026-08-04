@@ -346,7 +346,7 @@ if enable_optimization:
                     "Check": "✓" if oc.is_safe else "✗",
                     "Gov": "M_min" if oc.is_min_ecc_governed else "P_u"
                 })
-            st.dataframe(opt_data, use_container_width=True)
+            st.dataframe(opt_data, width="stretch")
             st.caption("Gov: M_min = Governed by Minimum Eccentricity Check (< 0.05D)")
 
 
@@ -376,7 +376,7 @@ if beams:
                 "Status": status
             })
         if ld_data:
-            st.dataframe(pd.DataFrame(ld_data), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(ld_data), width="stretch", hide_index=True)
             failed_ld = [d for d in ld_data if "Check" in d["Status"]]
             if failed_ld:
                 st.warning(f"{len(failed_ld)} beam(s) exceed basic L/d ratio — verify modification factors per IS 456 Cl 23.2.1")

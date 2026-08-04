@@ -363,7 +363,9 @@ class GridManager(BaseModel):
         for col in self.columns:
             # Factored Load Input? The engine usually works with factored load.
             # Assuming col.load_kn is Pu.
-            pu_n = col.load_kn * 1.5 * 1000.0 # IS 456 Table 18: 1.5DL + 1.5LL, Convert kN to N
+            # IS 456 Table 18: Limit State factor 1.5(DL + LL)
+            # col.load_kn contains SERVICE (unfactored) cumulative loads from calculate_loads()
+            pu_n = col.load_kn * 1.5 * 1000.0  # Factored load in Newtons
             
             # Start small, e.g. 230x230 (Min code requirement)
             width = 230.0
@@ -498,7 +500,11 @@ class GridManager(BaseModel):
                 # Update SW Load based on current depth
                 sw = (b.properties.width_mm / 1000.0) * (b.properties.depth_mm / 1000.0) * 25.0 # Corrected SW volume
                 # Note: Previous code hardcoded 0.23 width. Now dynamic.
-                total_load = 20.0 + sw
+                avg_span_x = (self.x_grid_lines[-1] - self.x_grid_lines[0]) / max(1, len(self.x_grid_lines) - 1) if self.x_grid_lines else 4.0
+                avg_span_y = (self.y_grid_lines[-1] - self.y_grid_lines[0]) / max(1, len(self.y_grid_lines) - 1) if self.y_grid_lines else 4.0
+                trib_width_m = min(avg_span_x, avg_span_y) / 2.0  # Half-span each side
+                floor_udl = trib_width_m * 12.0  # 12 kN/m2 typical total floor load
+                total_load = floor_udl + sw + 12.0  # + wall load 12 kN/m default
                 
                 res = RebarDetailer.detail_beam(
                     b_mm=b.properties.width_mm,
@@ -540,10 +546,10 @@ class GridManager(BaseModel):
                 # IS 456: Span/Depth <= 26 for continuous (Slab)
                 # Short span governs
                 short_span_mm = min(lx, ly) * 1000.0
-                min_thk = short_span_mm / 26.0
-                # Round to 5mm
-                thk_mm = math.ceil(min_thk / 5.0) * 5.0
-                thk_mm = max(thk_mm, 125.0) # Min 125mm
+                d_min = short_span_mm / 26.0  # IS 456 Cl 23.2.1 effective depth
+                thk_mm = d_min + 30.0  # Add cover (25mm) + half bar dia (5mm)
+                thk_mm = math.ceil(thk_mm / 5.0) * 5.0
+                thk_mm = max(thk_mm, 125.0)  # Absolute minimum
                 
                 sid = f"S{count}"
                 res = RebarDetailer.detail_slab(lx, ly, slab_thk_mm=thk_mm)

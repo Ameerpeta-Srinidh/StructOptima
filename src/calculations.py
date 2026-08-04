@@ -172,11 +172,12 @@ def check_column_capacity(
     # IS 456 formula for Pu
     p_u = (0.4 * fck * ac + 0.67 * fy * asc) / 1000.0 # Convert N to kN
     
-    # Slenderness check
+    # Slenderness check — IS 456 Cl 25.1.2
+    # Governed by the MINOR axis (smaller lateral dimension)
     depth_mm = np.sqrt(12.0 * section_props.ix / gross_area_mm2)
     width_mm = np.sqrt(12.0 * section_props.iy / gross_area_mm2)
-    larger_dimension = max(width_mm, depth_mm)
-    slenderness = effective_length_mm / larger_dimension
+    minor_dimension = min(width_mm, depth_mm)  # Governs buckling
+    slenderness = effective_length_mm / minor_dimension
     
     msg = []
     is_safe = True
@@ -187,9 +188,10 @@ def check_column_capacity(
     if slenderness > 12:
         msg.append(f"Warning: Slenderness {slenderness:.2f} > 12 (Long Column functionality not fully implemented).")
         
-    # IS 456 Cl 25.4 - Minimum eccentricity check
-    e_min_mm = max(effective_length_mm / 500.0 + max(width_mm, depth_mm) / 30.0, 20.0)
-    if e_min_mm > 0.05 * max(width_mm, depth_mm):
+    # IS 456 Cl 25.4 - Minimum eccentricity check for EACH axis
+    e_min_x = max(effective_length_mm / 500.0 + depth_mm / 30.0, 20.0)
+    e_min_y = max(effective_length_mm / 500.0 + width_mm / 30.0, 20.0)
+    if e_min_x > 0.05 * depth_mm or e_min_y > 0.05 * width_mm:
         msg.append("Minimum eccentricity exceeds 0.05D - design for combined axial + bending required")
         
     if load_kN > p_u:
