@@ -247,8 +247,9 @@ with tab2:
     with calc_c2:
         with st.expander("🚛 Concrete Pour Planner", expanded=True):
             vol_def = 10.0
-            if 'bom_results' in st.session_state and st.session_state.bom_results:
-                vol_def = float(st.session_state.bom_results.get("Concrete Volume (m³)", 10.0))
+            _bom = st.session_state.get('bom')
+            if _bom:
+                vol_def = float(getattr(_bom, 'total_concrete_vol_m3', 10.0))
             
             vol = st.number_input("Total Volume (m³)", min_value=0.1, value=vol_def)
             mixer = st.selectbox("Mixer Type", list(MIXER_CAPACITIES.keys()))

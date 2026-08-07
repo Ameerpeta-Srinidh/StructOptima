@@ -15,8 +15,8 @@ from src.load_combinations import LoadCombinationManager, get_summary_report
 
 @st.cache_data(show_spinner="Optimizing structure...")
 def run_optimization(_columns, story_height, num_stories, fck):
-    from src.optimization import get_optimized_structure
-    return get_optimized_structure(_columns, story_height, num_stories, fck)
+    from src.optimizer import optimize_structure, OptimizationLevel
+    return optimize_structure(_columns, story_height, num_stories, fck=fck, enable_optimization=True)
 
 st.set_page_config(page_title='StructOptima — Analysis', layout='wide', page_icon='📊')
 inject_css()
@@ -81,7 +81,12 @@ if seismic_result:
                 
     # Deep Beam Check
     if beams:
-        deep_beams = [b for b in beams if hasattr(b, 'properties') and (math.hypot(b.end_point.x-b.start_point.x, b.end_point.y-b.start_point.y)*1000 / b.properties.depth_mm) < 2.0]
+        deep_beams = [
+            b for b in beams
+            if hasattr(b, 'properties') and hasattr(b, 'start_point') and hasattr(b, 'end_point')
+            and b.properties.depth_mm > 0
+            and (math.hypot(b.end_point.x - b.start_point.x, b.end_point.y - b.start_point.y) * 1000 / b.properties.depth_mm) < 2.0
+        ]
         if deep_beams:
             st.error(f"⚠️ DEEP BEAM DETECTED: {len(deep_beams)} beams have L/D < 2.0. Manual Strut & Tie check required.")
         
@@ -365,7 +370,7 @@ if beams:
             depth_mm = getattr(b.properties, 'depth_mm', 0) if hasattr(b, 'properties') else 0
             actual_ld = span_mm / depth_mm if depth_mm > 0 else 0
             
-            allowable_ld = 7.0 if (hasattr(b.properties, 'is_cantilever') and getattr(b.properties, 'is_cantilever', False)) else 20.0
+            allowable_ld = 7.0 if (hasattr(b, 'properties') and getattr(b.properties, 'is_cantilever', False)) else 20.0
             status = "✅ OK" if actual_ld <= allowable_ld else "⚠️ Check"
             ld_data.append({
                 "Beam": getattr(b, 'id', 'Unknown'),

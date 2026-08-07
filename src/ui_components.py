@@ -470,22 +470,27 @@ def render_is_code_reference():
 
 
 def render_page_nav_cards():
-    """Render navigation cards to other pages on the dashboard."""
+    """Render navigation cards to other pages on the dashboard — fully clickable via st.page_link."""
+    st.markdown('<div class="section-header">📂 Navigate to</div>', unsafe_allow_html=True)
+
     cards = [
-        ("📊", "Analysis", "Seismic, wind, stability checks"),
-        ("📋", "Schedules", "Column, beam & slab schedules"),
-        ("📐", "Drawings", "3D/2D views & DXF exports"),
-        ("📄", "Reports", "PDF reports & export package"),
-        ("🔧", "Site Tools", "BBS, checklists & calculators"),
+        ("pages/1_📊_Analysis.py",  "📊", "Analysis",   "Seismic, wind & stability checks"),
+        ("pages/2_📋_Schedules.py", "📋", "Schedules",  "Column, beam & slab schedules"),
+        ("pages/3_📐_Drawings.py",  "📐", "Drawings",   "3D/2D views & DXF exports"),
+        ("pages/4_📄_Reports.py",   "📄", "Reports",    "PDF reports & export package"),
+        ("pages/5_🔧_Site_Tools.py","🔧", "Site Tools", "BBS, checklists & calculators"),
     ]
-    
+
     cols = st.columns(len(cards))
-    for i, (icon, title, desc) in enumerate(cards):
+    for i, (page, icon, title, desc) in enumerate(cards):
         with cols[i]:
-            st.markdown(f"""
-            <div class="nav-card">
+            # Render the visual card shell
+            st.markdown(f'''
+            <div class="nav-card" style="cursor:pointer;">
                 <div class="nc-icon">{icon}</div>
                 <div class="nc-title">{title}</div>
                 <div class="nc-desc">{desc}</div>
             </div>
-            """, unsafe_allow_html=True)
+            ''', unsafe_allow_html=True)
+            # Actual clickable link directly below the card
+            st.page_link(page, label=f"Open {title} →")
