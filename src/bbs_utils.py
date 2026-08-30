@@ -28,11 +28,20 @@ class BBSUtils:
         dims_mm: Dictionary of dimensions (A, B, C...)
         hook_type: Type of hook (STANDARD_90, SEISMIC_135, etc.)
         """
-        total_len = sum(dims_mm.values())
+        sc_str = str(shape_code)
+        if sc_str in ["51", "Box"]:
+            # Full stirrup perimeter + hook extensions
+            A = dims_mm.get('A', 0)
+            B = dims_mm.get('B', 0)
+            perimeter = 2 * (A + B)
+            hook_ext = 2 * 10 * bar_dia_mm  # 2 hooks × 10d each (IS 13920)
+            total_len = perimeter + hook_ext
+        else:
+            total_len = sum(dims_mm.values())
+            
         deduction = 0.0
         
         if bend_deduction != BendDeductionType.NONE:
-            sc_str = str(shape_code)
             if sc_str in ["21", "L-Shape", "U-Shape", "51", "Box"]:
                  num_bends = 0
                  if sc_str in ["21", "L-Shape"]: num_bends = 1

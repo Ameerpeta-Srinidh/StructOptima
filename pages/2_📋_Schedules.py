@@ -115,7 +115,7 @@ if all_levels:
             df = pd.DataFrame(data)
             st.dataframe(
                 df,
-                width="stretch",
+                use_container_width=True,
                 hide_index=True,
                 column_config={
                     "D/C Ratio": st.column_config.ProgressColumn(
@@ -169,7 +169,7 @@ else:
             "Status": "N/A",
         })
 if beam_data:
-    st.dataframe(pd.DataFrame(beam_data), width="stretch", hide_index=True)
+    st.dataframe(pd.DataFrame(beam_data), use_container_width=True, hide_index=True)
 else:
     st.info("No beams available.")
 
@@ -183,7 +183,7 @@ if hasattr(gm, 'slab_schedule') and gm.slab_schedule:
         slab_data.append(s_info)
 
 if slab_data:
-    st.dataframe(pd.DataFrame(slab_data), width="stretch", hide_index=True)
+    st.dataframe(pd.DataFrame(slab_data), use_container_width=True, hide_index=True)
 else:
     st.info("No slab schedule available.")
 
@@ -210,7 +210,7 @@ for i, cid in enumerate(level_0_cols):
             footing_data.append({"Column ID": c_id, "Details": str(f)})
 
 if footing_data:
-    st.dataframe(pd.DataFrame(footing_data), width="stretch", hide_index=True)
+    st.dataframe(pd.DataFrame(footing_data), use_container_width=True, hide_index=True)
 else:
     st.info("No footings available.")
 

@@ -93,24 +93,25 @@ class RebarDetailer:
         req_asc = max(asc_calc, min_asc)
         
         # 3. Select Bars
-        bar_opts = [12, 16, 20, 25]
+        # User requirement: Minimum 8-16# for all columns
+        bar_opts = [16, 20, 25, 32]
         
         selected_bars = ""
         provided_area = 0.0
-        main_dia = 12
-        num_bars = 4
+        main_dia = 16
+        num_bars = 8
         
         # Optimize selection
         for phi in bar_opts:
             a_bar = (math.pi * phi**2) / 4.0
             nb = math.ceil(req_asc / a_bar)
             
-            if nb < 4: nb = 4
+            if nb < 8: nb = 8
             
             # Ensure even number for rect column symmetry usually
             if nb % 2 != 0: nb += 1
                 
-            if nb <= 16: # Practical limit for bundle
+            if nb <= 20: # Practical limit for spacing
                 num_bars = nb
                 main_dia = phi
                 provided_area = nb * a_bar
@@ -235,7 +236,9 @@ class RebarDetailer:
 
         if mu_kNm <= Mu_lim:
             # Singly reinforced
-            ast_req = mu_kNm * 1e6 / (0.87 * fy * deff * (1 - 0.42 * xu_max_d))
+            R = (mu_kNm * 1e6) / (b_mm * deff * deff)
+            pt_calc = (fck / (2.0 * fy)) * (1.0 - math.sqrt(max(0, 1.0 - 4.598 * R / fck))) * 100.0
+            ast_req = pt_calc * b_mm * deff / 100.0
         else:
             # Doubly reinforced
             Mu2 = mu_kNm - Mu_lim
@@ -289,14 +292,41 @@ class RebarDetailer:
         # IS 456 Table 19 - tau_c (simplified for pt% ~ 0.5-1.0%)
         ast_provided = num * a_bar
         pt = 100.0 * ast_provided / (b_mm * deff)
-        if pt <= 0.15: tau_c = 0.28
-        elif pt <= 0.25: tau_c = 0.36
-        elif pt <= 0.50: tau_c = 0.48
-        elif pt <= 0.75: tau_c = 0.56
-        elif pt <= 1.00: tau_c = 0.62
-        elif pt <= 1.50: tau_c = 0.72
-        elif pt <= 2.00: tau_c = 0.79
-        else: tau_c = 0.82
+        
+        # M20 tau_c table points
+        m20_points = [(0.15,0.28), (0.25,0.36), (0.50,0.48), (0.75,0.56), (1.00,0.62), (1.25,0.67), (1.50,0.72), (1.75,0.75), (2.00,0.79), (2.25,0.81), (2.50,0.82), (2.75,0.82), (3.00,0.82)]
+        
+        # Interpolate
+        if pt <= 0.15:
+            tau_c = 0.28
+        elif pt >= 3.00:
+            tau_c = 0.82
+        else:
+            # Linear interpolation
+            for i in range(len(m20_points)-1):
+                p1, t1 = m20_points[i]
+                p2, t2 = m20_points[i+1]
+                if p1 <= pt <= p2:
+                    tau_c = t1 + (t2 - t1) * (pt - p1) / (p2 - p1)
+                    break
+
+        tau_c *= math.sqrt(fck / 20.0)
+
+        # Check tau_c_max
+        tau_c_max_table = {20: 2.8, 25: 3.1, 30: 3.5, 35: 3.7, 40: 4.0}
+        tau_c_max = tau_c_max_table.get(int(fck), 4.0)
+
+        if tau_v > tau_c_max:
+             return BeamRebarResult(
+                 top_bars_desc=top_desc,
+                 bottom_bars_desc=bot_desc,
+                 stirrups_desc="FAIL",
+                 size_label=f"{int(b_mm)}x{int(d_mm)}",
+                 weight_kg_per_m=0.0,
+                 provided_steel_area_mm2=0.0,
+                 congestion_status="FAIL",
+                 weight_breakdown={}
+             )
 
         if tau_v <= tau_c:
             sv = min(300, int(0.75 * deff), int(b_mm))  # Nominal stirrups

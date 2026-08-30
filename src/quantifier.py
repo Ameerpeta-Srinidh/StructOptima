@@ -11,9 +11,14 @@ class MaterialCost(BaseModel):
     steel_cost_inr: float
     total_carbon_kg: float = 0.0
     concrete_carbon_kg: float = 0.0
-    concrete_carbon_kg: float = 0.0
     steel_carbon_kg: float = 0.0
     steel_by_diameter: Dict[Union[str, int], float] = {}  # {dia: kg}
+    
+    # Masonry/Wall quantities
+    brick_count: int = 0
+    mortar_vol_m3: float = 0.0
+    plaster_area_m2: float = 0.0
+    brickwork_cost_inr: float = 0.0
     
     # Cost Ranges (Min/Max)
     excavation_cost_range: Dict[str, float] = {} # {"min": 0, "max": 0}
@@ -281,22 +286,26 @@ class Quantifier:
         carbon_steel = total_steel * steel_factor
         total_carbon = carbon_conc + carbon_steel
         
-        # Calculate material breakdown (M25 concrete mix design)
-        # M25 nominal mix: 1:1:2 (Cement:Sand:Aggregate) by volume
-        # Per m³ of M25 concrete:
-        #   Cement: ~400 kg (8 bags of 50kg)
-        #   Sand: ~0.44 m³
-        #   Aggregate (20mm): ~0.88 m³
-        #   Water: ~180 liters (w/c ratio 0.45)
+        # Calculate material breakdown using IS 10262 design mix values
+        # Defaulting to M25 (340 kg/m3) since grade isn't directly passed here.
+        fck = 25.0
+        if fck == 20: cement_per_m3 = 320.0
+        elif fck == 25: cement_per_m3 = 340.0
+        elif fck == 30: cement_per_m3 = 360.0
+        elif fck == 35: cement_per_m3 = 380.0
+        elif fck >= 40: cement_per_m3 = 400.0
+        else: cement_per_m3 = 340.0
         
-        ratio_sand = 1.0
-        ratio_agg = 2.0
-        dry_volume_factor = 1.54
-        cement_bags = total_conc * dry_volume_factor / (1 + ratio_sand + ratio_agg) / 0.035
-        cement_kg = cement_bags * 50.0
-        sand_m3 = total_conc * dry_volume_factor * ratio_sand / (1 + ratio_sand + ratio_agg)
-        aggregate_m3 = total_conc * dry_volume_factor * ratio_agg / (1 + ratio_sand + ratio_agg)
-        water_liters = total_conc * 180.0
+        cement_kg = total_conc * cement_per_m3
+        cement_bags = cement_kg / 50.0
+        water_liters = total_conc * 170.0 # ~170 L/m3 for w/c ~ 0.50
+        
+        # Approximate sand/aggregate volumes based on remaining mass (Density ~2400kg/m3)
+        # Remaining mass = 2400 - cement - water = 1890 kg/m3. 
+        # Assume Sand:Agg ratio ~ 1:2 by weight -> Sand ~630 kg, Agg ~1260 kg.
+        # Volume: Sand (~1600 kg/m3) -> 0.39 m3, Agg (~1450 kg/m3) -> 0.87 m3
+        sand_m3 = total_conc * 0.39
+        aggregate_m3 = total_conc * 0.87
         
         # Recalculate costs with wastage-adjusted steel
         cost_steel = total_steel * self.steel_rate
@@ -306,24 +315,50 @@ class Quantifier:
         carbon_steel = total_steel * steel_factor
         total_carbon = carbon_conc + carbon_steel
         
-        # 6. Excavation & Finishes (Ranges)
-        excavation_vol = footing_conc_vol * 3.0 # Rough approx: excavation is 3x concrete vol (slopes, working space)
+        # 6. Masonry Walls (NEW)
+        brick_count = 0
+        mortar_vol = 0.0
+        plaster_area = 0.0
+        brickwork_cost = 0.0
+        
+        if grid_mgr and hasattr(grid_mgr, 'walls') and grid_mgr.walls:
+            num_stories = getattr(grid_mgr, 'num_stories', 1)
+            for w in grid_mgr.walls:
+                if w.material in ["brick", "aac_block"]:
+                    # Subtract openings
+                    eff_area = w.length_m * w.height_m * (1.0 - w.opening_fraction)
+                    wall_vol = eff_area * (w.thickness_mm / 1000.0)
+                    
+                    total_eff_area = eff_area * num_stories
+                    total_wall_vol = wall_vol * num_stories
+                    
+                    # Brick size: 0.23 x 0.115 x 0.075 m (nominal with mortar) -> ~500 bricks per m3
+                    # Mortar is ~30% of brickwork volume
+                    brick_count += int(total_wall_vol * 500)
+                    mortar_vol += total_wall_vol * 0.30
+                    plaster_area += total_eff_area * 2.0  # both sides
+                    
+                    # Costs (Rough estimate)
+                    rate = 6000 if w.material == "brick" else 5000
+                    brickwork_cost += total_wall_vol * rate
+
+        # 7. Excavation & Finishes (Ranges)
+        excavation_vol = footing_conc_vol * 3.0 # Rough approx: excavation is 3x concrete vol
         
         exc_cost_min = excavation_vol * self.excavation_rate_min
         exc_cost_max = excavation_vol * self.excavation_rate_max
         
-        # Finish Area (Approx): 2 * Slab Area + Wall Area
-        # Simplified: Slab Area * 3 (Ceiling + Floor + Walls approx)
+        # Finish Area: Floor + Ceiling + Wall Plaster
         finish_area = 0.0
         if grid_mgr:
             total_floor_area = grid_mgr.width_m * grid_mgr.length_m * getattr(grid_mgr, 'num_stories', 1)
-            finish_area = total_floor_area * 3.0
+            finish_area = (total_floor_area * 2.0) + plaster_area
             
         finish_cost_min = finish_area * self.finish_rate_min
         finish_cost_max = finish_area * self.finish_rate_max
 
-        # Base Cost
-        base_cost = total_cost + (exc_cost_min + finish_cost_min) # Using min for base
+        # Base Cost includes masonry
+        base_cost = total_cost + brickwork_cost + (exc_cost_min + finish_cost_min)
         
         # Contingency
         cont_amt = base_cost * (self.contingency_percent / 100.0)
@@ -345,6 +380,12 @@ class Quantifier:
             sand_m3=sand_m3,
             aggregate_m3=aggregate_m3,
             water_liters=water_liters,
+            
+            # Masonry fields
+            brick_count=brick_count,
+            mortar_vol_m3=mortar_vol,
+            plaster_area_m2=plaster_area,
+            brickwork_cost_inr=brickwork_cost,
             
             # New Fields
             total_excavation_vol_m3=excavation_vol,

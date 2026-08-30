@@ -8,7 +8,13 @@ from .quantifier import MaterialCost
 from .grid_manager import GridManager, Column
 
 class ReportGenerator:
-    def generate_report(self, filename: str, grid_mgr: GridManager, bom: MaterialCost, audit_results: List = [], math_breakdown: List[str] = [], project_name: str = "Structural Design Report", use_fly_ash: bool = False):
+    def generate_report(self, filename: str, grid_mgr: GridManager, bom: MaterialCost,
+                        audit_results: List = [], math_breakdown: List[str] = [],
+                        project_name: str = "Structural Design Report", use_fly_ash: bool = False,
+                        seismic_result=None, wind_result=None, stab_checks=None, stab_summary=None,
+                        all_beams=None, conc_grade: str = "M25",
+                        live_load: float = 0, building_weight: float = 0,
+                        seismic_zone: str = "II", **kwargs):
         doc = SimpleDocTemplate(filename, pagesize=A4)
         elements = []
         styles = getSampleStyleSheet()
@@ -155,16 +161,15 @@ class ReportGenerator:
         footing_data = [["Col ID", "Load (kN)", "Size (m)", "Depth (mm)", "Conc (m3)"]]
         
         # Match footings to Level 0 columns
-        # Assumption: grid_mgr.footings corresponds to the list of Level 0 columns sorted by ID or creation order
-        # We need to recreate the same list of Level 0 columns to zip them
+        passed_footings = kwargs.get('footings', [])
         
-        if hasattr(grid_mgr, 'footings') and grid_mgr.footings:
+        if passed_footings:
             # Filter for Level 0 columns
             level_0_cols = [c for c in grid_mgr.columns if getattr(c, 'level', 0) == 0]
             
             # Ensure correlation
-            if len(level_0_cols) == len(grid_mgr.footings):
-                for col, ft in zip(level_0_cols, grid_mgr.footings):
+            if len(level_0_cols) == len(passed_footings):
+                for col, ft in zip(level_0_cols, passed_footings):
                     footing_data.append([
                         col.id,
                         f"{col.load_kn:.1f}",
@@ -268,8 +273,34 @@ class ReportGenerator:
         elements.append(t_slab)
         elements.append(Spacer(1, 12))
 
-        # 8. Structural Layout Plan
-        elements.append(Paragraph("8. Structural Layout Plan", styles["Heading1"]))
+        # 8. Masonry Wall Schedule (NEW)
+        elements.append(Paragraph("8. Masonry Wall Schedule", styles["Heading1"]))
+        wall_data = [["Wall ID", "Start (x,y)", "End (x,y)", "Len (m)", "Thk (mm)", "Material", "Load (kN/m)"]]
+        
+        if hasattr(grid_mgr, 'walls') and grid_mgr.walls:
+            for w in grid_mgr.walls:
+                wall_data.append([
+                    w.id,
+                    f"({w.start_x:.1f}, {w.start_y:.1f})",
+                    f"({w.end_x:.1f}, {w.end_y:.1f})",
+                    f"{w.length_m:.2f}",
+                    f"{w.thickness_mm:.0f}",
+                    w.material.replace("_", " ").title(),
+                    f"{w.line_load_kn_m:.1f}"
+                ])
+                
+        t_wall = Table(wall_data, repeatRows=1)
+        t_wall.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.darkorange),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+        ]))
+        elements.append(t_wall)
+        elements.append(Spacer(1, 12))
+
+        # 9. Structural Layout Plan
+        elements.append(Paragraph("9. Structural Layout Plan", styles["Heading1"]))
         
         # ... (Existing Map Logic)
         coords_text = "Column Coordinates:\n"
@@ -280,8 +311,8 @@ class ReportGenerator:
         elements.append(Paragraph(f"<pre>{coords_text}</pre>", styles["Code"]))
         elements.append(Spacer(1, 12))
         
-        # 9. Steel Material Breakdown
-        elements.append(Paragraph("9. Integrated Steel Breakdown", styles["Heading1"]))
+        # 10. Steel Material Breakdown
+        elements.append(Paragraph("10. Integrated Steel Breakdown", styles["Heading1"]))
         
         steel_data = [["Bar Diameter", "Total Weight (kg)"]]
         
@@ -388,8 +419,8 @@ class ReportGenerator:
             opt_text = """
             <b>Wait! You can reduce your Carbon Footprint.</b><br/>
             Refining the design to use <b>Fly Ash based Concrete (PPC)</b> instead of OPC 
-            can reduce concrete emissions by approximately 33%. <br/>
-            Switch "Use Green Concrete" ON in the dashboard to see savings.
+            can reduce concrete emissions by approximately 15-20%. <br/>
+            Switch "Use Green Concrete" ON in the dashboard to see savings. (Note: PPC is slower setting and has lower early strength, use only if confirmed by RMC supplier).
             """
             elements.append(Paragraph(opt_text, styles["Normal"]))
         else:
@@ -479,6 +510,168 @@ class ReportGenerator:
         else:
              elements.append(Paragraph("No staircase selected for design.", styles["Normal"]))
         
+        
+        # NEW SECTIONS: Seismic, Wind, Material Breakdown, Beam L/d, Stability (Changes 4 & 10)
+        import math as _math
+        
+        # --- Seismic Analysis ---
+        if seismic_result:
+            elements.append(Paragraph("Seismic Analysis (IS 1893:2016)", styles["Heading1"]))
+            try:
+                _z = getattr(seismic_result.parameters, 'zone_factor', '—')
+                _ah = getattr(seismic_result.parameters, 'design_acceleration', 0)
+                _vb = getattr(seismic_result, 'base_shear_kn', 0)
+                _ta = getattr(seismic_result.parameters, 'fundamental_period', 0)
+                _scwb_req = getattr(seismic_result.parameters, 'scwb_required', False)
+                _scwb_ok = getattr(seismic_result, 'all_scwb_pass', True)
+                seismic_tbl = [
+                    ["Parameter", "Value"],
+                    ["Seismic Zone", seismic_zone],
+                    ["Zone Factor (Z)", str(_z)],
+                    ["Design Acceleration (Ah)", f"{_ah:.4f}"],
+                    ["Fundamental Period (Ta)", f"{_ta:.3f} s"],
+                    ["Base Shear (Vb)", f"{_vb:.1f} kN"],
+                    ["Strong Column–Weak Beam", "REQUIRED" if _scwb_req else "Not Required"],
+                    ["SCWB Status", "PASS" if _scwb_ok else "FAIL — See Analysis Page"],
+                ]
+                t_seis = Table(seismic_tbl, colWidths=[200, 200])
+                t_seis.setStyle(TableStyle([
+                    ('BACKGROUND', (0,0), (-1,0), colors.darkblue),
+                    ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+                    ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+                    ('BACKGROUND', (-1,-1), (-1,-1), colors.pink if not _scwb_ok else colors.lightgreen),
+                ]))
+                elements.append(t_seis)
+            except Exception as _e:
+                elements.append(Paragraph(f"Seismic data available but error rendering: {_e}", styles["Normal"]))
+            elements.append(Spacer(1, 12))
+        
+        # --- Wind Analysis ---
+        if wind_result and hasattr(wind_result, 'pressure_results') and wind_result.pressure_results:
+            elements.append(Paragraph("Wind Analysis (IS 875 Part 3)", styles["Heading1"]))
+            try:
+                _vd = wind_result.pressure_results[-1].design_wind_speed_ms
+                _vwx = getattr(wind_result, 'total_base_shear_x_kn', 0)
+                _vwy = getattr(wind_result, 'total_base_shear_y_kn', 0)
+                wind_tbl = [
+                    ["Parameter", "Value"],
+                    ["Design Wind Speed (Top)", f"{_vd:.1f} m/s"],
+                    ["Wind Base Shear (X)", f"{_vwx:.1f} kN"],
+                    ["Wind Base Shear (Y)", f"{_vwy:.1f} kN"],
+                ]
+                t_wind = Table(wind_tbl, colWidths=[200, 200])
+                t_wind.setStyle(TableStyle([
+                    ('BACKGROUND', (0,0), (-1,0), colors.steelblue),
+                    ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+                    ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+                ]))
+                elements.append(t_wind)
+            except Exception as _e:
+                elements.append(Paragraph(f"Wind data available but error rendering: {_e}", styles["Normal"]))
+            elements.append(Spacer(1, 12))
+        
+        # --- Concrete Material Breakdown (IS 10262:2019) ---
+        if bom and bom.total_concrete_vol_m3 > 0:
+            elements.append(Paragraph("Concrete Material Breakdown (IS 10262:2019)", styles["Heading1"]))
+            try:
+                from .site_calculators import mix_design_table
+                _mix = mix_design_table(conc_grade)
+                _vol = bom.total_concrete_vol_m3
+                _fa_density = 1600.0
+                _ca_density = 1450.0
+                _fa_m3 = _mix['fine_aggregate_kg_m3'] / _fa_density
+                _ca_m3 = _mix['coarse_aggregate_kg_m3'] / _ca_density
+                mat_tbl = [
+                    ["Material", "Per m³", "Total"],
+                    ["Wet Concrete Volume", "", f"{_vol:.2f} m³"],
+                    ["Cement (50kg bags)", f"{_mix['cement_bags_per_m3']} bags", f"{_vol * _mix['cement_bags_per_m3']:.1f} bags"],
+                    ["Fine Aggregate (Sand)", f"{_fa_m3:.3f} m³", f"{_vol * _fa_m3:.2f} m³"],
+                    ["Coarse Aggregate (20mm)", f"{_ca_m3:.3f} m³", f"{_vol * _ca_m3:.2f} m³"],
+                    ["Water", f"{_mix['water_kg_m3']} kg", f"{_vol * _mix['water_kg_m3']:.0f} kg"],
+                    ["Water:Cement Ratio", str(_mix['water_cement_ratio']), "—"],
+                    ["Nominal Mix Ratio", _mix['nominal_ratio'], "—"],
+                ]
+                t_mat = Table(mat_tbl, colWidths=[170, 100, 130])
+                t_mat.setStyle(TableStyle([
+                    ('BACKGROUND', (0,0), (-1,0), colors.darkorange),
+                    ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+                    ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+                    ('FONTSIZE', (0,0), (-1,-1), 9),
+                ]))
+                elements.append(t_mat)
+                elements.append(Paragraph("Note: Indicative quantities per IS 10262:2019. Add 3-5% wastage for actual procurement.", styles["Normal"]))
+            except Exception as _e:
+                elements.append(Paragraph(f"Mix design data error: {_e}", styles["Normal"]))
+            elements.append(Spacer(1, 12))
+        
+        # --- Beam L/d Check ---
+        if all_beams:
+            elements.append(Paragraph("Beam L/d Deflection Check (IS 456 Cl 23.2)", styles["Heading1"]))
+            try:
+                ld_tbl = [["Beam ID", "Span (mm)", "Depth (mm)", "Actual L/d", "Allowable", "Status"]]
+                for _b in all_beams:
+                    try:
+                        _dx = _b.end_point.x - _b.start_point.x
+                        _dy = _b.end_point.y - _b.start_point.y
+                        _span_m = (_dx**2 + _dy**2)**0.5
+                        _span_mm = _span_m * 1000
+                        _dep = getattr(_b.properties, 'depth_mm', 0) if hasattr(_b, 'properties') else 0
+                        _ald = _span_mm / _dep if _dep > 0 else 0
+                        _allow = 7.0 if getattr(getattr(_b, 'properties', None), 'is_cantilever', False) else 20.0
+                        _st = "PASS" if _ald <= _allow else "FAIL"
+                        ld_tbl.append([getattr(_b, 'id', '?'), f"{_span_mm:.0f}", f"{_dep:.0f}",
+                                       f"{_ald:.1f}", f"{_allow:.0f}", _st])
+                    except Exception:
+                        continue
+                t_ld = Table(ld_tbl, repeatRows=1)
+                t_ld.setStyle(TableStyle([
+                    ('BACKGROUND', (0,0), (-1,0), colors.teal),
+                    ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+                    ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+                    ('FONTSIZE', (0,0), (-1,-1), 8),
+                ]))
+                elements.append(t_ld)
+            except Exception as _e:
+                elements.append(Paragraph(f"L/d check error: {_e}", styles["Normal"]))
+            elements.append(Spacer(1, 12))
+        
+        # --- Stability & Fire Resistance ---
+        if stab_checks and stab_summary:
+            elements.append(Paragraph("Stability & Fire Resistance (IS 456 Table 16A)", styles["Heading1"]))
+            try:
+                _total = stab_summary.total_members
+                _pass_st = stab_summary.passed_stability
+                _pass_fr = stab_summary.passed_fire
+                elements.append(Paragraph(
+                    f"Members Checked: {_total} | Passed Stability: {_pass_st}/{_total} | Passed Fire: {_pass_fr}/{_total}",
+                    styles["Normal"]
+                ))
+                if stab_summary.recommendations:
+                    for _r in stab_summary.recommendations:
+                        elements.append(Paragraph(f"• {_r}", styles["Normal"]))
+            except Exception as _e:
+                elements.append(Paragraph(f"Stability data error: {_e}", styles["Normal"]))
+            elements.append(Spacer(1, 12))
+        
+        # --- Code Compliance Audit ---
+        if audit_results:
+            elements.append(Paragraph("Code Compliance Audit", styles["Heading1"]))
+            audit_tbl = [["Check", "Status", "Notes"]]
+            for _ar in audit_results:
+                _chk = getattr(_ar, 'check_name', getattr(_ar, 'rule', str(_ar)))
+                _st = getattr(_ar, 'status', 'OK')
+                _notes = getattr(_ar, 'message', getattr(_ar, 'notes', ''))
+                audit_tbl.append([str(_chk)[:40], str(_st), str(_notes)[:60]])
+            t_audit = Table(audit_tbl, repeatRows=1, colWidths=[150, 60, 190])
+            t_audit.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), colors.darkgreen),
+                ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+                ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+                ('FONTSIZE', (0,0), (-1,-1), 8),
+            ]))
+            elements.append(t_audit)
+            elements.append(Spacer(1, 12))
+
         # 14. PROFESSIONAL DISCLAIMER (CRITICAL)
         elements.append(Spacer(1, 24))
         elements.append(Paragraph("14. Professional Disclaimer", styles["Heading1"]))
@@ -491,7 +684,7 @@ class ReportGenerator:
         
         <b>Key Limitations:</b><br/>
         • The software uses simplified analysis methods (tributary area, short column assumptions).<br/>
-        • Seismic, wind, and other lateral loads are NOT considered in this analysis.<br/>
+        • Seismic forces (IS 1893) and Wind loads (IS 875 Pt 3) have been incorporated for basic checks, but require full dynamic analysis for high-rise buildings.<br/>
         • Site-specific soil conditions, groundwater, and other geotechnical factors are not evaluated.<br/>
         • Local building codes may have additional requirements beyond IS 456:2000.<br/><br/>
         
@@ -531,7 +724,6 @@ class ReportGenerator:
         """
         elements.append(Paragraph(footer_text, styles["Normal"]))
 
-        
         doc.build(elements)
 
     def generate_summary_report(self, filename: str, grid_mgr: GridManager, bom: MaterialCost, use_fly_ash: bool = False):
@@ -694,10 +886,10 @@ class ReportGenerator:
         # Foundation Schedule
         elements.append(Paragraph("Foundation Schedule", styles["Heading1"]))
         ft_data = [["Col ID", "Load (kN)", "Size (m)", "Depth (mm)", "Concrete (m³)"]]
-        
-        if hasattr(grid_mgr, 'footings') and grid_mgr.footings:
+        passed_footings = kwargs.get('footings', [])
+        if passed_footings:
             level_0_cols = [c for c in grid_mgr.columns if c.level == 0]
-            for col, ft in zip(level_0_cols, grid_mgr.footings):
+            for col, ft in zip(level_0_cols, passed_footings):
                 ft_data.append([
                     col.id, f"{col.load_kn:.1f}",
                     f"{ft.length_m:.2f}x{ft.width_m:.2f}",

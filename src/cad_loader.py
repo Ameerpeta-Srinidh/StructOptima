@@ -136,7 +136,7 @@ class CADLoader:
         xs = [c['x'] for c in raw_cols]
         ys = [c['y'] for c in raw_cols]
         
-        max_coord = max(max(xs), max(ys)) if xs and ys else 0
+        max_coord = max(max(abs(x) for x in xs), max(abs(y) for y in ys)) if xs and ys else 0
         self.scale_factor = 1.0
         if max_coord > 500:
             self.scale_factor = 0.001
@@ -220,6 +220,44 @@ class CADLoader:
                     properties=MemberProperties(width_mm=300, depth_mm=600)
                 ))
             
+        # ── Extract Walls from DXF and create Wall objects ──
+        if self.parser:
+            from .grid_manager import Wall
+            raw_arch_walls = self.parser.extract_walls_normalized()
+            raw_walls_for_thickness = self.parser.extract_walls()
+            detected_thickness_mm = self.parser.detect_wall_thickness(raw_walls_for_thickness)
+            wall_thickness = detected_thickness_mm if detected_thickness_mm else 230.0
+            # Convert to meters if in mm scale
+            if self.scale_factor < 1.0:
+                wall_thickness = wall_thickness  # Already in mm
+            
+            wall_height = gm.story_height_m - 0.45  # Deduct avg beam depth
+            
+            for wi, wl in enumerate(raw_arch_walls):
+                sx = wl[0][0] * self.scale_factor
+                sy = wl[0][1] * self.scale_factor
+                ex = wl[1][0] * self.scale_factor
+                ey = wl[1][1] * self.scale_factor
+                
+                wall_len = math.hypot(ex - sx, ey - sy)
+                if wall_len < 0.3:  # Skip very short segments (< 300mm)
+                    continue
+                
+                gm.walls.append(Wall(
+                    id=f"W{wi+1}",
+                    start_x=round(sx, 3),
+                    start_y=round(sy, 3),
+                    end_x=round(ex, 3),
+                    end_y=round(ey, 3),
+                    thickness_mm=wall_thickness,
+                    height_m=wall_height,
+                    material="brick",
+                    is_load_bearing=True,
+                    level=0
+                ))
+            
+            logger.info("Extracted %d wall segments (thickness=%.0fmm)", len(gm.walls), wall_thickness)
+        
         return gm, beams
     
     def get_placement_json(self) -> str:

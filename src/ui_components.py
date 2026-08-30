@@ -7,19 +7,19 @@ import math
 
 
 def get_custom_css():
-    """Returns the full custom CSS for mobile-responsive, dark-themed engineering app."""
+    """Returns the full custom CSS for mobile-responsive, light-themed professional engineering app."""
     return """
     <style>
     /* ===== GLOBAL ===== */
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
     
-    html, body, [class*="st-"] {
+    html, body, .stApp {
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     }
     
     /* ===== PROJECT HEADER BAR ===== */
     .project-header {
-        background: linear-gradient(135deg, #0d1b3e 0%, #1a237e 50%, #0d47a1 100%);
+        background: #FFFFFF;
         padding: 14px 20px;
         border-radius: 10px;
         margin-bottom: 16px;
@@ -27,71 +27,76 @@ def get_custom_css():
         flex-wrap: wrap;
         align-items: center;
         gap: 12px;
-        box-shadow: 0 2px 12px rgba(0,0,0,0.3);
-        border: 1px solid rgba(255,255,255,0.08);
+        box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+        border: 1px solid #E2E8F0;
+        border-left: 4px solid #1565C0;
     }
     .project-header .ph-title {
-        color: #fff;
+        color: #1A1A2E;
         font-weight: 700;
         font-size: 1.05em;
         margin-right: auto;
         white-space: nowrap;
     }
     .project-header .ph-chip {
-        background: rgba(255,255,255,0.12);
-        color: rgba(255,255,255,0.9);
+        background: #F0F4F8;
+        color: #4A5568;
         padding: 4px 12px;
         border-radius: 16px;
         font-size: 0.82em;
         font-weight: 500;
-        border: 1px solid rgba(255,255,255,0.15);
+        border: 1px solid #E2E8F0;
         white-space: nowrap;
     }
     .project-header .ph-status-pass {
-        background: rgba(46,125,50,0.25);
-        color: #81c784;
-        border-color: rgba(46,125,50,0.4);
+        background: #E8F5E9;
+        color: #2E7D32;
+        border-color: #A5D6A7;
     }
     .project-header .ph-status-warn {
-        background: rgba(255,143,0,0.25);
-        color: #ffb74d;
-        border-color: rgba(255,143,0,0.4);
+        background: #FFF3E0;
+        color: #E65100;
+        border-color: #FFCC80;
     }
     
     /* ===== METRIC CARDS ===== */
     .metric-card {
-        background: linear-gradient(135deg, rgba(26,35,126,0.15) 0%, rgba(13,71,161,0.10) 100%);
-        border: 1px solid rgba(255,255,255,0.08);
-        border-radius: 12px;
+        background: #FFFFFF;
+        border: 1px solid #E2E8F0;
+        border-top: 3px solid #1565C0;
+        border-radius: 10px;
         padding: 16px 18px;
         text-align: center;
-        backdrop-filter: blur(10px);
+        box-shadow: 0 1px 3px rgba(0,0,0,0.06);
         transition: transform 0.2s, box-shadow 0.2s;
     }
     .metric-card:hover {
         transform: translateY(-2px);
-        box-shadow: 0 4px 16px rgba(13,71,161,0.25);
+        box-shadow: 0 4px 12px rgba(21,101,192,0.12);
     }
     .metric-card .mc-value {
         font-size: 1.6em;
         font-weight: 700;
-        color: #64b5f6;
+        color: #1565C0;
         margin: 4px 0;
     }
     .metric-card .mc-label {
         font-size: 0.82em;
-        color: rgba(255,255,255,0.6);
+        color: #718096;
         text-transform: uppercase;
         letter-spacing: 0.5px;
     }
     .metric-card .mc-sub {
         font-size: 0.78em;
-        color: rgba(255,255,255,0.4);
+        color: #A0AEC0;
         margin-top: 4px;
     }
-    .metric-card.mc-green .mc-value { color: #81c784; }
-    .metric-card.mc-amber .mc-value { color: #ffb74d; }
-    .metric-card.mc-red .mc-value { color: #ef5350; }
+    .metric-card.mc-green { border-top-color: #2E7D32; }
+    .metric-card.mc-green .mc-value { color: #2E7D32; }
+    .metric-card.mc-amber { border-top-color: #E65100; }
+    .metric-card.mc-amber .mc-value { color: #E65100; }
+    .metric-card.mc-red { border-top-color: #C62828; }
+    .metric-card.mc-red .mc-value { color: #C62828; }
     
     /* ===== STATUS BADGES ===== */
     .badge {
@@ -103,24 +108,24 @@ def get_custom_css():
         letter-spacing: 0.3px;
     }
     .badge-pass {
-        background: rgba(46,125,50,0.2);
-        color: #81c784;
-        border: 1px solid rgba(46,125,50,0.3);
+        background: #E8F5E9;
+        color: #2E7D32;
+        border: 1px solid #A5D6A7;
     }
     .badge-fail {
-        background: rgba(211,47,47,0.2);
-        color: #ef5350;
-        border: 1px solid rgba(211,47,47,0.3);
+        background: #FFEBEE;
+        color: #C62828;
+        border: 1px solid #EF9A9A;
     }
     .badge-warn {
-        background: rgba(255,143,0,0.2);
-        color: #ffb74d;
-        border: 1px solid rgba(255,143,0,0.3);
+        background: #FFF3E0;
+        color: #E65100;
+        border: 1px solid #FFCC80;
     }
     
     /* ===== D/C RATIO BAR ===== */
     .dc-bar-container {
-        background: rgba(255,255,255,0.06);
+        background: #E8EDF2;
         border-radius: 6px;
         height: 20px;
         width: 100%;
@@ -139,26 +144,26 @@ def get_custom_css():
         font-weight: 600;
         color: #fff;
     }
-    .dc-green { background: linear-gradient(90deg, #2e7d32, #43a047); }
-    .dc-amber { background: linear-gradient(90deg, #f57f17, #ff8f00); }
-    .dc-red   { background: linear-gradient(90deg, #c62828, #e53935); }
+    .dc-green { background: linear-gradient(90deg, #2E7D32, #43A047); }
+    .dc-amber { background: linear-gradient(90deg, #E65100, #FF8F00); }
+    .dc-red   { background: linear-gradient(90deg, #C62828, #E53935); }
     
     /* ===== SECTION HEADERS ===== */
     .section-header {
-        background: linear-gradient(90deg, rgba(13,71,161,0.15), transparent);
+        background: #F0F4F8;
         padding: 10px 16px;
-        border-left: 4px solid #0d47a1;
+        border-left: 4px solid #1565C0;
         border-radius: 0 8px 8px 0;
         margin: 20px 0 12px 0;
         font-size: 1.15em;
         font-weight: 600;
-        color: #e0e0e0;
+        color: #1A1A2E;
     }
     
     /* ===== SEARCH BOX ===== */
     .search-result-card {
-        background: rgba(13,71,161,0.12);
-        border: 1px solid rgba(13,71,161,0.25);
+        background: #EBF5FB;
+        border: 1px solid #BBDEFB;
         border-radius: 10px;
         padding: 14px 18px;
         margin: 8px 0;
@@ -166,18 +171,18 @@ def get_custom_css():
     .search-result-card .sr-id {
         font-size: 1.1em;
         font-weight: 700;
-        color: #64b5f6;
+        color: #1565C0;
     }
     .search-result-card .sr-detail {
         font-size: 0.88em;
-        color: rgba(255,255,255,0.7);
+        color: #4A5568;
         margin-top: 4px;
     }
     
     /* ===== IS CODE REFERENCE CARD ===== */
     .code-ref-card {
-        background: rgba(255,255,255,0.04);
-        border: 1px solid rgba(255,255,255,0.08);
+        background: #F8F9FA;
+        border: 1px solid #E2E8F0;
         border-radius: 10px;
         padding: 12px 14px;
         font-size: 0.82em;
@@ -185,20 +190,69 @@ def get_custom_css():
     }
     .code-ref-card .cr-title {
         font-weight: 700;
-        color: #64b5f6;
+        color: #1565C0;
         margin-bottom: 6px;
         font-size: 0.9em;
     }
     .code-ref-card .cr-row {
         display: flex;
         justify-content: space-between;
-        color: rgba(255,255,255,0.7);
-        border-bottom: 1px solid rgba(255,255,255,0.04);
+        color: #4A5568;
+        border-bottom: 1px solid #EDF2F7;
         padding: 2px 0;
     }
     .code-ref-card .cr-val {
         font-weight: 600;
-        color: #e0e0e0;
+        color: #1A1A2E;
+    }
+    
+    /* ===== SIDEBAR REDESIGN ===== */
+    [data-testid="stSidebar"] {
+        background-color: #F8FAFC !important;
+        border-right: 1px solid #E2E8F0;
+    }
+    
+    [data-testid="stSidebar"] [data-testid="stExpander"] {
+        background: #FFFFFF;
+        border: 1px solid #E2E8F0;
+        border-radius: 8px;
+        margin-bottom: 8px;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    }
+    
+    [data-testid="stSidebar"] [data-testid="stExpander"] summary {
+        font-weight: 600;
+        color: #1A1A2E;
+        padding: 10px;
+    }
+    
+    [data-testid="stSidebar"] [data-testid="stExpander"] summary:hover {
+        background: #F1F5F9;
+        border-radius: 8px;
+    }
+
+    [data-testid="stSidebar"] .stSelectbox > div > div, 
+    [data-testid="stSidebar"] .stNumberInput > div > div,
+    [data-testid="stSidebar"] .stTextInput > div > div {
+        border-radius: 6px;
+        border: 1px solid #CBD5E1;
+    }
+    
+    [data-testid="stSidebar"] button[kind="primary"] {
+        background: linear-gradient(135deg, #1565C0 0%, #0D47A1 100%) !important;
+        color: #FFFFFF !important;
+        font-weight: bold !important;
+        font-size: 1.1em !important;
+        padding: 14px 24px !important;
+        border-radius: 8px !important;
+        border: none !important;
+        box-shadow: 0 4px 12px rgba(21,101,192,0.3) !important;
+        width: 100%;
+        transition: transform 0.2s, box-shadow 0.2s;
+    }
+    [data-testid="stSidebar"] button[kind="primary"]:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 16px rgba(21,101,192,0.4) !important;
     }
     
     /* ===== MOBILE RESPONSIVE ===== */
@@ -240,17 +294,18 @@ def get_custom_css():
     
     /* ===== NAVIGATION LINKS ===== */
     .nav-card {
-        background: linear-gradient(135deg, rgba(26,35,126,0.12) 0%, rgba(13,71,161,0.08) 100%);
-        border: 1px solid rgba(255,255,255,0.08);
+        background: #FFFFFF;
+        border: 1px solid #E2E8F0;
         border-radius: 12px;
         padding: 18px;
         text-align: center;
         cursor: pointer;
         transition: all 0.2s;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
     }
     .nav-card:hover {
-        border-color: rgba(13,71,161,0.4);
-        box-shadow: 0 4px 20px rgba(13,71,161,0.15);
+        border-color: #90CAF9;
+        box-shadow: 0 4px 16px rgba(21,101,192,0.12);
         transform: translateY(-2px);
     }
     .nav-card .nc-icon {
@@ -259,12 +314,12 @@ def get_custom_css():
     }
     .nav-card .nc-title {
         font-weight: 600;
-        color: #e0e0e0;
+        color: #1A1A2E;
         font-size: 0.95em;
     }
     .nav-card .nc-desc {
         font-size: 0.78em;
-        color: rgba(255,255,255,0.5);
+        color: #718096;
         margin-top: 4px;
     }
     </style>

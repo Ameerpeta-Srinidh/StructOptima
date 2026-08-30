@@ -33,7 +33,6 @@ v_mode_str = st.session_state.get('view_mode', "Engineering")
 v_tab1, v_tab2 = st.tabs(["3D View", "2D Plan View"])
 
 with v_tab1:
-    st.markdown("### Engineering 3D Viewer (Mobile & AR Ready)")
     if gm and all_beams:
         scene = GeometryExporter.create_structure_scene(
             grid_mgr=gm, 
@@ -74,7 +73,7 @@ with v_tab2:
         viz = Visualizer()
         level_sel = st.slider("Select Level", 1, max(1, num_stories), 1)
         fig_2d = viz.create_2d_plan(gm, all_beams, view_mode=v_mode_str, level=level_sel)
-        st.plotly_chart(fig_2d, width="stretch")
+        st.plotly_chart(fig_2d, use_container_width=True)
 
 st.markdown("---")
 st.subheader("DXF Downloads")
@@ -129,7 +128,6 @@ if gm and all_beams:
     
     # Layer-wise Exports Section
     st.markdown("---")
-    st.markdown("#### 📐 Layer-wise Structural Plans")
     
     floor_cols = st.columns(min(num_stories, 4))
     for lvl in range(num_stories):

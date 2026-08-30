@@ -71,8 +71,13 @@ def design_footing(
     
     # Square footing
     side = math.sqrt(required_area)
-    # Min size 1.0m
-    if side < 1.0: side = 1.0
+    
+    # User requirement: Minimum 1.5m for corner/edge (load <= 400), 2.0m for interior (load > 400)
+    # Using axial load as a proxy for column type
+    min_side = 1.5 if axial_load_kn <= 400 else 2.0
+    
+    if side < min_side:
+        side = min_side
     
     # Max size 10m - beyond this, use pile foundation
     status = "PASS"
@@ -87,8 +92,8 @@ def design_footing(
     provided_area = side * side
     
     # 2. Thickness / Punching Shear
-    # Start thickness at 300mm
-    thickness = 300.0
+    # User requirement: Minimum 0.3m for load <= 400, 0.35m for load > 400
+    thickness = 300.0 if axial_load_kn <= 400 else 350.0
     
     # Allowable shear stress
     tau_allowable = calculate_punching_shear_capacity(thickness, fck) # MPa

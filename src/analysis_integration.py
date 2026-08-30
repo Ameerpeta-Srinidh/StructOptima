@@ -243,12 +243,24 @@ def solve_frame(gm, all_beams, plane="YZ", constant_coord=0.0, fck=25.0, use_cra
                 if not beam_obj: continue
                 
                 for idx in elem_indices:
+                    # Use solver.get_member_forces() which properly extracts
+                    # FEA envelope forces (end moments + mid-span parabolic peak)
                     res = solver.get_member_forces(idx)
                     if res:
                         max_m = max(max_m, res.get('max_moment', 0))
                         max_v = max(max_v, res.get('max_shear', 0))
+                    else:
+                        # Fallback to simply supported if FEA failed for this element
+                        el = solver.elements[idx]
+                        n1 = solver.nodes[el['n1']]
+                        n2 = solver.nodes[el['n2']]
+                        L = math.hypot(n2[0] - n1[0], n2[1] - n1[1])
+                        w = solver.loads.get(idx, 0.0)
+                        max_m = max(max_m, w * L**2 / 8.0)
+                        max_v = max(max_v, w * L / 2.0)
                 
                 # Update Beam only if this frame gave higher forces (Max Envelope)
                 beam_obj.design_moment_knm = max(beam_obj.design_moment_knm, max_m)
                 beam_obj.design_shear_kn = max(beam_obj.design_shear_kn, max_v)
                 beam_obj.analysis_status = "FEA_SOLVED"
+

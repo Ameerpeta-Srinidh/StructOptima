@@ -20,9 +20,7 @@ if not st.session_state.get('analysis_done'):
 
 # Get required data from session state
 gm = st.session_state.get('gm')
-all_beams = st.session_state.get('beams')
-if not all_beams:
-    all_beams = st.session_state.get('all_beams', [])
+all_beams = st.session_state.get('all_beams', [])
 bom = st.session_state.get('bom')
 audit_results = st.session_state.get('audit_results')
 auditor_math = st.session_state.get('auditor_math')
@@ -31,6 +29,18 @@ project_name = st.session_state.get('project_name', "PROPOSED BUILDING")
 engineer_name = st.session_state.get('engineer_name', "STRUCTURAL ENGINEER")
 use_fly_ash = st.session_state.get('use_fly_ash', False)
 num_stories = gm.num_stories if gm else 1
+# Previously missing data — now loaded for complete reports (Changes 4 & 10)
+seismic_result = st.session_state.get('seismic_result')
+wind_result = st.session_state.get('wind_result')
+stab_checks = st.session_state.get('stab_checks')
+stab_summary = st.session_state.get('stab_summary')
+safety_summary = st.session_state.get('safety_summary')
+conc_grade = st.session_state.get('conc_grade', 'M25')
+live_load = st.session_state.get('live_load', 0)
+building_weight = st.session_state.get('building_weight', 0)
+seismic_zone = st.session_state.get('seismic_zone', 'II')
+building_type_name = st.session_state.get('building_type_name', '')
+footings = st.session_state.get('footings', [])
 
 if not gm or not all_beams:
     st.error("Missing critical engineering data. Please re-run the analysis.")
@@ -47,7 +57,7 @@ def generate_zip_package():
         reporter = ReportGenerator()
         bbs_reporter = BBSReportGenerator()
         
-        # 1. Complete Report
+        # 1. Complete Report — now with all missing sections
         report_file = os.path.join(tmpdirname, "Structural_Design_Report.pdf")
         reporter.generate_report(
             report_file, 
@@ -56,7 +66,17 @@ def generate_zip_package():
             audit_results=audit_results, 
             math_breakdown=auditor_math,
             project_name=project_name,
-            use_fly_ash=use_fly_ash
+            use_fly_ash=use_fly_ash,
+            seismic_result=seismic_result,
+            wind_result=wind_result,
+            stab_checks=stab_checks,
+            stab_summary=stab_summary,
+            all_beams=all_beams,
+            conc_grade=conc_grade,
+            live_load=live_load,
+            building_weight=building_weight,
+            seismic_zone=seismic_zone,
+            footings=footings,
         )
         
         # 2. BBS Report
@@ -150,7 +170,18 @@ with col1:
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
             reporter.generate_report(
                 tmp.name, gm, bom, audit_results=audit_results, 
-                math_breakdown=auditor_math, project_name=project_name, use_fly_ash=use_fly_ash
+                math_breakdown=auditor_math, project_name=project_name, 
+                use_fly_ash=use_fly_ash,
+                seismic_result=seismic_result,
+                wind_result=wind_result,
+                stab_checks=stab_checks,
+                stab_summary=stab_summary,
+                all_beams=all_beams,
+                conc_grade=conc_grade,
+                live_load=live_load,
+                building_weight=building_weight,
+                seismic_zone=seismic_zone,
+                footings=footings,
             )
         with open(tmp.name, "rb") as f:
             st.download_button("📑 Complete Report", f.read(), "Structural_Design_Report.pdf", "application/pdf")

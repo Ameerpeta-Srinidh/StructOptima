@@ -721,24 +721,46 @@ class BeamPlacer:
         return max_back_span
     
     def _calculate_depth(self, span_mm: float, support_type: SupportType) -> float:
-        # IS 456 / Practical Rule: L/15 for general beams
+        """Calculate beam depth using IS 456 Table 23 / SP 34 L/d guidance.
+        
+        Real construction practice (RCC residential, G+2/G+3):
+          - Simply supported primary beam:  D ≈ L/12  (conservative, avoids deflection)
+          - Continuous primary beam:        D ≈ L/15  (allowed by IS 456 Cl 23.2)
+          - Secondary beam:                 D ≈ L/10  (shorter effective span, beam-to-beam)
+          - Cantilever:                     D ≈ L/7   (IS 456 Table 23)
+        
+        We use L/12 for primary (SP 34 recommendation) and L/10 for secondary.
+        This matches what site engineers use without deflection calculations.
+        
+        Ref: IS 456:2000 Cl 23.2 Table 23, SP 34:1987 Chapter 6
+        """
         if support_type == SupportType.CANTILEVER:
+            # IS 456 Table 23: basic L/d = 7 for cantilever
             d = span_mm / 7.0
+        elif support_type == SupportType.BEAM_BEAM:
+            # Secondary beam (beam-to-beam) — less continuity benefit
+            # FIX 8: Use L/10 (was L/15 — too shallow, causes deflection)
+            d = span_mm / 10.0
         else:
-            d = span_mm / 15.0
+            # Primary column-to-column beam — SP 34 Ch6 recommends L/12 for RCC frames
+            # FIX 8: Use L/12 (was L/15 — too shallow for Indian residential practice)
+            d = span_mm / 12.0
             
-        # Minimum depth checks (IS 456)
+        # IS 456 Cl 23.0: Minimum beam depth = slab thickness × 3 (for T-beam action)
+        # Absolute minimum: 300mm (site practice for any structural beam)
         min_depth = max(self.MIN_BEAM_DEPTH_MM, 3 * self.DEFAULT_SLAB_THICKNESS_MM)
         d = max(d, min_depth)
         
-        # Round up to nearest 25mm
-        d = math.ceil(d / 25) * 25
+        # Round UP to nearest 50mm (site prefer 50mm increments for formwork economy)
+        d = math.ceil(d / 50) * 50
         
-        if d > 750:
-             self.warnings.append({
+        # Headroom warning: 3500mm floor height - 125mm slab - beam depth
+        # Beam depth > 600mm leaves < 2775mm clear height — tight for residential
+        if d > 600:
+            self.warnings.append({
                 "severity": "WARNING",
-                "message": f"Beam depth {d:.0f}mm is large - check headroom",
-                "code_reference": "Architectural Headroom"
+                "message": f"Beam depth {d:.0f}mm — check headroom (clear height = {3500 - 125 - d:.0f}mm with 3.5m floor)",
+                "code_reference": "NBC 2016 Cl 4.4.2 — min 2.75m habitable room height"
             })
         
         return d

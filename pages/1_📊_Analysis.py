@@ -351,7 +351,7 @@ if enable_optimization:
                     "Check": "✓" if oc.is_safe else "✗",
                     "Gov": "M_min" if oc.is_min_ecc_governed else "P_u"
                 })
-            st.dataframe(opt_data, width="stretch")
+            st.dataframe(opt_data, use_container_width=True)
             st.caption("Gov: M_min = Governed by Minimum Eccentricity Check (< 0.05D)")
 
 
@@ -381,9 +381,99 @@ if beams:
                 "Status": status
             })
         if ld_data:
-            st.dataframe(pd.DataFrame(ld_data), width="stretch", hide_index=True)
+            st.dataframe(pd.DataFrame(ld_data), use_container_width=True, hide_index=True)
             failed_ld = [d for d in ld_data if "Check" in d["Status"]]
             if failed_ld:
                 st.warning(f"{len(failed_ld)} beam(s) exceed basic L/d ratio — verify modification factors per IS 456 Cl 23.2.1")
             else:
                 st.success("All beams satisfy IS 456 Cl 23.2 basic L/d limits")
+
+
+# 8. Design Failures & Overstress Summary (Change 3)
+st.markdown("---")
+render_section_header("🔴 Design Failures & Overstress Report")
+
+_failures_found = False
+
+# 8a. Beam Schedule Failures (from gm.beam_schedule)
+if gm and hasattr(gm, 'beam_schedule') and gm.beam_schedule:
+    beam_fails = []
+    for bid, bres in gm.beam_schedule.items():
+        _status = str(getattr(bres, 'status', 'OK'))
+        if 'FAIL' in _status.upper() or 'WARN' in _status.upper():
+            _span = getattr(bres, 'span_m', 0)
+            _w = getattr(bres, 'width_mm', getattr(bres, 'width', '?'))
+            _d = getattr(bres, 'depth_mm', getattr(bres, 'depth', '?'))
+            _warnings = getattr(bres, 'warnings', [])
+            for w in (_warnings if isinstance(_warnings, list) else [str(_warnings)]):
+                beam_fails.append({
+                    "Beam ID": bid,
+                    "Size (mm)": f"{_w}×{_d}",
+                    "Span (m)": f"{float(_span):.2f}" if _span else "—",
+                    "Issue": str(w),
+                    "Status": "❌ FAIL" if 'FAIL' in _status.upper() else "⚠️ WARNING"
+                })
+    if beam_fails:
+        _failures_found = True
+        st.error(f"**{len(beam_fails)} beam design issue(s) found:**")
+        st.dataframe(pd.DataFrame(beam_fails), use_container_width=True, hide_index=True)
+        st.caption("📌 Beam failures typically indicate span too large for the given section size. Increase depth (L/12 rule) or reduce span.")
+
+# 8b. Column Schedule Failures
+if gm and hasattr(gm, 'rebar_schedule') and gm.rebar_schedule:
+    col_fails = []
+    for cid, cres in gm.rebar_schedule.items():
+        _status = str(getattr(cres, 'status', 'OK'))
+        if 'FAIL' in _status.upper() or 'WARN' in _status.upper():
+            _warnings = getattr(cres, 'warnings', [])
+            for w in (_warnings if isinstance(_warnings, list) else [str(_warnings)]):
+                col_fails.append({
+                    "Column ID": cid,
+                    "Issue": str(w),
+                    "Status": "❌ FAIL" if 'FAIL' in _status.upper() else "⚠️ WARNING"
+                })
+    if col_fails:
+        _failures_found = True
+        st.error(f"**{len(col_fails)} column design issue(s) found:**")
+        st.dataframe(pd.DataFrame(col_fails), use_container_width=True, hide_index=True)
+        st.caption("📌 Column failures typically indicate under-sized section for the applied axial load. Increase column size.")
+
+# 8c. SCWB Joint Failures — show which specific joints fail and their Mc/Mb ratio
+if seismic_result and hasattr(seismic_result, 'scwb_details') and seismic_result.scwb_details:
+    scwb_fails = [d for d in seismic_result.scwb_details if not d.get('pass', True)]
+    if scwb_fails:
+        _failures_found = True
+        st.error(f"**{len(scwb_fails)} joint(s) fail Strong Column–Weak Beam check (IS 13920 Cl 7.2):**")
+        st.dataframe(pd.DataFrame(scwb_fails), use_container_width=True, hide_index=True)
+        st.caption("📌 IS 13920 Cl 7.2: Sum of column moments ≥ 1.4 × Sum of beam moments at each joint")
+elif seismic_result and hasattr(seismic_result, 'all_scwb_pass') and not seismic_result.all_scwb_pass:
+    _failures_found = True
+    st.error("**SCWB joint failures detected** — detailed joint list not available. Check the seismic report section above.")
+    st.caption("📌 IS 13920 Cl 7.2: ΣMc ≥ 1.4 × ΣMb at every beam-column joint in seismic zones III/IV/V")
+
+# 8d. Shear Overstress (tau_v > tau_c_max)
+if beams and gm and hasattr(gm, 'beam_schedule') and gm.beam_schedule:
+    shear_fails = []
+    for bid, bres in gm.beam_schedule.items():
+        _tau_v = getattr(bres, 'tau_v_Nmm2', 0)
+        _tau_max = getattr(bres, 'tau_c_max_Nmm2', 3.1)
+        if _tau_v and _tau_v > _tau_max:
+            _w = getattr(bres, 'width_mm', '?')
+            _d = getattr(bres, 'depth_mm', '?')
+            shear_fails.append({
+                "Beam ID": bid,
+                "Size (mm)": f"{_w}×{_d}",
+                "τv (N/mm²)": f"{_tau_v:.2f}",
+                "τc,max (N/mm²)": f"{_tau_max:.2f}",
+                "Overstress": f"{(_tau_v/_tau_max - 1)*100:.1f}%",
+                "Action": "Increase beam width (b) — shear cannot be resisted by stirrups alone"
+            })
+    if shear_fails:
+        _failures_found = True
+        st.error(f"**{len(shear_fails)} beam(s) exceed τc,max (IS 456 Table 20):**")
+        st.dataframe(pd.DataFrame(shear_fails), use_container_width=True, hide_index=True)
+        st.caption("📌 When τv > τc,max, the beam section must be enlarged. Stirrups alone cannot carry the excess shear.")
+
+if not _failures_found:
+    st.success("✅ No design failures or overstress conditions detected in beam or column schedules.")
+

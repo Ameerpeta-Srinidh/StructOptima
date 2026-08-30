@@ -33,12 +33,50 @@ class Column(BaseModel):
     def area_mm2(self) -> float:
         return self.width_nb * self.depth_nb
 
+class Wall(BaseModel):
+    """Masonry/RCC wall element for dead load calculation and BOM.
+    
+    Material densities per IS 875 (Part 1):1987 Table 1:
+      - Burnt clay brick: 19.2 kN/m³
+      - AAC block: 7.5 kN/m³
+      - RCC shear wall: 25.0 kN/m³
+    """
+    id: str
+    start_x: float  # meters
+    start_y: float  # meters
+    end_x: float    # meters
+    end_y: float    # meters
+    thickness_mm: float = 230.0  # Standard 9-inch brick wall
+    height_m: float = 3.0  # Wall height (story height minus beam depth)
+    material: Literal["brick", "aac_block", "rcc"] = "brick"
+    is_load_bearing: bool = True
+    level: int = 0
+    opening_fraction: float = 0.33  # 1/3 deducted for doors/windows (practical estimate)
+    
+    @property
+    def length_m(self) -> float:
+        import math as _m
+        return _m.hypot(self.end_x - self.start_x, self.end_y - self.start_y)
+    
+    @property
+    def density_kn_m3(self) -> float:
+        """IS 875 (Part 1):1987 Table 1"""
+        densities = {"brick": 19.2, "aac_block": 7.5, "rcc": 25.0}
+        return densities.get(self.material, 19.2)
+    
+    @property
+    def line_load_kn_m(self) -> float:
+        """Dead load per meter run of wall (kN/m), with opening deduction."""
+        thickness_m = self.thickness_mm / 1000.0
+        effective_height = self.height_m * (1.0 - self.opening_fraction)
+        return thickness_m * effective_height * self.density_kn_m3
+
 class GridManager(BaseModel):
     width_m: float
     length_m: float
     num_stories: int = 1
-    story_height_m: float = 3.0
-    max_span_m: float = 6.0
+    story_height_m: float = 3.5
+    max_span_m: float = 5.0  # IS 456 Table 26: economical residential slab span ≤ 5m
     
     # Cantilever Config (Phase 9)
     cantilever_dirs: List[str] = [] # "top","bottom","left","right"
@@ -48,6 +86,7 @@ class GridManager(BaseModel):
     y_grid_lines: List[float] = []
     columns: List[Column] = []
     footings: List[Any] = [] # Using Any to avoid circular import issues with Footing
+    walls: List[Wall] = []   # Architectural/structural walls from DXF
     
     # Void Zones for Opening Deductions (List of (x_idx, y_idx) tuples for bays)
     void_zones: List[Tuple[int, int]] = []
@@ -59,39 +98,89 @@ class GridManager(BaseModel):
     staircase_schedule: dict = {} # {stair_id: StaircaseResult}
     
     def _estimate_initial_column_size(self, col_type: str, trib_area_est: float) -> tuple:
-        """Estimate column size based on story count, position, and IS 456 Cl 39.3."""
+        """Estimate column size based on story count, position, and IS 456 Cl 39.3.
+        
+        Floor load per IS 875:
+          - Dead load (125mm slab + finish + partitions): ~4.5 kN/m²
+          - Live load (residential IS 875 Pt2):            ~2.0 kN/m²
+          - Self-weight of beams (approx):                ~1.5 kN/m²
+          - Total service load:                           ~8.0 kN/m²
+        """
         fck = 25.0
         fy = 415.0
-        floor_load = 12.0  # kN/m2 typical residential
-        pu_kn = trib_area_est * floor_load * self.num_stories * 1.5  # Factored
+        floor_load = 8.0  # FIX 3: kN/m² per IS 875 Part 1 & 2 (was 12.0 — too high)
+        pu_kn = trib_area_est * floor_load * self.num_stories * 1.5  # Factored per IS 456 Table 18
         pu_n = pu_kn * 1000.0
         
+        # Per IS 456 Cl 34.1.3: minimum column dimension = 200mm; practice = 230mm (brick module)
+        # Per IS 13920 Cl 6.1.3: min 300mm for seismic zones III/IV/V
         width = 230.0
         depth = 230.0
         while True:
             ag = width * depth
-            asc = 0.008 * ag
+            asc = 0.008 * ag  # IS 456 Cl 26.5.3.1: min 0.8% steel
             ac = ag - asc
+            # IS 456 Cl 39.3: Pu = 0.4*fck*Ac + 0.67*fy*Asc
             p_cap_n = (0.4 * fck * ac) + (0.67 * fy * asc)
             if p_cap_n >= pu_n:
                 break
+            # Increment by 50mm (standard size increment on site)
             width += 50.0
             depth += 50.0
             if width > 1500:
                 break
         
-        # Min 300mm for seismic zones (IS 13920)
-        width = max(width, 300.0)
-        depth = max(depth, 300.0)
-        # Round to 25mm
+        # Min sizes per IS 456 / IS 13920 / practice
+        # Corner/edge: 230×300 min; interior: 300×300 min
+        if col_type == "corner":
+            width = max(width, 230.0)
+            depth = max(depth, 300.0)
+        elif col_type == "edge":
+            width = max(width, 230.0)
+            depth = max(depth, 300.0)
+        else:  # interior
+            width = max(width, 300.0)
+            depth = max(depth, 300.0)
+        # Round to nearest 25mm module (standard formwork sizes)
         width = math.ceil(width / 25.0) * 25.0
         depth = math.ceil(depth / 25.0) * 25.0
         return width, depth
 
+    def _choose_bay_count(self, dimension_m: float) -> int:
+        """Choose number of bays such that each span falls in 3–5m range.
+        
+        Per IS 456 / SP 34 / NBC 2016:
+          - Preferred residential RCC slab span: 3.0–5.0m (two-way action, 125mm slab)
+          - Beyond 5m, slab thickness rises uneconomically (L/d = 40 → 125mm @ 5m)
+          - Below 3m, column count is excessive and uneconomical
+        """
+        MIN_SPAN = 3.0  # metres
+        MAX_SPAN = 5.0  # metres (IS 456 Table 26 economical limit for residential)
+        
+        # Find the minimum number of bays that gives span ≤ MAX_SPAN
+        n = max(1, math.ceil(dimension_m / MAX_SPAN))
+        span = dimension_m / n
+        
+        # If span is already ≥ MIN_SPAN, we're in the sweet spot — done
+        if span >= MIN_SPAN:
+            return n
+        
+        # Span is < MIN_SPAN with n bays — try fewer bays (larger spans)
+        # This can happen for very small buildings (< 6m)
+        while n > 1 and (dimension_m / (n - 1)) <= MAX_SPAN:
+            n -= 1
+        return n
+
     def generate_grid(self):
-        """Generates uniform grid with multi-story columns."""
-        num_bays_x = math.ceil(self.width_m / self.max_span_m)
-        num_bays_y = math.ceil(self.length_m / self.max_span_m)
+        """Generates IS 456-compliant column grid with preferred 3–5m bay spacing.
+        
+        FIX 4: Bay sizing now chooses spans in the 3–5m economical range
+        (IS 456 Table 26 + SP 34) rather than raw division by max_span.
+        FIX 2: Edge column type and tributary area are no longer overwritten.
+        """
+        # FIX 4: Use economical bay sizing (3–5m) per IS 456
+        num_bays_x = self._choose_bay_count(self.width_m)
+        num_bays_y = self._choose_bay_count(self.length_m)
         
         num_bays_x = max(1, num_bays_x)
         num_bays_y = max(1, num_bays_y)
@@ -99,8 +188,8 @@ class GridManager(BaseModel):
         span_x = self.width_m / num_bays_x
         span_y = self.length_m / num_bays_y
         
-        self.x_grid_lines = [i * span_x for i in range(num_bays_x + 1)]
-        self.y_grid_lines = [j * span_y for j in range(num_bays_y + 1)]
+        self.x_grid_lines = [round(i * span_x, 4) for i in range(num_bays_x + 1)]
+        self.y_grid_lines = [round(j * span_y, 4) for j in range(num_bays_y + 1)]
         
         self.columns = []
         
@@ -118,10 +207,12 @@ class GridManager(BaseModel):
                     col_type = "corner"
                     trib_est = (span_x / 2) * (span_y / 2)
                 elif is_edge_x or is_edge_y:
+                    # FIX 2: Keep "edge" type — do NOT overwrite with "interior"
                     col_type = "edge"
                     fx = span_x / 2 if is_edge_x else span_x
-                    fy = span_y / 2 if is_edge_y else span_y
-                    trib_est = fx * fy
+                    fy_val = span_y / 2 if is_edge_y else span_y
+                    trib_est = fx * fy_val
+                else:
                     col_type = "interior"
                     trib_est = span_x * span_y
                 
@@ -262,8 +353,24 @@ class GridManager(BaseModel):
     def calculate_loads(self, floor_load_kn_m2: float, wall_load_kn_m: float = 0.0):
         """
         Cumulative Load Takedown from Top -> Bottom.
-        Wall Load: Added to each level based on beam framing.
+        Wall Load: Distributed from actual self.walls geometry if available, else from uniform parameter.
         """
+        # Pre-calculate wall load per column stack based on actual wall geometry
+        wall_load_map = {}
+        if self.walls:
+            import math as _m
+            for w in self.walls:
+                total_w_load = w.length_m * w.line_load_kn_m
+                # Distribute half load to the nearest start column, half to nearest end column
+                start_c = min(self.columns, key=lambda c: _m.hypot(c.x - w.start_x, c.y - w.start_y))
+                end_c = min(self.columns, key=lambda c: _m.hypot(c.x - w.end_x, c.y - w.end_y))
+                
+                k1 = (start_c.x, start_c.y)
+                k2 = (end_c.x, end_c.y)
+                wall_load_map[k1] = wall_load_map.get(k1, 0.0) + (total_w_load / 2.0)
+                if start_c != end_c:
+                    wall_load_map[k2] = wall_load_map.get(k2, 0.0) + (total_w_load / 2.0)
+
         # Group by (x, y) coordinates to form stacks
         stacks = {}
         for col in self.columns:
@@ -301,7 +408,6 @@ class GridManager(BaseModel):
                 
                 # Add Cantilever Load (Simplified)
                 # If this is edge/corner, and direction matches cantilever, add load
-                
                 if self.cantilever_dirs:
                     c_load = 0
                     # Check bounds
@@ -341,9 +447,24 @@ class GridManager(BaseModel):
                          beam_len += c_len
                     
                     level_load += c_load
+                
+                # Calculate Wall Load
+                if self.walls:
+                    is_roof = (col.level == self.num_stories - 1)
+                    if is_roof:
+                        # Roof usually only has parapet wall (~1m height, roughly 33% of full story wall)
+                        wall_load = wall_load_map.get(key, 0.0) * 0.33
+                    else:
+                        wall_load = wall_load_map.get(key, 0.0)
+                else:
+                    # Fallback if no specific wall objects exist
+                    wall_load = beam_len * wall_load_kn_m
                     
-                wall_load = beam_len * wall_load_kn_m
                 total_level_load = level_load + wall_load
+                
+                # Column self-weight
+                col_sw = (col.width_nb / 1000.0) * (col.depth_nb / 1000.0) * self.story_height_m * 25.0
+                total_level_load += col_sw
                 
                 # Phase 10: Add Staircase Load if present
                 if hasattr(col, 'staircase_add_load'):
@@ -352,31 +473,48 @@ class GridManager(BaseModel):
                 cumulative_load += total_level_load
                 col.load_kn = cumulative_load
 
-    def optimize_column_sizes(self, concrete: Concrete, fy: float = 415.0):
+    def optimize_column_sizes(self, concrete: Concrete, fy: float = 415.0,
+                              wall_thickness_mm: float = 230.0,
+                              align_to_wall: bool = False,
+                              seismic_zone: str = "III"):
         """
         Iterative sizing per column segment based on IS 456:2000 Cl 39.3.
         Pu = 0.4 fck Ac + 0.67 fy Asc
         Assumption: Min steel 0.8% (Asc = 0.008 Ag).
+        
+        After individual sizing:
+          - Enforces IS 13920 Cl 6.1.3 minimum 300mm for seismic zones III/IV/V
+          - Enforces per-type practice minimums (corner/edge 230×300, interior 300×300)
+          - Optionally aligns one face to wall thickness (Change 5)
+          - Locks each XY stack to its maximum size (Change 7)
+          - Groups similar sizes within ±15mm to standardize schedule (Change 6)
         """
         fck = concrete.fck
+        is_seismic = seismic_zone in ("III", "IV", "V")
+        
+        # Preferred sizes for snap-to (brick module + formwork standards)
+        PREF = [230, 300, 350, 380, 400, 450, 500, 550, 600, 650, 700, 750, 800]
+        
+        def snap_pref(val: float) -> float:
+            for p in PREF:
+                if p >= val:
+                    return float(p)
+            return float(math.ceil(val / 25.0) * 25.0)
         
         for col in self.columns:
-            # Factored Load Input? The engine usually works with factored load.
-            # Assuming col.load_kn is Pu.
-            # IS 456 Table 18: Limit State factor 1.5(DL + LL)
             # col.load_kn contains SERVICE (unfactored) cumulative loads from calculate_loads()
-            pu_n = col.load_kn * 1.5 * 1000.0  # Factored load in Newtons
+            pu_n = col.load_kn * 1.5 * 1000.0  # Factored load in Newtons (IS 456 Table 18)
             
-            # Start small, e.g. 230x230 (Min code requirement)
+            # Start at minimum per IS 456 Cl 34.1 (230mm)
             width = 230.0
             depth = 230.0
             
             while True:
                 ag = width * depth
-                asc = 0.008 * ag
+                asc = 0.008 * ag  # Min 0.8% steel per IS 456 Cl 26.5.3.1
                 ac = ag - asc
                 
-                # Capacity Check
+                # IS 456:2000 Cl 39.3: Pu = 0.4*fck*Ac + 0.67*fy*Asc
                 p_cap_n = (0.4 * fck * ac) + (0.67 * fy * asc)
                 
                 if p_cap_n >= pu_n:
@@ -384,14 +522,77 @@ class GridManager(BaseModel):
                     col.depth_nb = depth
                     break
                 
-                # Increase size in 50mm increments
                 width += 50.0
                 depth += 50.0
                 
-                if width > 2000: # Safety break
+                if width > 2000:  # Safety break
                     col.width_nb = width
                     col.depth_nb = depth
                     break
+            
+            # ── IS 13920 Cl 6.1.3: Minimum 300mm in seismic zones III/IV/V ──
+            if is_seismic:
+                col.width_nb = max(col.width_nb, 300.0)
+                col.depth_nb = max(col.depth_nb, 300.0)
+            
+            # ── Per-type practice minimums (SP 34 Ch5 / IS 456 practice) ────
+            # User requirement: Min 300x450 for ALL columns
+            # Increase to 400x600 for interior columns with >400kN load
+            col.width_nb = max(col.width_nb, 300.0)
+            col.depth_nb = max(col.depth_nb, 450.0)
+            
+            if col.type == "interior" and col.load_kn > 400:
+                col.width_nb = max(col.width_nb, 400.0)
+                col.depth_nb = max(col.depth_nb, 600.0)
+            
+            # Snap to preferred size (round up to nearest standard size)
+            col.width_nb = snap_pref(col.width_nb)
+            col.depth_nb = snap_pref(col.depth_nb)
+            
+            # Change 5: Align one face to wall thickness for architectural alignment
+            # Per IS 456 Cl 34.1 & IS SP:24 commentary: column face should align with wall
+            if align_to_wall:
+                # Keep the load-governed dimension, align the SMALLER face to wall
+                if col.width_nb <= col.depth_nb:
+                    col.width_nb = max(col.width_nb, wall_thickness_mm)
+                    col.width_nb = snap_pref(col.width_nb)
+                else:
+                    col.depth_nb = max(col.depth_nb, wall_thickness_mm)
+                    col.depth_nb = snap_pref(col.depth_nb)
+        
+        # Change 7: Lock each XY stack to its maximum computed size
+        # Columns must not change size mid-stack (constructability + IS 456)
+        stacks = {}
+        for col in self.columns:
+            key = (round(col.x, 2), round(col.y, 2))
+            if key not in stacks:
+                stacks[key] = []
+            stacks[key].append(col)
+        
+        for key, stack in stacks.items():
+            max_w = max(c.width_nb for c in stack)
+            max_d = max(c.depth_nb for c in stack)
+            for c in stack:
+                c.width_nb = max_w
+                c.depth_nb = max_d
+        
+        # Change 6: Group columns by similar size (within ±15mm tolerance)
+        # Canonical size = FIRST encountered in that group (which is the largest due to stack locking)
+        # ±15mm prevents merging 280 → 300 or 300 → 280 incorrectly
+        unique_sizes = []
+        for col in self.columns:
+            found = False
+            for (gw, gd) in unique_sizes:
+                if abs(col.width_nb - gw) <= 15 and abs(col.depth_nb - gd) <= 15:
+                    # Only group if canonical is ≥ current (don't reduce to smaller)
+                    col.width_nb = gw
+                    col.depth_nb = gd
+                    found = True
+                    break
+            if not found:
+                unique_sizes.append((col.width_nb, col.depth_nb))
+        
+        logger.info(f"Column grouping complete: {len(unique_sizes)} unique size groups")
                     
     # ... (Keep existing methods)
         
@@ -561,10 +762,13 @@ class GridManager(BaseModel):
         self.rebar_schedule = {}
         
         for col in self.columns:
+            # col.load_kn is SERVICE (unfactored) load from calculate_loads()
+            # IS 456 Table 18: γf = 1.5 for (1.5 DL + 1.5 LL) combination
+            pu_factored_kn = col.load_kn * 1.5
             res = RebarDetailer.detail_column(
                 b_mm=col.width_nb,
                 d_mm=col.depth_nb,
-                pu_kn=col.load_kn,
+                pu_kn=pu_factored_kn,
                 concrete=concrete,
                 level=col.level,
                 fy=fy

@@ -14,7 +14,7 @@ class AutoFramer:
         self.beams = []
         self.centerlines = []
         
-        self.max_span_mm = 7000.0
+        self.max_span_mm = 5000.0
         self.snap_tolerance_mm = 600.0
         self.min_wall_len_mm = 600.0
         self.cluster_tolerance_mm = 1000.0
@@ -105,7 +105,7 @@ class AutoFramer:
             if length > self.min_wall_len:
                 valid_walls.append((start, end))
         
-        self.centerlines = self._extract_wall_centerlines(valid_walls)
+        self.centerlines = valid_walls
         
         candidate_points = []
         for start, end in self.centerlines:
@@ -352,6 +352,15 @@ class AutoFramer:
         unique_x = sorted(list(set([c['x'] for c in self.columns])))
         unique_y = sorted(list(set([c['y'] for c in self.columns])))
         
+        import math as _math
+        def _beam_depth_mm(span_mm: float) -> float:
+            """User requirement: Standardize beams. 450mm for <=5m, 600mm for >5m."""
+            return 450.0 if span_mm <= 5000 else 600.0
+        
+        def _beam_width_mm(depth_mm: float) -> float:
+            """User requirement: Standardize beams to 250mm width minimum."""
+            return 250.0
+        
         def add_beam(c1, c2, direction):
             nonlocal beam_count
             pair_key = (min(c1['x'], c2['x']), min(c1['y'], c2['y']), max(c1['x'], c2['x']), max(c1['y'], c2['y']))
@@ -359,12 +368,19 @@ class AutoFramer:
                 return
             beam_pairs_added.add(pair_key)
             beam_count += 1
+            # Calculate span and size per IS 456 Table 23 / SP 34 Ch6
+            if direction == "V":
+                span_mm = abs(c2['y'] - c1['y'])
+            else:
+                span_mm = abs(c2['x'] - c1['x'])
+            d_mm = _beam_depth_mm(span_mm)
+            w_mm = _beam_width_mm(d_mm)
             beams.append(StructuralMember(
                 id=f"AB_{direction}_{beam_count}",
                 type="beam",
                 start_point=Point(x=c1['x'], y=c1['y']),
                 end_point=Point(x=c2['x'], y=c2['y']),
-                properties=MemberProperties(width_mm=230, depth_mm=450)
+                properties=MemberProperties(width_mm=w_mm, depth_mm=d_mm)
             ))
         
         for x in unique_x:
@@ -459,12 +475,15 @@ class AutoFramer:
             for dist, other, is_horizontal, pair_key, over_limit in candidates[:needed]:
                 beam_count += 1
                 direction = "H" if is_horizontal else "V"
+                # User requirement: Standardize beams
+                d_mm = 450.0 if dist <= 5000 else 600.0
+                w_mm = 250.0
                 self.beams.append(StructuralMember(
                     id=f"AB_{direction}_{beam_count}",
                     type="beam",
                     start_point=Point(x=col['x'], y=col['y']),
                     end_point=Point(x=other['x'], y=other['y']),
-                    properties=MemberProperties(width_mm=230, depth_mm=450)
+                    properties=MemberProperties(width_mm=w_mm, depth_mm=d_mm)
                 ))
                 beam_pairs_added.add(pair_key)
                 if over_limit:

@@ -62,32 +62,22 @@ inject_css()
 
 # ========== WELCOME BANNER ==========
 st.markdown("""
-<div style="background: linear-gradient(135deg, #1a237e 0%, #0d47a1 40%, #01579b 100%);
-            padding: 40px 30px 30px 30px; border-radius: 12px; margin-bottom: 20px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.15);">
-    <h1 style="color: white; margin: 0 0 8px 0; font-size: 2.4em; letter-spacing: -0.5px;">
+<div style="background: #FFFFFF; padding: 28px 30px; border-radius: 12px; margin-bottom: 20px;
+            box-shadow: 0 1px 6px rgba(0,0,0,0.08); border: 1px solid #E2E8F0;
+            border-left: 5px solid #1565C0;">
+    <h1 style="color: #1A1A2E; margin: 0 0 10px 0; font-size: 2.2em; letter-spacing: -0.5px; font-weight: 700;">
         🏗️ StructOptima
     </h1>
-    <p style="color: rgba(255,255,255,0.92); font-size: 1.15em; margin: 0 0 18px 0; max-width: 700px;">
-        Generate IS-code compliant structural designs from DXF files in minutes.
-        Automated column placement, beam design, rebar detailing, and professional PDF reports.
-    </p>
-    <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-        <span style="background: rgba(255,255,255,0.18); color: white; padding: 6px 16px;
-                     border-radius: 20px; font-weight: 600; font-size: 0.95em;
-                     border: 1px solid rgba(255,255,255,0.3);">
-            IS 456:2000
-        </span>
-        <span style="background: rgba(255,255,255,0.18); color: white; padding: 6px 16px;
-                     border-radius: 20px; font-weight: 600; font-size: 0.95em;
-                     border: 1px solid rgba(255,255,255,0.3);">
-            IS 1893:2016
-        </span>
-        <span style="background: rgba(255,255,255,0.18); color: white; padding: 6px 16px;
-                     border-radius: 20px; font-weight: 600; font-size: 0.95em;
-                     border: 1px solid rgba(255,255,255,0.3);">
-            IS 13920:2016
-        </span>
+    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <span style="background: #E3F2FD; color: #1565C0; padding: 5px 14px;
+                     border-radius: 20px; font-weight: 600; font-size: 0.85em;
+                     border: 1px solid #BBDEFB;">IS 456:2000</span>
+        <span style="background: #E3F2FD; color: #1565C0; padding: 5px 14px;
+                     border-radius: 20px; font-weight: 600; font-size: 0.85em;
+                     border: 1px solid #BBDEFB;">IS 1893:2016</span>
+        <span style="background: #E3F2FD; color: #1565C0; padding: 5px 14px;
+                     border-radius: 20px; font-weight: 600; font-size: 0.85em;
+                     border: 1px solid #BBDEFB;">IS 13920:2016</span>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -106,86 +96,12 @@ if _os.path.exists(_sample_report_path):
         key="sample_report_btn"
     )
 
-# ========== TRUST STATS BAR ==========
-_ts1, _ts2, _ts3, _ts4 = st.columns(4)
-_ts1.metric("Modules", "51", help="51 integrated structural design modules")
-_ts2.metric("Test Suites", "28", help="28 automated test suites validating calculations")
-_ts3.metric("IS 456 Compliant", "✓", help="Full compliance with IS 456:2000")
-_ts4.metric("Indian Standard Codes", "4 Codes", help="IS 456 · IS 1893 · IS 13920 · IS 875")
-
 st.markdown("---")
-
-with st.expander("📐 DXF Input Guide — How to Prepare Your Architectural DXF", expanded=False):
-    st.markdown("""
-**StructOptima's universal parser handles almost any DXF format**, but for best results:
-
-| Element | Recommended Format |
-|---------|-------------------|
-| **Walls** | `LINE` or `LWPOLYLINE` entities on a layer named `WALL`, `WALLS`, `A-WALL`, or similar |
-| **Units** | Millimeters (mm) — this is the Indian standard |
-| **Double walls** | Accepted! Both double-line walls (230mm offset) and single centerlines are auto-normalized |
-| **Layer names** | Put walls on layers containing keywords: `WALL`, `STRUCT`, `BOUNDARY`, `ARCH` |
-| **No layers?** | That's OK — the parser auto-detects wall geometry from line patterns |
-
-**What NOT to include on wall layers:** Dimensions, text, furniture, annotations, hatches.
-
-**Supported building shapes:** Rectangular, L-shape, C-shape, T-shape, H-shape, stepped, irregular.
-    """)
-
-# Design Assumptions & Safety Factors (Always visible)
-with st.expander("Design Basis & Safety Factors (Click to expand)", expanded=False):
-    col_a, col_b = st.columns(2)
-    
-    with col_a:
-        st.markdown("""
-        **Design Code:** IS 456:2000 (Plain & Reinforced Concrete)
-        
-        **Units Used:**
-        - Dimensions: **meters (m)**
-        - Loads: **kN, kN/m, kN/m²**
-        - Stress: **MPa (N/mm²)**
-        - Rebar: **mm diameter**
-        
-        **Load Factors (Limit State):**
-        - Dead Load: **1.5**
-        - Live Load: **1.5**
-        - Combined: **1.5 (DL + LL)**
-        """)
-    
-    with col_b:
-        st.markdown("""
-        **Material Safety Factors:**
-        - Concrete (γc): **1.5**
-        - Steel (γs): **1.15**
-        
-        **Key Assumptions:**
-        - Short column (Le/r < 12)
-        - Simply supported beams
-        - Isolated square footings
-        - Tributary area load distribution
-        
-        **Deflection Limit:** Span/250
-        
-        **Punching Shear:** 0.25√fck MPa
-        """)
-    
-    st.warning("All designs must be verified by a licensed structural engineer before construction.")
 
 # Sidebar Steps
 with st.sidebar:
-    # ========== BRANDING HEADER ==========
-    st.markdown("""
-    <div style="text-align: center; padding: 10px 0 5px 0;">
-        <h2 style="margin: 0; color: #1a237e;">🏗️ StructOptima</h2>
-        <p style="margin: 2px 0; font-size: 0.85em; color: #666;">v1.0.0 · March 2026</p>
-    </div>
-    """, unsafe_allow_html=True)
-    st.caption("Built by **Srinidh Ameerpeta & Charan Tej**")
-    st.markdown(
-        "[⭐ GitHub Repository](https://github.com/Ameerpeta-Srinidh/StructOptima)",
-        unsafe_allow_html=True
-    )
-    st.caption("Automated IS-code structural design engine — from DXF to PDF report in minutes.")
+    st.markdown("### 🏗️ StructOptima")
+    st.caption("v1.0.0 · Srinidh Ameerpeta & Charan Tej")
     st.markdown("---")
     
     st.header("Project Details")
@@ -194,165 +110,90 @@ with st.sidebar:
     drawing_ref = st.text_input("Drawing Ref. No.", value="", help="Drawing or job reference number")
     project_date = st.date_input("Date")
     st.markdown("---")
-    st.header("Project Parameters")
     
-    input_mode = st.radio("Input Method", ["Manual Dimensions", "Import CAD (DXF)", "Import BIM (IFC)"])
-    
-    cad_file = None
-    auto_frame = False
-    width = 0.0
-    length = 0.0
-    
-    if input_mode == "Import CAD (DXF)":
-        cad_file = st.file_uploader("Upload DXF File", type=["dxf"])
-        auto_frame = st.checkbox("Auto-Frame from Architecture (Walls)", help="Check this if your file has only walls and you want AI to place columns.")
+    with st.expander("📐 Input & Geometry", expanded=True):
+        input_mode = st.radio("Input Method", ["Manual Dimensions", "Import CAD (DXF)", "Import BIM (IFC)"], label_visibility="collapsed")
         
-        st.subheader("Vertical Stack")
-        num_stories = st.number_input("Number of Stories", min_value=1, max_value=50, value=2)
-        story_height = st.number_input("Story Height (m)", 2.4, 6.0, 3.0)
+        cad_file = None
+        auto_frame = False
+        width = 0.0
+        length = 0.0
         
-    elif input_mode == "Import BIM (IFC)":
-        try:
-            import ifcopenshell
-            _ifc_available = True
-        except ImportError:
-            _ifc_available = False
-        
-        if _ifc_available:
-            ifc_file = st.file_uploader("Upload IFC File", type=["ifc"])
-            st.info("BIM Mode extracts exact Material & Geometry from IfcColumn/IfcBeam.")
+        if input_mode == "Import CAD (DXF)":
+            cad_file = st.file_uploader("Upload DXF File", type=["dxf"])
+            auto_frame = st.checkbox("Auto-Frame from Architecture", help="Check this if your file has only walls and you want AI to place columns.")
+            st.divider()
+            num_stories = st.number_input("Number of Stories", min_value=1, max_value=50, value=2)
+            story_height = st.number_input("Story Height (m)", 2.4, 6.0, 3.5)
+            
+        elif input_mode == "Import BIM (IFC)":
+            try:
+                import ifcopenshell
+                _ifc_available = True
+            except ImportError:
+                _ifc_available = False
+            
+            if _ifc_available:
+                ifc_file = st.file_uploader("Upload IFC File", type=["ifc"])
+                st.info("BIM Mode extracts Material & Geometry from IfcColumn/IfcBeam.")
+            else:
+                ifc_file = None
+                st.error("**IFC import requires `ifcopenshell`** (pip install ifcopenshell)")
+                st.stop()
+            
         else:
-            ifc_file = None
-            st.error(
-                "**IFC import requires `ifcopenshell`** which is not installed.\n\n"
-                "Install it with: `pip install ifcopenshell`\n\n"
-                "Note: ifcopenshell can be difficult to install on some platforms. "
-                "See [ifcopenshell.org](https://ifcopenshell.org/) for installation guides."
-            )
-            st.stop()
+            width = st.slider("Floor Width (m)", 6.0, 50.0, 18.0, 1.0)
+            length = st.slider("Floor Length (m)", 6.0, 50.0, 12.0, 1.0)
+            st.divider()
+            num_stories = st.number_input("Number of Stories", min_value=1, max_value=50, value=2)
+            story_height = st.number_input("Story Height (m)", 2.4, 6.0, 3.5)
+    
+    with st.expander("🏢 Occupancy & Loads", expanded=False):
+        building_type_name = st.selectbox(
+            "Occupancy Type (IS 875 Part 2)",
+            list(BUILDING_TYPES.keys()),
+            index=0
+        )
+        load_params = get_load_parameters(building_type_name)
+        live_load = load_params.total_floor_load_kn_m2 + (25 * load_params.slab_thickness_mm / 1000)
+        wall_load = st.number_input("Wall Load (kN/m)", 0.0, 50.0, 12.0)
+        sbc = st.number_input("SBC (kN/m²)", min_value=50.0, max_value=500.0, value=200.0)
         
-    else:
-        width = st.slider("Floor Width (m)", 6.0, 50.0, 18.0, 1.0)
-        length = st.slider("Floor Length (m)", 6.0, 50.0, 12.0, 1.0)
+    with st.expander("🌍 Environmental (Seismic & Wind)", expanded=False):
+        seismic_zone = st.selectbox(
+            "Seismic Zone (IS 1893:2016)",
+            SEISMIC_ZONES,
+            index=1,
+            format_func=lambda x: ZONE_DESCRIPTIONS.get(x, x)
+        )
+        st.divider()
+        wind_zone_idx = st.selectbox("Wind Zone (IS 875 Part 3)", ["1", "2", "3", "4", "5", "6"], index=1)
+        from src.wind_load import WindZone, TerrainCategory
+        wind_zone = WindZone(wind_zone_idx)
+        terrain_cat = st.selectbox("Terrain Category", ["1", "2", "3", "4"], index=1)
+        terrain_cat_enum = TerrainCategory(terrain_cat)
         
-        st.subheader("Vertical Stack")
-        num_stories = st.number_input("Number of Stories", min_value=1, max_value=50, value=2)
-        story_height = st.number_input("Story Height (m)", 2.4, 6.0, 3.0)
-    
-    st.subheader("Building Type (IS 875 Part 2)")
-    building_type_name = st.selectbox(
-        "Occupancy Type",
-        list(BUILDING_TYPES.keys()),
-        index=0,
-        help="Select building occupancy to apply IS 875 Part 2 compliant floor loads"
-    )
-    
-    # Get IS 875 compliant load parameters
-    load_params = get_load_parameters(building_type_name)
-    
-    # Display load summary
-    with st.expander("View Design Loads (IS 875 Part 2)"):
-        st.markdown(f"**{load_params.description}**")
-        st.markdown(f"""
-        | Load Type | Value | Reference |
-        |-----------|-------|-----------|  
-        | Live Load (Floor) | **{load_params.live_load_floor_kn_m2} kN/m²** | IS 875 Part 2 |
-        | Live Load (Corridor) | {load_params.live_load_corridor_kn_m2} kN/m² | IS 875 Part 2 |
-        | Floor Finish | {load_params.floor_finish_kn_m2} kN/m² | IS 875 Part 1 |
-        | Partitions | {load_params.partition_load_kn_m2} kN/m² | IS 875 Part 1 |
-        | Services | {load_params.services_load_kn_m2} kN/m² | Assumed |
-        | **Total Floor Load** | **{load_params.total_floor_load_kn_m2:.1f} kN/m²** | - |
-        """)
-    
-    # Calculate combined floor load
-    live_load = load_params.total_floor_load_kn_m2 + (25 * load_params.slab_thickness_mm / 1000)
-    wall_load = st.number_input("Wall Load (kN/m)", 0.0, 50.0, 12.0, help="Load from brick/block walls on beams")
-    sbc = st.number_input("SBC (kN/m²)", min_value=50.0, max_value=500.0, value=200.0, help="Safe Bearing Capacity of soil")
-    
-    st.subheader("Seismic Zone (IS 1893:2016)")
-    seismic_zone = st.selectbox(
-        "Zone",
-        SEISMIC_ZONES,
-        index=1,
-        format_func=lambda x: ZONE_DESCRIPTIONS.get(x, x),
-        help="Select seismic zone per IS 1893:2016"
-    )
-    if seismic_zone in ["III", "IV", "V"]:
-        st.caption("Ductile detailing per IS 13920 will be checked")
-        st.caption("Strong Column-Weak Beam verification enabled")
-        
-    st.subheader("Wind Zone (IS 875 Part 3)")
-    wind_zone_idx = st.selectbox(
-        "Zone",
-        ["1", "2", "3", "4", "5", "6"],
-        index=1,
-        help="Select Wind Zone per IS 875 Part 3 (Zone 1=33m/s, Zone 6=55m/s)"
-    )
-    from src.wind_load import WindZone, TerrainCategory
-    wind_zone = WindZone(wind_zone_idx)
-    terrain_cat = st.selectbox(
-        "Terrain Category",
-        ["1", "2", "3", "4"],
-        index=1,
-        help="Category 2: Open terrain with scattered obstructions (typical)"
-    )
-    terrain_cat_enum = TerrainCategory(terrain_cat)
-    
-    st.subheader("Architectural Features")
-    add_staircase = st.checkbox("Add Staircase (Central Void)")
-    
-    cant_dirs = []
-    if input_mode == "Manual Dimensions":
-        st.write("Cantilever Balconies (1.5m):")
-        c_left = st.checkbox("Left")
-        c_right = st.checkbox("Right")
-        c_top = st.checkbox("Top (Back)")
-        c_bot = st.checkbox("Bottom (Front)")
-        
-        if c_left: cant_dirs.append("left")
-        if c_right: cant_dirs.append("right")
-        if c_top: cant_dirs.append("top")
-        if c_bot: cant_dirs.append("bottom")
-    
-    st.subheader("Design Settings")
-    
-    st.sidebar.markdown("### Engineering Assumptions")
-    assume_fixed = st.sidebar.checkbox("Fixed Supports (Base)", value=True, help="Uncheck for Pinned supports (Conservative)")
-    use_cracked = st.sidebar.checkbox("Cracked Sections (IS 1893)", value=True, help="Applies Stiffness Modifiers: 0.7Ig (Col), 0.35Ig (Beam)")
-    st.sidebar.info(
-        "**Basis of Design:**\n"
-        "- IS 456:2000 (RC Design)\n"
-        "- IS 1893:2016 (Seismic)\n"
-        "- **Safety Factors:** γc=1.5, γs=1.15\n"
-        "- **Uplift Check:** 0.9DL + 1.5WL\n"
-        "- **Pattern Loading:** Inactive (Simplified)"
-    )
-    
-    with st.expander("Advanced Configuration"):
+    with st.expander("⚙️ Advanced Settings", expanded=False):
+        add_staircase = st.checkbox("Add Staircase (Central Void)")
+        cant_dirs = []
+        if input_mode == "Manual Dimensions":
+            st.caption("Cantilever Balconies:")
+            c_left, c_right = st.columns(2)
+            if c_left.checkbox("Left"): cant_dirs.append("left")
+            if c_right.checkbox("Right"): cant_dirs.append("right")
+            c_top, c_bot = st.columns(2)
+            if c_top.checkbox("Top (Back)"): cant_dirs.append("top")
+            if c_bot.checkbox("Bottom (Front)"): cant_dirs.append("bottom")
+            st.divider()
+            
+        assume_fixed = st.checkbox("Fixed Supports (Base)", value=True)
+        use_cracked = st.checkbox("Cracked Sections", value=True, help="0.7Ig Col, 0.35Ig Beam")
         conc_grade = st.selectbox("Concrete Grade", ["M20", "M25", "M30"], index=1)
-        
-    st.subheader("Sustainability")
-    use_fly_ash = st.checkbox("Use Green Concrete (Fly Ash/Slag)", help="Reduces embodied carbon by approx 33%")
-    
-    st.subheader("Cost Optimization")
-    enable_optimization = st.checkbox(
-        "Enable Cost Optimization",
-        value=False,
-        help="Optimize column sizes by floor while maintaining IS 456 safety"
-    )
-    if enable_optimization:
-        st.caption("All IS 456 safety factors maintained")
-        st.caption("Columns sized to actual load requirements")
-    
-    st.subheader("Visualization")
-    view_mode = st.selectbox(
-        "View Mode", 
-        ["Engineering", "Architectural", "Deflection", "Utilization", "Load Path"],
-        index=0,
-        help="Deflection: Animated Deformations | Utilization: D/C Ratio | Load Path: Transfer Beams"
-    )
+        use_fly_ash = st.checkbox("Use Green Concrete (Fly Ash)")
+        enable_optimization = st.checkbox("Enable Cost Optimization", value=False)
+        view_mode = st.selectbox("View Mode", ["Engineering", "Architectural", "Deflection", "Utilization", "Load Path"], index=0)
 
-    st.markdown("---")
+    st.markdown("<br>", unsafe_allow_html=True)
     _disclaimer_accepted = st.checkbox(
         "I confirm that I will independently verify all outputs before use in construction. "
         "I understand this tool provides preliminary structural designs that require review "
@@ -507,15 +348,21 @@ if st.session_state.get('analysis_done', False):
         update_structural_analysis(gm, beams, use_cracked_sections=use_cracked)
         
         m_grade = Concrete.from_grade(conc_grade)
-        gm.optimize_column_sizes(concrete=m_grade, fy=415.0)
+        _residential_types = ["Residential", "Residential (IS 875)", "Apartment", "Housing"]
+        _is_residential = any(r.lower() in building_type_name.lower() for r in ["residential", "apartment", "housing", "flat", "dwelling"])
+        gm.optimize_column_sizes(
+            concrete=m_grade, 
+            fy=415.0,
+            wall_thickness_mm=230.0,
+            align_to_wall=_is_residential,
+            seismic_zone=seismic_zone
+        )
         gm.detail_columns(concrete=m_grade, fy=415.0)
         gm.detail_beams(beams)
         gm.detail_slabs()
         
         if add_staircase:
             gm.detail_staircase()
-        
-        project_bbs = generate_bbs_from_grid_manager(gm, beams, "Residential Project")
             
         level_0_cols = [c for c in gm.columns if c.level == 0]
         footings = []
@@ -536,6 +383,8 @@ if st.session_state.get('analysis_done', False):
                 copied.id = f"{b.id}_L{i}"
                 copied.level = i
                 all_beams.append(copied)
+                
+        project_bbs = generate_bbs_from_grid_manager(gm, all_beams, "Residential Project")
             
         quantifier = Quantifier()
         bom = quantifier.calculate_bom(gm.columns, all_beams, footings, grid_mgr=gm, use_fly_ash=use_fly_ash)
@@ -548,7 +397,15 @@ if st.session_state.get('analysis_done', False):
         
         fck = int(conc_grade[1:])
         floor_area_m2 = gm.width_m * gm.length_m
-        building_weight = bom.total_concrete_vol_m3 * 25 + bom.total_steel_weight_kg * 0.00981 + floor_area_m2 * num_stories * live_load
+        dead_load_per_floor = bom.total_concrete_vol_m3 * 25 / max(num_stories, 1)  # DL per floor
+        ll_per_m2 = load_params.live_load_kn_m2 if hasattr(load_params, 'live_load_kn_m2') else 2.0
+        ll_fraction = 0.25 if ll_per_m2 <= 3.0 else 0.50  # IS 1893 Table 10
+        building_weight = bom.total_concrete_vol_m3 * 25  # Total DL (concrete includes steel density)
+        for lvl in range(num_stories):
+            if lvl == num_stories - 1:  # Roof
+                building_weight += 0  # 0% LL on roof
+            else:
+                building_weight += floor_area_m2 * ll_per_m2 * ll_fraction
 
         seismic_result = run_seismic_check(
             gm.columns,
@@ -579,8 +436,8 @@ if st.session_state.get('analysis_done', False):
         safety_summary = get_safety_warnings_results(
             gm.columns,
             all_beams,
-            floor_width=width,
-            floor_length=length,
+            floor_width=gm.width_m,
+            floor_length=gm.length_m,
             fck=fck,
             seismic_zone=seismic_zone
         )
@@ -630,7 +487,30 @@ if st.session_state.get('analysis_done', False):
     # 4 metric cards
     c1, c2, c3, c4 = st.columns(4)
     with c1:
-        render_metric_card("Total Concrete", f"{bom.total_concrete_vol_m3:.2f} m³", icon="🏢")
+        with st.expander(f"🏢 Total Concrete: {bom.total_concrete_vol_m3:.2f} m³", expanded=False):
+            from src.site_calculators import mix_design_table
+            _mix = mix_design_table(conc_grade or "M25")
+            vol = bom.total_concrete_vol_m3
+            dry_factor = 1.54  # IS 10262 dry volume factor
+            _fck_key = int((conc_grade or "M25").replace("M", ""))
+            _wc = _mix["water_cement_ratio"]
+            _cement_per_m3 = _mix["cement_kg_m3"]
+            _fa_per_m3 = _mix["fine_aggregate_kg_m3"] / 1600.0  # kg→m³ (bulk density ~1600)
+            _ca_per_m3 = _mix["coarse_aggregate_kg_m3"] / 1450.0  # kg→m³ (bulk density ~1450)
+            total_cement_bags = round(vol * _mix["cement_bags_per_m3"], 1)
+            total_fa_m3 = round(vol * _fa_per_m3, 2)
+            total_ca_m3 = round(vol * _ca_per_m3, 2)
+            st.caption(f"**Grade:** {conc_grade or 'M25'} | **W/C Ratio:** {_wc}")
+            st.caption(f"**Wet Volume:** {vol:.2f} m³")
+            st.markdown(f"""
+| Material | Per m³ | Total |
+|---|---|---|
+| Cement | {_mix['cement_bags_per_m3']} bags | **{total_cement_bags} bags (50kg)** |
+| Fine Aggregate | {_fa_per_m3:.3f} m³ | **{total_fa_m3} m³** |
+| Coarse Aggregate | {_ca_per_m3:.3f} m³ | **{total_ca_m3} m³** |
+| Water | {_mix['water_kg_m3']} kg | {round(vol * _mix['water_kg_m3'], 0):.0f} kg |
+""")
+            st.caption("Ref: IS 10262:2019 Concrete Mix Design")
     with c2:
         render_metric_card("Total Steel", f"{bom.total_steel_weight_kg:.0f} kg", icon="🔩")
     with c3:
@@ -757,29 +637,4 @@ else:
     st.info("Adjust parameters in the sidebar and click 'Run Analysis' to generate the structure.")
 
 st.markdown("---")
-st.markdown("""
-<div style="background: linear-gradient(135deg, #e8f5e9 0%, #e3f2fd 100%);
-            padding: 20px; border-radius: 10px; border-left: 5px solid #1565c0;
-            margin: 10px 0;">
-    <h4 style="color: #1565c0; margin-top: 0;">🛡️ Responsible Use — Engineering Best Practice</h4>
-    <p style="color: #37474f; font-size: 0.95em; margin-bottom: 10px;">
-        StructOptima generates <strong>preliminary structural designs compliant with IS 456:2000, 
-        IS 1893:2016, and IS 13920:2016</strong>. Like any design tool — including STAAD.Pro, ETABS, 
-        and SAP2000 — all outputs require professional review before construction.
-    </p>
-    <ul style="color: #37474f; font-size: 0.9em; margin-bottom: 0; padding-left: 20px;">
-        <li>✅ <strong>IS-code calculations</strong> are automated with safety factors γc=1.5, γs=1.15</li>
-        <li>✅ <strong>51 integrated modules</strong> cover columns, beams, slabs, foundations, seismic, and rebar detailing</li>
-        <li>✅ <strong>Independent audit checks</strong> verify every design against code limits</li>
-        <li>📋 Final designs should be <strong>reviewed and sealed by a licensed Structural Engineer</strong> for construction</li>
-        <li>📋 Site-specific geotechnical investigation is recommended before foundation construction</li>
-    </ul>
-</div>
-""", unsafe_allow_html=True)
-
-st.markdown("""
-<div style="text-align: center; padding: 15px 0; color: #9e9e9e; font-size: 0.85em;">
-    <p style="margin: 0;">© 2026 StructOptima — Built by <strong>Srinidh Ameerpeta &amp; Charan Tej</strong></p>
-    <p style="margin: 4px 0 0 0;">All calculations per IS 456:2000 · IS 1893:2016 · IS 13920:2016 | v1.0.0</p>
-</div>
-""", unsafe_allow_html=True)
+st.caption("StructOptima v1.0.0 · IS 456:2000 · IS 1893:2016 · IS 13920:2016")

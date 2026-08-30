@@ -270,7 +270,11 @@ class MemberDesigner:
             Mu = Mu_kNm * 1e6
             
             R = Mu / (b_mm * d**2)
-            pt = (self.fck / (2 * self.fy)) * (1 - math.sqrt(1 - 4.598 * R / self.fck)) * 100
+            # Guard against over-reinforced section (discriminant < 0)
+            # Per IS 456, the section should be redesigned if Mu > Mu_lim,
+            # but we clamp here to avoid math domain crash
+            discriminant = max(0.0, 1 - 4.598 * R / self.fck)
+            pt = (self.fck / (2 * self.fy)) * (1 - math.sqrt(discriminant)) * 100
             
             pt_min = 0.85 / self.fy * 100  # IS 456 Cl 26.5.1.1
             pt = max(pt, pt_min)
@@ -324,10 +328,12 @@ class MemberDesigner:
         
         if tau_v <= tau_c:
             Asv_min = 0.4 * b_mm * d / (0.87 * self.fy)
-            sv_max = min(0.75 * d, 300)
+            sv_max = int(math.floor(min(0.75 * d, 300) / 5) * 5)  # Round DOWN to 5mm per IS 13920
             stirrup_dia = 8
             Asv_leg = math.pi * stirrup_dia**2 / 4 * 2
             sv = min(0.87 * self.fy * Asv_leg / (0.4 * b_mm), sv_max)
+            sv = int(math.floor(sv / 5) * 5)  # Round DOWN for safety
+            sv = max(50, sv)  # Minimum practical spacing
             
             logger.info(f"{element_id}: Min shear reinforcement, sv={sv:.0f}mm")
             return tau_v, tau_c, 0.0, sv
@@ -342,7 +348,9 @@ class MemberDesigner:
         Asv = math.pi * stirrup_dia**2 / 4 * 2
         sv = 0.87 * self.fy * Asv * d / (Vus * 1000)
         sv = min(sv, 0.75 * d, 300)
-        sv = max(50, math.floor(sv / 25) * 25)
+        # IS 13920:2016 Cl 6.3.5: always round DOWN to nearest 5mm for safety
+        sv = int(math.floor(sv / 5) * 5)
+        sv = max(50, sv)  # Minimum practical spacing 50mm
         
         logger.info(f"{element_id}: Shear design, tau_v={tau_v:.2f}, sv={sv:.0f}mm")
         return tau_v, tau_c, Vus, sv

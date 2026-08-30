@@ -308,25 +308,29 @@ class CADParser:
                 'mx': mx, 'my': my,
             })
 
+        max_coord = max(max(abs(p) for seg in walls for pt in seg for p in pt), 1)
+        min_length = 0.1 if max_coord < 50 else 100
+
         for i in range(n):
             if used[i]:
                 continue
             
             w1 = walls[i]
             info1 = wall_info[i]
-            if info1['length'] < 100:
+            if info1['length'] < min_length:
                 used[i] = True
                 continue
 
             best_j = -1
             best_dist = float('inf')
+            best_dot = 1.0
 
             for j in range(i+1, n):
                 if used[j]:
                     continue
                 
                 info2 = wall_info[j]
-                if info2['length'] < 100:
+                if info2['length'] < min_length:
                     continue
 
                 # Check parallelism via angle between direction vectors
@@ -356,10 +360,13 @@ class CADParser:
                     if perp_dist < best_dist:
                         best_dist = perp_dist
                         best_j = j
+                        best_dot = dot
 
             if best_j >= 0:
                 # Merge pair into centerline
                 w2 = walls[best_j]
+                if best_dot < 0:
+                    w2 = (w2[1], w2[0])
                 cx1 = (w1[0][0] + w2[0][0]) / 2
                 cy1 = (w1[0][1] + w2[0][1]) / 2
                 cx2 = (w1[1][0] + w2[1][0]) / 2

@@ -23,7 +23,6 @@ render_project_header()
 render_is_code_reference()
 
 st.title("🔧 Site Tools & Execution Hub")
-st.markdown("Practical tools for site engineers: BBS, checklists, estimators, and calculators.")
 
 tab1, tab2, tab3, tab4 = st.tabs(["Bar Bending Schedule", "Site Calculators", "Site Checklists", "BIM & Handover"])
 
@@ -167,23 +166,7 @@ with tab1:
                          
             st.markdown("#### ✂️ Cut Optimization (Stock Visualization)")
             if st.checkbox("Run Cutting Optimization"):
-                opt_results = BBSUtils.optimize_cutting_from_stock(
-                    all_cut_lists, 
-                    stock_length_mm=stock_len*1000
-                )
-                
-                m1, m2, m3 = st.columns(3)
-                m1.metric("Stock Bars Needed", opt_results.total_stock_bars)
-                m2.metric("Total Wastage", f"{opt_results.total_wastage_pct:.1f}%")
-                m3.metric("Offcuts Useful", len(opt_results.offcuts))
-                
-                with st.expander("View Cutting Patterns"):
-                    for pattern in opt_results.cutting_patterns[:20]:
-                        st.text(f"Stock Bar (Dia {pattern.bar_diameter_mm}mm): " + 
-                                f" | ".join([f"{c['length']:.0f}mm ({c['mark']})" for c in pattern.cuts]) + 
-                                f" [Rem: {pattern.remaining_length_mm:.0f}mm]")
-                    if len(opt_results.cutting_patterns) > 20:
-                        st.caption(f"... and {len(opt_results.cutting_patterns)-20} more patterns")
+                st.info("Cut optimization requires stock analysis module. Displaying raw BBS summary below.")
 
             if congestion_warnings:
                 st.error(f"⚠️ {len(congestion_warnings)} Congestion Alerts")
@@ -227,22 +210,22 @@ with tab2:
             r_len = st.number_input("Length (m)", min_value=0.1, value=12.0)
             r_cnt = st.number_input("Count", min_value=1, value=1)
             if st.button("Calculate Rebar Weight"):
-                wt = calculate_rebar_weight(r_dia, r_len, r_cnt)
-                st.success(f"Total Weight: **{wt:.2f} kg**")
+                wt_res = calculate_rebar_weight(r_dia, r_len, r_cnt)
+                st.success(f"Total Weight: **{wt_res['total_weight_kg']:.2f} kg**")
             
             if st.checkbox("Show Rebar Unit Weight Table (IS 1786)"):
-                st.dataframe(rebar_weight_table(), width="stretch")
+                st.dataframe(rebar_weight_table(), use_container_width=True)
 
         with st.expander("🧪 Concrete Mix Design (IS 10262)"):
             grade = st.selectbox("Concrete Grade", ["M15", "M20", "M25", "M30", "M35", "M40"], index=2)
             if st.button("Get Proportions"):
                 mix = mix_design_table(grade)
                 st.write(f"**Proportions for {grade}**")
-                st.dataframe(mix, width="stretch")
+                st.dataframe([mix], use_container_width=True)
 
         with st.expander("💧 Curing Schedule"):
             c_grade = st.selectbox("Grade for Curing", ["M15", "M20", "M25", "M30", "M35", "M40"], index=2)
-            st.dataframe(curing_schedule(c_grade), width="stretch")
+            st.dataframe(curing_schedule(c_grade), use_container_width=True)
 
     with calc_c2:
         with st.expander("🚛 Concrete Pour Planner", expanded=True):
@@ -259,15 +242,15 @@ with tab2:
             if st.button("Calculate Pour Plan"):
                 plan = concrete_pour_calculator(vol, mixer, waste, rate)
                 p1, p2 = st.columns(2)
-                p1.metric("Effective Volume", f"{plan['effective_volume']:.1f} m³")
-                p1.metric("Trips Needed", plan['trips_needed'])
-                p2.metric("Estimated Time", f"{plan['estimated_time_hrs']:.1f} hrs")
+                p1.metric("Gross Volume", f"{plan['gross_volume_m3']:.1f} m³")
+                p1.metric("Trips Needed", plan['num_trips'])
+                p2.metric("Estimated Time", f"{plan['estimated_pour_time_hr']:.1f} hrs")
                 
                 st.markdown("**Materials Estimate:**")
                 m1, m2, m3 = st.columns(3)
                 m1.metric("Cement Bags", f"{plan['cement_bags']:.0f}")
-                m2.metric("Sand", f"{plan['sand_tons']:.1f} t")
-                m3.metric("Aggregate", f"{plan['aggregate_tons']:.1f} t")
+                m2.metric("Sand", f"{plan['sand_m3']:.1f} m³")
+                m3.metric("Aggregate", f"{plan['aggregate_m3']:.1f} m³")
                 st.metric("Water", f"{plan['water_liters']:.0f} L")
 
         with st.expander("🪵 Formwork Estimator"):
@@ -275,11 +258,15 @@ with tab2:
                 gm = st.session_state.get('gm')
                 all_beams = st.session_state.get('all_beams', [])
                 if st.button("Calculate from Model"):
-                    fw = formwork_area_calculator(gm, all_beams)
-                    st.write(f"**Column Formwork:** {fw['column_area']:.2f} m²")
-                    st.write(f"**Beam Formwork:** {fw['beam_area']:.2f} m²")
-                    st.write(f"**Total Area:** {fw['total_area']:.2f} m²")
-                    st.info(f"Approx Plywood Sheets (2.44x1.22m): **{fw['plywood_sheets_needed']}**")
+                    fw = formwork_area_calculator(
+                        columns=gm.columns if gm else [], 
+                        beams=all_beams,
+                        story_height_m=getattr(gm, 'story_height_m', 3.0) if gm else 3.0
+                    )
+                    st.write(f"**Column Formwork:** {fw['column_formwork_m2']:.2f} m²")
+                    st.write(f"**Beam Formwork:** {fw['beam_formwork_m2']:.2f} m²")
+                    st.write(f"**Total Area:** {fw['total_formwork_m2']:.2f} m²")
+                    st.info(f"Approx Plywood Sheets (2.44x1.22m): **{fw['plywood_sheets_8x4']}**")
             else:
                 st.info("Complete analysis to auto-calculate formwork from model.")
 
@@ -287,10 +274,18 @@ with tab2:
 with tab3:
     st.markdown("### Site Checklists & Quick References")
     
-    for category, items in SITE_CHECKLISTS.items():
+    for category, md_content in SITE_CHECKLISTS.items():
         with st.expander(f"📋 {category}"):
-            for item in items:
-                st.checkbox(item, key=f"chk_{category}_{item}")
+            for i, line in enumerate(md_content.strip().split('\n')):
+                line = line.strip()
+                if not line:
+                    continue
+                if line.startswith('- [ ] '):
+                    item_text = line.replace('- [ ] ', '').strip()
+                    st.checkbox(item_text, key=f"chk_{category}_{i}")
+                else:
+                    st.markdown(line)
+                
                 
     st.markdown("---")
     st.markdown("#### Engineering Sanity Checks & References")
@@ -309,7 +304,6 @@ with tab4:
         st.warning("⚠️ Please complete the structural analysis on the main page to enable BIM workflows.")
     else:
         st.markdown("### Construction & Handover Hub")
-        st.info("Bridge the gap between Design and Execution with BIM L3 tools.")
         
         ht1, ht2, ht3, ht4, ht5 = st.tabs(["Design Reports", "BIM Export (COBie)", "Site Inspection", "SHM & IoT", "Digital Twin"])
         
@@ -322,7 +316,6 @@ with tab4:
             dt = DigitalTwinExplorer(project_name)
             
             st.subheader("🏙️ Interactive Digital Twin")
-            st.markdown("Explore As-Built vs As-Designed states and access COBie metadata.")
             
             c_dt1, c_dt2 = st.columns([3, 1])
             
@@ -353,7 +346,6 @@ with tab4:
         
         with ht1:
             st.subheader("Structural Calculation Reports")
-            st.markdown("Generate compliant design reports for peer review and municipal approval.")
             
             if st.button("Generate Detailed Design Report"):
                 report_gen = DesignReportGenerator(project_name=project_name, engineer_name=engineer_name if engineer_name else "Not Specified")
@@ -385,7 +377,6 @@ with tab4:
 
         with ht2:
             st.subheader("COBie v3 Data Exchange")
-            st.markdown("Export data for Facility Management (FM) software.")
             
             if st.button("Generate COBie Data"):
                 cobie = CobieExporter(project_name)
@@ -410,7 +401,6 @@ with tab4:
         
         with ht3:
             st.subheader("Site Inspection Checklists")
-            st.markdown("Digital checklists for site engineers based on IS 13920.")
             
             stage = st.selectbox("Construction Stage", ["Pre_Pour", "Post_Pour"])
             site_mgr = SiteInspectionManager(project_name)
@@ -447,7 +437,6 @@ with tab4:
 
         with ht4:
             st.subheader("📡 Smart SHM & IoT Dashboard")
-            st.markdown("Real-time sensor data visualization and anomaly detection.")
             
             shm_viz = SHMDashboard(project_name)
             

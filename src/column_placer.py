@@ -129,7 +129,8 @@ class ColumnPlacer:
     def _compute_adaptive_params(self):
         env = self.building_envelope
         if not env or len(env) < 3:
-            self.max_span = 7000.0
+            # FIX 5: cap at 5000mm (IS 456 Table 26 economical residential span)
+            self.max_span = 5000.0
             self.min_span = 1500.0
             self.proximity_merge = 700.0
             self.bldg_width = 10000.0
@@ -142,7 +143,11 @@ class ColumnPlacer:
         self.bldg_length = max(ys) - min(ys)
         shorter = min(self.bldg_width, self.bldg_length)
         
-        self.max_span = min(7000.0, max(4000.0, shorter * 0.6))
+        # FIX 5: Residential economical span per IS 456 Table 26 / SP 34:
+        # Two-way slab with 125mm thickness works up to 5m span (L/d = 40).
+        # Beyond 5m, slab becomes uneconomical (needs 150mm+ thickness).
+        # Previous code allowed 7m — that is for industrial/commercial structures.
+        self.max_span = min(5000.0, max(3000.0, shorter * 0.5))
         self.min_span = max(1000.0, shorter * 0.08)
         self.proximity_merge = max(600.0, shorter * 0.05)
         
@@ -624,27 +629,70 @@ class ColumnPlacer:
                         ))
     
     def _size_columns(self):
+        """Apply IS 456 / IS 13920 / SP 34 minimum column sizes by junction type.
+        
+        Real-life practice (G+2/G+3 residential):
+          - Corner   : 230×300mm (one face flush with wall = 230mm, other minimum 300mm)
+          - Edge     : 230×300mm (same — one face in wall plane)
+          - T-junction: 230×300mm to 300×300mm (depends on loads from both sides)
+          - Cross-jct: 300×300mm (interior, loads from all 4 bays)
+          - Interior : 300×300mm (max tributary area, govern size)
+        
+        Ref: IS 456:2000 Cl 26.5.3, IS 13920:2016 Cl 6.1.3, SP 34 Chapter 5
+        """
+        # Preferred sizes on-site (brick module + formwork standard)
+        # 230, 300, 350, 380, 400, 450, 500, 600
+        PREF_SIZES = [230, 300, 350, 380, 400, 450, 500, 600]
+        
+        def _snap_to_preferred(val: float) -> float:
+            """Snap to nearest preferred column size ≥ val."""
+            for s in PREF_SIZES:
+                if s >= val:
+                    return float(s)
+            return float(math.ceil(val / 25) * 25)
+        
         for col in self.columns:
-            if col.junction_type == JunctionType.CORNER:
-                col.width = max(col.width, self.min_dim)
-                col.depth = max(col.depth, self.min_dim)
-            elif col.junction_type == JunctionType.CROSS_JUNCTION:
-                col.width = max(col.width, self.min_dim)
-                col.depth = max(col.depth, self.min_dim + 150)
-            elif col.junction_type == JunctionType.T_JUNCTION:
-                col.width = max(col.width, self.min_dim)
-                col.depth = max(col.depth, self.min_dim + 100)
-            else:
-                col.width = max(col.width, self.min_dim)
-                col.depth = max(col.depth, self.min_dim)
+            jt = col.junction_type
             
+            if jt == JunctionType.CORNER:
+                # Corner: IS 456 Cl 34.1.3 — 230mm face aligns with wall
+                # Minimum 230×300 (one face in wall, other projects minimum 300mm)
+                min_w = max(self.min_dim, 230.0)
+                min_d = max(self.min_dim, 300.0)
+            
+            elif jt == JunctionType.EDGE:
+                # Edge: Same as corner — face flush with wall
+                min_w = max(self.min_dim, 230.0)
+                min_d = max(self.min_dim, 300.0)
+            
+            elif jt == JunctionType.T_JUNCTION:
+                # T-junction: One major beam direction → slightly larger
+                # Practice: 230×300 or 300×300 depending on seismic zone
+                min_w = max(self.min_dim, 230.0)
+                min_d = max(self.min_dim, 300.0)
+            
+            elif jt == JunctionType.CROSS_JUNCTION:
+                # Cross-junction (interior): Loads from all 4 bays → larger
+                # IS 13920 Cl 6.1.3: min 300mm in seismic zones III/IV/V
+                min_w = max(self.min_dim, 300.0)
+                min_d = max(self.min_dim, 300.0)
+            
+            else:  # INTERIOR or any other
+                min_w = max(self.min_dim, 300.0)
+                min_d = max(self.min_dim, 300.0)
+            
+            # Apply minimums and snap to preferred size
+            col.width = _snap_to_preferred(max(col.width, min_w))
+            col.depth = _snap_to_preferred(max(col.depth, min_d))
+            
+            # Ensure aspect ratio ≥ 0.4 (IS 13920 Cl 7.1.2 — else it's a wall)
             aspect_ratio = min(col.width, col.depth) / max(col.width, col.depth)
             if aspect_ratio < self.MIN_ASPECT_RATIO:
                 self.warnings.append(PlacementWarning(
                     severity="WARNING",
-                    message=f"Column {col.id} has aspect ratio {aspect_ratio:.2f} < 0.4 - may be classified as structural wall",
+                    message=f"Column {col.id} has aspect ratio {aspect_ratio:.2f} < 0.4 - may be classified as structural wall (IS 13920 Cl 7.1.2)",
                     column_id=col.id,
-                    code_reference="IS 13920 Clause 7.1"
+                    code_reference="IS 13920 Clause 7.1.2"
                 ))
     
     def _orient_columns(self):
@@ -686,13 +734,30 @@ class ColumnPlacer:
         self._place_at_grid_intersections()
         self._fill_gaps()
         
-        # Deduplicate columns that ended up at the same location
+        # FIX 7: Deduplicate using proximity_merge distance instead of 500mm buckets.
+        # Old method: snap to 500mm grid — drops valid columns and keeps wrong ones.
+        # New method: keep the HIGHER-DEGREE column when two are within proximity_merge.
+        # Priority: CROSS > T > CORNER/EDGE > INTERIOR (higher degree = structural priority)
+        _degree_priority = {
+            JunctionType.CROSS_JUNCTION: 4,
+            JunctionType.T_JUNCTION: 3,
+            JunctionType.CORNER: 2,
+            JunctionType.EDGE: 2,
+            JunctionType.INTERIOR: 1,
+        }
         deduped = []
-        seen = set()
         for col in self.columns:
-            key = (round(col.x / 500.0) * 500.0, round(col.y / 500.0) * 500.0)
-            if key not in seen:
-                seen.add(key)
+            merged = False
+            for existing in deduped:
+                dist = math.hypot(col.x - existing.x, col.y - existing.y)
+                if dist < self.proximity_merge:
+                    # Keep the higher-priority junction type; upgrade if new is higher
+                    if _degree_priority.get(col.junction_type, 0) > _degree_priority.get(existing.junction_type, 0):
+                        existing.junction_type = col.junction_type
+                        existing.degree = max(existing.degree, col.degree)
+                    merged = True
+                    break
+            if not merged:
                 deduped.append(col)
         self.columns = deduped
         
