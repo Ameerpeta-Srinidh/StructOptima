@@ -286,7 +286,8 @@ class BeamPlacer:
                 has_wall = self._wall_exists_between((x1, y1), (x2, y2))
                 
                 beam_count += 1
-                depth = self._calculate_depth(span, SupportType.COLUMN_COLUMN)
+                span_mm_val = span * 1000.0 if span < 100.0 else span
+                depth = self._calculate_depth(span_mm_val, SupportType.COLUMN_COLUMN)
                 width = self.WALL_THICKNESS_MM if has_wall else self.MIN_BEAM_WIDTH_MM
                 
                 beam = BeamPlacement(
@@ -294,7 +295,7 @@ class BeamPlacer:
                     beam_type=BeamType.PRIMARY,
                     start_x=x1, start_y=y1,
                     end_x=x2, end_y=y2,
-                    span_mm=span,
+                    span_mm=span_mm_val,
                     width_mm=width,
                     depth_mm=depth,
                     start_node=self._get_column_id(x1, y1),
@@ -335,7 +336,8 @@ class BeamPlacer:
                 has_wall = self._wall_exists_between((x1, y1), (x2, y2))
                 
                 beam_count += 1
-                depth = self._calculate_depth(span, SupportType.COLUMN_COLUMN)
+                span_mm_val = span * 1000.0 if span < 100.0 else span
+                depth = self._calculate_depth(span_mm_val, SupportType.COLUMN_COLUMN)
                 width = self._calculate_width(has_wall)
                 
                 beam = BeamPlacement(
@@ -343,7 +345,7 @@ class BeamPlacer:
                     beam_type=BeamType.PRIMARY,
                     start_x=x1, start_y=y1,
                     end_x=x2, end_y=y2,
-                    span_mm=span,
+                    span_mm=span_mm_val,
                     width_mm=width,
                     depth_mm=depth,
                     start_node=self._get_column_id(x1, y1),
@@ -485,14 +487,15 @@ class BeamPlacer:
                 mid_x = (x1 + x2) / 2
                 beam_count += 1
                 span = height
-                depth = self._calculate_depth(span, SupportType.BEAM_BEAM)
+                span_mm_val = span * 1000.0 if span < 100.0 else span
+                depth = self._calculate_depth(span_mm_val, SupportType.BEAM_BEAM)
                 
                 beam = BeamPlacement(
                     id=f"B{beam_count}",
                     beam_type=BeamType.SECONDARY,
                     start_x=mid_x, start_y=y1,
                     end_x=mid_x, end_y=y2,
-                    span_mm=span,
+                    span_mm=span_mm_val,
                     width_mm=self._calculate_width(True),
                     depth_mm=depth,
                     support_type=SupportType.BEAM_BEAM,
@@ -529,14 +532,15 @@ class BeamPlacer:
                 mid_y = (y1 + y2) / 2
                 beam_count += 1
                 span = width
-                depth = self._calculate_depth(span, SupportType.BEAM_BEAM)
+                span_mm_val = span * 1000.0 if span < 100.0 else span
+                depth = self._calculate_depth(span_mm_val, SupportType.BEAM_BEAM)
                 
                 beam = BeamPlacement(
                     id=f"B{beam_count}",
                     beam_type=BeamType.SECONDARY,
                     start_x=x1, start_y=mid_y,
                     end_x=x2, end_y=mid_y,
-                    span_mm=span,
+                    span_mm=span_mm_val,
                     width_mm=self._calculate_width(True),
                     depth_mm=depth,
                     support_type=SupportType.BEAM_BEAM,
@@ -640,20 +644,21 @@ class BeamPlacer:
                         continue
                         
                     beam_count += 1
-                    depth = self._calculate_depth(dist, SupportType.CANTILEVER)
+                    dist_mm_val = dist * 1000.0 if dist < 100.0 else dist
+                    depth = self._calculate_depth(dist_mm_val, SupportType.CANTILEVER)
                     width = self._calculate_width(True) # Cantilevers usually match wall/slab edge
                     
                     back_span = self._find_back_span(cx, cy, sx, sy) # Pass direction
                     
                     # Strictly 1.5x backspan required
-                    is_safe = back_span >= dist * self.MIN_BACK_SPAN_RATIO
+                    is_safe = back_span >= dist_mm_val * self.MIN_BACK_SPAN_RATIO
                     
                     beam = BeamPlacement(
                         id=f"B{beam_count}",
                         beam_type=BeamType.CANTILEVER,
                         start_x=cx, start_y=cy,
                         end_x=sx, end_y=sy,
-                        span_mm=dist,
+                        span_mm=dist_mm_val,
                         width_mm=width,
                         depth_mm=depth,
                         start_node=self._get_column_id(cx, cy),

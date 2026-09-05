@@ -309,7 +309,8 @@ class CADParser:
             })
 
         max_coord = max(max(abs(p) for seg in walls for pt in seg for p in pt), 1)
-        min_length = 0.1 if max_coord < 50 else 100
+        # If coordinates are > 500, they are likely in mm. Otherwise they are in meters.
+        min_length = 0.1 if max_coord < 500 else 100
 
         for i in range(n):
             if used[i]:

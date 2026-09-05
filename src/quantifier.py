@@ -110,7 +110,15 @@ class Quantifier:
         if grid_mgr and hasattr(grid_mgr, 'slab_schedule') and grid_mgr.slab_schedule:
             # Calculate total slab area from grid
             if grid_mgr.x_grid_lines and grid_mgr.y_grid_lines:
-                total_floor_area = grid_mgr.width_m * grid_mgr.length_m
+                actual_area = 0.0
+                if grid_mgr.slab_schedule:
+                    for slab_id, slab in grid_mgr.slab_schedule.items():
+                        if hasattr(slab, 'area_m2'):
+                            actual_area += slab.area_m2
+                if actual_area > 0:
+                    total_floor_area = actual_area
+                else:
+                    total_floor_area = grid_mgr.width_m * grid_mgr.length_m
                 num_stories = getattr(grid_mgr, 'num_stories', 1)
                 
                 # Get average thickness from slab schedule
@@ -209,7 +217,15 @@ class Quantifier:
              if 'S1' in grid_mgr.slab_schedule:
                  s_res = grid_mgr.slab_schedule['S1']
                  # Total area
-                 total_area = grid_mgr.width_m * grid_mgr.length_m * grid_mgr.num_stories
+                 actual_area = 0.0
+                 if grid_mgr.slab_schedule:
+                     for slab_id, slab in grid_mgr.slab_schedule.items():
+                         if hasattr(slab, 'area_m2'):
+                             actual_area += slab.area_m2
+                 if actual_area > 0:
+                     total_area = actual_area * grid_mgr.num_stories
+                 else:
+                     total_area = grid_mgr.width_m * grid_mgr.length_m * grid_mgr.num_stories
                  
                  # Subtract void?
                  
@@ -351,7 +367,16 @@ class Quantifier:
         # Finish Area: Floor + Ceiling + Wall Plaster
         finish_area = 0.0
         if grid_mgr:
-            total_floor_area = grid_mgr.width_m * grid_mgr.length_m * getattr(grid_mgr, 'num_stories', 1)
+            actual_area = 0.0
+            if hasattr(grid_mgr, 'slab_schedule') and grid_mgr.slab_schedule:
+                for slab_id, slab in grid_mgr.slab_schedule.items():
+                    if hasattr(slab, 'area_m2'):
+                        actual_area += slab.area_m2
+            
+            if actual_area > 0:
+                total_floor_area = actual_area * getattr(grid_mgr, 'num_stories', 1)
+            else:
+                total_floor_area = grid_mgr.width_m * grid_mgr.length_m * getattr(grid_mgr, 'num_stories', 1)
             finish_area = (total_floor_area * 2.0) + plaster_area
             
         finish_cost_min = finish_area * self.finish_rate_min

@@ -258,6 +258,20 @@ class GridManager(BaseModel):
         if not self.x_grid_lines or not self.y_grid_lines:
             return
 
+        # ── FIX: Ensure ALL column positions exist in grid lines ──
+        # Intermediate columns placed by AutoFramer may not be in the original grid.
+        # Without their coordinates in the grid, trib_area will be zero.
+        GRID_TOL = 0.01  # 10mm tolerance for matching
+        for col in self.columns:
+            # Check X
+            if not any(abs(gx - col.x) < GRID_TOL for gx in self.x_grid_lines):
+                self.x_grid_lines.append(round(col.x, 4))
+                self.x_grid_lines.sort()
+            # Check Y
+            if not any(abs(gy - col.y) < GRID_TOL for gy in self.y_grid_lines):
+                self.y_grid_lines.append(round(col.y, 4))
+                self.y_grid_lines.sort()
+
         x_min, x_max = min(self.x_grid_lines), max(self.x_grid_lines)
         y_min, y_max = min(self.y_grid_lines), max(self.y_grid_lines)
         
@@ -703,7 +717,7 @@ class GridManager(BaseModel):
                 # Note: Previous code hardcoded 0.23 width. Now dynamic.
                 avg_span_x = (self.x_grid_lines[-1] - self.x_grid_lines[0]) / max(1, len(self.x_grid_lines) - 1) if self.x_grid_lines else 4.0
                 avg_span_y = (self.y_grid_lines[-1] - self.y_grid_lines[0]) / max(1, len(self.y_grid_lines) - 1) if self.y_grid_lines else 4.0
-                trib_width_m = min(avg_span_x, avg_span_y) / 2.0  # Half-span each side
+                trib_width_m = min(avg_span_x, avg_span_y)  # Half-span each side
                 floor_udl = trib_width_m * 12.0  # 12 kN/m2 typical total floor load
                 total_load = floor_udl + sw + 12.0  # + wall load 12 kN/m default
                 

@@ -147,7 +147,7 @@ class SoftStoreyChecker:
 
 
 class ShortColumnChecker:
-    MIN_SLENDERNESS_FOR_SHORT = 4.0
+    MIN_SLENDERNESS_FOR_SHORT = 5.0
     
     def __init__(self):
         pass
@@ -165,6 +165,9 @@ class ShortColumnChecker:
             col_depth = col.get('depth', 300)
             full_height = col.get('height', 3000)
             
+            if col_depth <= 0:
+                continue
+                
             restraining_beams = []
             for beam in intermediate_beams:
                 beam_start = beam.get('start', (0, 0))

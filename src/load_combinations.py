@@ -171,6 +171,27 @@ IS_456_COMBINATIONS = [
         is_code_requirement="IS 1893"
     ),
     LoadCombination(
+        name="1.5(DL-EQx)",
+        combination_type=CombinationType.STRENGTH,
+        factors={LoadType.DEAD: 1.5, LoadType.SEISMIC_X: -1.5},
+        description="Dead - Seismic X (reverse, no live)",
+        is_code_requirement="IS 1893"
+    ),
+    LoadCombination(
+        name="1.5(DL+EQy)",
+        combination_type=CombinationType.STRENGTH,
+        factors={LoadType.DEAD: 1.5, LoadType.SEISMIC_Y: 1.5},
+        description="Dead + Seismic Y (no live)",
+        is_code_requirement="IS 1893"
+    ),
+    LoadCombination(
+        name="1.5(DL-EQy)",
+        combination_type=CombinationType.STRENGTH,
+        factors={LoadType.DEAD: 1.5, LoadType.SEISMIC_Y: -1.5},
+        description="Dead - Seismic Y (reverse, no live)",
+        is_code_requirement="IS 1893"
+    ),
+    LoadCombination(
         name="0.9DL+1.5EQx",
         combination_type=CombinationType.STABILITY,
         factors={LoadType.DEAD: 0.9, LoadType.SEISMIC_X: 1.5},
@@ -179,10 +200,26 @@ IS_456_COMBINATIONS = [
         is_code_requirement="IS 1893"
     ),
     LoadCombination(
+        name="0.9DL-1.5EQx",
+        combination_type=CombinationType.STABILITY,
+        factors={LoadType.DEAD: 0.9, LoadType.SEISMIC_X: -1.5},
+        description="CRITICAL: Seismic uplift/overturning check (reverse)",
+        is_critical=True,
+        is_code_requirement="IS 1893"
+    ),
+    LoadCombination(
         name="0.9DL+1.5EQy",
         combination_type=CombinationType.STABILITY,
         factors={LoadType.DEAD: 0.9, LoadType.SEISMIC_Y: 1.5},
         description="CRITICAL: Seismic uplift/overturning check Y",
+        is_critical=True,
+        is_code_requirement="IS 1893"
+    ),
+    LoadCombination(
+        name="0.9DL-1.5EQy",
+        combination_type=CombinationType.STABILITY,
+        factors={LoadType.DEAD: 0.9, LoadType.SEISMIC_Y: -1.5},
+        description="CRITICAL: Seismic uplift/overturning check Y (reverse)",
         is_critical=True,
         is_code_requirement="IS 1893"
     ),

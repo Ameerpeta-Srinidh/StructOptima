@@ -220,6 +220,9 @@ class StabilityChecker:
         Returns:
             (slenderness_ratio, max_allowed, is_ok)
         """
+        if width_mm <= 0 or depth_mm <= 0:
+            return {"status": "FAIL", "reason": "Invalid member dimensions (zero or negative)"}
+            
         Le = effective_length_factor * height_mm
         D = min(width_mm, depth_mm)  # Minimum lateral dimension
         
@@ -248,6 +251,9 @@ class StabilityChecker:
         Returns:
             (slenderness_ratio, max_allowed, is_ok)
         """
+        if width_mm <= 0 or depth_mm <= 0:
+            return {"status": "FAIL", "reason": "Invalid member dimensions (zero or negative)"}
+            
         L_by_b = span_mm / width_mm
         limit1 = 60.0
         limit2 = 250 * width_mm / depth_mm

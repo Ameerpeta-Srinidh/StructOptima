@@ -514,11 +514,12 @@ class ColumnPlacer:
             for i in range(len(cols_on_line) - 1):
                 c_lo, c_hi = cols_on_line[i], cols_on_line[i+1]
                 gap = abs(c_hi.y - c_lo.y)
-                if gap <= self.max_span:
+                gap_mm = gap * 1000.0 if gap < 100.0 else gap
+                if gap_mm <= self.max_span:
                     continue
                 if is_perim_x or wall_exists_between(
                         (c_lo.x, c_lo.y), (c_hi.x, c_hi.y)):
-                    num_fills = math.ceil(gap / self.max_span) - 1
+                    num_fills = math.ceil(gap_mm / self.max_span) - 1
                     for k in range(1, num_fills + 1):
                         mid_y = c_lo.y + gap * k / (num_fills + 1)
                         key = (round(gx, 0), round(mid_y, 0))
@@ -541,11 +542,12 @@ class ColumnPlacer:
             for i in range(len(cols_on_line) - 1):
                 c_lo, c_hi = cols_on_line[i], cols_on_line[i+1]
                 gap = abs(c_hi.x - c_lo.x)
-                if gap <= self.max_span:
+                gap_mm = gap * 1000.0 if gap < 100.0 else gap
+                if gap_mm <= self.max_span:
                     continue
                 if is_perim_y or wall_exists_between(
                         (c_lo.x, c_lo.y), (c_hi.x, c_hi.y)):
-                    num_fills = math.ceil(gap / self.max_span) - 1
+                    num_fills = math.ceil(gap_mm / self.max_span) - 1
                     for k in range(1, num_fills + 1):
                         mid_x = c_lo.x + gap * k / (num_fills + 1)
                         key = (round(mid_x, 0), round(gy, 0))
@@ -566,8 +568,9 @@ class ColumnPlacer:
         
         for start, end in self.centerlines:
             span = math.hypot(end[0] - start[0], end[1] - start[1])
+            span_mm = span * 1000.0 if span < 100.0 else span
             
-            if span <= self.max_span:
+            if span_mm <= self.max_span:
                 continue
             
             start_has_col = any(self._is_close(start, (c.x, c.y)) for c in self.columns)
@@ -576,7 +579,7 @@ class ColumnPlacer:
             if not (start_has_col and end_has_col):
                 continue
             
-            num_segments = math.ceil(span / self.max_span)
+            num_segments = math.ceil(span_mm / self.max_span)
             
             for i in range(1, num_segments):
                 t = i / num_segments

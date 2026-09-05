@@ -334,8 +334,14 @@ class WindLoadCalculator:
                 height_m, width_m, length_m, "along_length"
             )
             
-            net_pressure_windward = pz * (cpe_ww_x - (-cpi))
-            net_pressure_leeward = pz * (cpe_lw_x - cpi)
+            # Check both +Cpi and -Cpi and use the one that gives the maximum absolute net pressure
+            p_ww_plus = pz * (cpe_ww_x - cpi)
+            p_ww_minus = pz * (cpe_ww_x - (-cpi))
+            net_pressure_windward = p_ww_plus if abs(p_ww_plus) > abs(p_ww_minus) else p_ww_minus
+
+            p_lw_plus = pz * (cpe_lw_x - cpi)
+            p_lw_minus = pz * (cpe_lw_x - (-cpi))
+            net_pressure_leeward = p_lw_plus if abs(p_lw_plus) > abs(p_lw_minus) else p_lw_minus
             
             pressure_result = WindPressureResult(
                 height_m=z,

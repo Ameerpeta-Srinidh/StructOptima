@@ -282,7 +282,8 @@ class SeismicDesignChecker:
     def get_spectral_acceleration(self, Ta: float) -> float:
         # IS 1893:2016 Spectral Acceleration Sa/g
         # Simplified for user transparency (Medium Soil Type II)
-        if Ta < 0.10: return 2.5 # Or 1 + 15T
+        if Ta < 0.10: return 1.0 + 15.0 * Ta
+
         if Ta <= 0.55: return 2.5
         if Ta <= 4.0: return 1.36 / Ta
         return 0.34

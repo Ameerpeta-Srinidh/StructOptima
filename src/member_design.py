@@ -471,8 +471,9 @@ class MemberDesigner:
         
         # FIXED: Concrete compression uses xu (neutral axis depth), NOT D (full depth)
         # Mu = 0.36 fck b xu (d - 0.42 xu) + Asc * fsc * (d - d')
-        Mux1 = (0.36 * self.fck * b * xu_x * (d_x - 0.42 * xu_x) + (Ast / 2) * (0.87 * self.fy) * (D - 2 * cover)) / 1e6
-        Muy1 = (0.36 * self.fck * D * xu_y * (d_y - 0.42 * xu_y) + (Ast / 2) * (0.87 * self.fy) * (b - 2 * cover)) / 1e6
+        d_prime = cover + 8.0 + 8.0  # 8mm ties + 16mm bar / 2
+        Mux1 = (0.36 * self.fck * b * xu_x * (d_x - 0.42 * xu_x) + (Ast / 2) * (0.87 * self.fy) * (D - 2 * d_prime)) / 1e6
+        Muy1 = (0.36 * self.fck * D * xu_y * (d_y - 0.42 * xu_y) + (Ast / 2) * (0.87 * self.fy) * (b - 2 * d_prime)) / 1e6
         
         Mux1 = max(Mux1, 1.0)
         Muy1 = max(Muy1, 1.0)
