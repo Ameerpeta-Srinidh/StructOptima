@@ -40,15 +40,24 @@ with v_tab1:
         with col_w_info:
             st.caption("Toggle walls ON/OFF to inspect structural RC frame (columns & beams) or full architectural wall layout.")
 
-        scene = GeometryExporter.create_structure_scene(
-            grid_mgr=gm, 
-            beams=all_beams, 
-            footings=footings, 
-            view_mode=v_mode_str,
-            arch_walls=st.session_state.get('arch_walls'),
-            show_walls=show_walls
-        )
-        glb_data = GeometryExporter.export_to_glb_base64(scene)
+        try:
+            import importlib
+            import src.geometry_exporter as _ge_mod
+            importlib.reload(_ge_mod)
+            _GeometryExporter = _ge_mod.GeometryExporter
+
+            scene = _GeometryExporter.create_structure_scene(
+                grid_mgr=gm, 
+                beams=all_beams, 
+                footings=footings, 
+                view_mode=v_mode_str,
+                arch_walls=st.session_state.get('arch_walls'),
+                show_walls=show_walls
+            )
+            glb_data = _GeometryExporter.export_to_glb_base64(scene)
+        except Exception as _e:
+            st.error(f"⚠️ Unable to render 3D model: {_e}")
+            glb_data = ""
         
         # Build the HTML for model-viewer
         html_code = f"""

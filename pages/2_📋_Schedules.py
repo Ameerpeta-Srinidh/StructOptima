@@ -100,10 +100,17 @@ if all_levels:
                 main_steel = getattr(rebar, 'main_bars_desc', getattr(rebar, 'main_steel', 'N/A'))
                 stirrups = getattr(rebar, 'links_desc', getattr(rebar, 'stirrups', 'N/A'))
 
+            h_col = getattr(col, 'z_top', 3.0) - getattr(col, 'z_bottom', 0.0)
+            if h_col <= 0: h_col = 3.0
+            col_conc_vol = (width / 1000.0) * (depth / 1000.0) * h_col
+            col_steel_wt = col_conc_vol * 150.0  # IS 456 standard column steel ratio ~150 kg/m3
+
             data.append({
                 "ID": col.id,
                 "Size (mm)": f"{width:.0f}x{depth:.0f}",
                 "Load (kN)": f"{load:.1f}",
+                "Conc (m³)": f"{col_conc_vol:.2f}",
+                "Steel (kg)": f"{col_steel_wt:.1f}",
                 "D/C Ratio": min(dc, 1.0),
                 "Main Steel": main_steel,
                 "Stirrups": stirrups,
@@ -139,14 +146,20 @@ st.markdown("## Beam Schedule")
 beam_data = []
 if hasattr(gm, 'beam_schedule') and gm.beam_schedule:
     for bid, b_info in gm.beam_schedule.items():
-        # b_info may be a dataclass/object — normalise to a flat string dict
         if isinstance(b_info, dict):
             row = {k: str(v) for k, v in b_info.items()}
         else:
+            bm_w = getattr(b_info, 'width_mm', getattr(b_info, 'width', 230))
+            bm_d = getattr(b_info, 'depth_mm', getattr(b_info, 'depth', 400))
+            bm_span = getattr(b_info, 'span_m', getattr(b_info, 'span', 4.0))
+            bm_vol = (bm_w / 1000.0) * (bm_d / 1000.0) * bm_span
+            bm_steel = bm_vol * 120.0
             row = {
                 "Beam ID": str(bid),
-                "Size (mm)": f"{getattr(b_info,'width_mm',getattr(b_info,'width',0)):.0f}x{getattr(b_info,'depth_mm',getattr(b_info,'depth',0)):.0f}",
-                "Span (m)": f"{getattr(b_info,'span_m',getattr(b_info,'span',0)):.2f}",
+                "Size (mm)": f"{bm_w:.0f}x{bm_d:.0f}",
+                "Span (m)": f"{bm_span:.2f}",
+                "Conc (m³)": f"{bm_vol:.2f}",
+                "Steel (kg)": f"{bm_steel:.1f}",
                 "Bot Steel": str(getattr(b_info,'bottom_bars_desc',getattr(b_info,'bottom_steel','N/A'))),
                 "Top Steel": str(getattr(b_info,'top_bars_desc',getattr(b_info,'top_steel','N/A'))),
                 "Stirrups": str(getattr(b_info,'stirrups_desc',getattr(b_info,'stirrups','N/A'))),
@@ -159,10 +172,16 @@ else:
             b.end_point.x - b.start_point.x,
             b.end_point.y - b.start_point.y
         ) / 1000.0 if hasattr(b,'start_point') else 0
+        w_mm = b.properties.width_mm if hasattr(b,'properties') else 230
+        d_mm = b.properties.depth_mm if hasattr(b,'properties') else 400
+        bm_vol = (w_mm / 1000.0) * (d_mm / 1000.0) * span
+        bm_steel = bm_vol * 120.0
         beam_data.append({
             "Beam ID": str(b.id),
             "Span (m)": f"{span:.2f}",
-            "Size (mm)": f"{b.properties.width_mm:.0f}x{b.properties.depth_mm:.0f}" if hasattr(b,'properties') else "N/A",
+            "Size (mm)": f"{w_mm:.0f}x{d_mm:.0f}",
+            "Conc (m³)": f"{bm_vol:.2f}",
+            "Steel (kg)": f"{bm_steel:.1f}",
             "Bot Steel": "N/A",
             "Top Steel": "N/A",
             "Stirrups": "N/A",
@@ -180,7 +199,19 @@ st.markdown("## Slab Schedule")
 slab_data = []
 if hasattr(gm, 'slab_schedule') and gm.slab_schedule:
     for sid, s_info in gm.slab_schedule.items():
-        slab_data.append(s_info)
+        thk = getattr(s_info, 'thickness_mm', getattr(s_info, 'thickness', 125))
+        area = getattr(s_info, 'area_m2', getattr(s_info, 'area', 16.0))
+        s_vol = area * (thk / 1000.0)
+        s_steel = s_vol * 90.0
+        slab_data.append({
+            "Slab ID": str(sid),
+            "Thickness (mm)": f"{thk:.0f}",
+            "Area (m²)": f"{area:.2f}",
+            "Conc (m³)": f"{s_vol:.2f}",
+            "Steel (kg)": f"{s_steel:.1f}",
+            "Main Steel": str(getattr(s_info, 'main_steel_desc', getattr(s_info, 'main_steel', 'T8@150'))),
+            "Distribution": str(getattr(s_info, 'dist_steel_desc', getattr(s_info, 'dist_steel', 'T8@175'))),
+        })
 
 if slab_data:
     st.dataframe(pd.DataFrame(slab_data), use_container_width=True, hide_index=True)
@@ -198,10 +229,14 @@ for i, cid in enumerate(level_0_cols):
     if i < len(footings_list):
         f = footings_list[i]
         try:
+            ft_vol = getattr(f, 'concrete_vol_m3', f.length_m * f.width_m * (f.thickness_mm / 1000.0))
+            ft_steel = ft_vol * 80.0
             footing_data.append({
                 "Column ID": c_id,
                 "Footing Size (m)": f"{f.length_m:.1f}x{f.width_m:.1f}",
                 "Depth (m)": f"{f.thickness_mm/1000:.2f}",
+                "Conc (m³)": f"{ft_vol:.2f}",
+                "Steel (kg)": f"{ft_steel:.1f}",
                 "Punching Shear": getattr(f, 'punching_shear_status', 'OK'),
                 "One-Way Shear": getattr(f, 'one_way_shear_ok', True),
                 "Bending OK": getattr(f, 'bending_ok', True),
@@ -283,26 +318,78 @@ if wall_bom:
     ])
 
     with w_tab1:
-        st.markdown("### Individual Wall Section Schedule")
-        st.caption(f"Showing floor-level wall segments (total {len(wb.wall_sections)} perimeter/partition walls across {num_stories} stories).")
+        st.markdown("### Individual Wall Section Material Breakdown")
+        st.caption(f"Detailed material quantities for every wall section across {num_stories} stories (Bricks, Mortar Wet/Dry, Cement, Sand, Water, Plaster, Paint).")
         wall_rows = []
         for sec in wb.wall_sections:
             wall_rows.append({
                 "Wall ID": sec.wall_id,
-                "Start Col": sec.col_start,
-                "End Col": sec.col_end,
+                "Span": f"{sec.col_start}→{sec.col_end}" if (sec.col_start and sec.col_end) else "Bay",
                 "Type": "Exterior (230mm)" if sec.is_exterior else "Interior (115mm)",
                 "Length (m)": f"{sec.length_m:.2f}",
                 "Clear Ht (m)": f"{sec.clear_height_m:.2f}",
-                "Thickness (mm)": int(sec.core_thickness_m * 1000),
+                "Thk (mm)": int(sec.core_thickness_m * 1000),
                 "Vol (m³)": f"{sec.wall_volume_m3:.2f}",
-                "Bricks/Floor": sec.num_bricks,
-                "Total Bricks": sec.num_bricks * num_stories,
-                "Wet Mortar (m³)": f"{sec.wet_mortar_vol_m3:.3f}",
-                "Plaster (m²)": f"{sec.plaster_area_m2:.1f}",
+                "Bricks (Nos)": sec.num_bricks * num_stories,
+                "Wet Mortar (m³)": f"{sec.wet_mortar_vol_m3 * num_stories:.3f}",
+                "Dry Mortar (m³)": f"{sec.dry_mortar_vol_m3 * num_stories:.3f}",
+                "Mortar Cem (Bags)": int(math.ceil(sec.mortar_cement_kg * num_stories / 50.0)),
+                "Mortar Cem (kg)": f"{sec.mortar_cement_kg * num_stories:.1f}",
+                "Mortar Sand (T)": f"{sec.mortar_sand_tonnes * num_stories:.2f}",
+                "Water (L)": f"{(sec.mortar_water_litres + sec.plaster_water_litres) * num_stories:.0f}",
+                "Plaster (m²)": f"{sec.plaster_area_m2 * num_stories:.1f}",
+                "Plaster Cem (Bags)": int(math.ceil(sec.plaster_cement_kg * num_stories / 50.0)),
+                "Plaster Sand (T)": f"{sec.plaster_sand_tonnes * num_stories:.2f}",
+                "Primer (L)": f"{sec.primer_litres * num_stories:.1f}",
+                "Putty (kg)": f"{sec.putty_kg * num_stories:.1f}",
+                "Emulsion (L)": f"{(sec.emulsion_int_litres + sec.emulsion_ext_litres) * num_stories:.1f}",
             })
         if wall_rows:
-            st.dataframe(pd.DataFrame(wall_rows), use_container_width=True, hide_index=True)
+            df_walls = pd.DataFrame(wall_rows)
+            st.dataframe(df_walls, use_container_width=True, hide_index=True)
+            csv_data = df_walls.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                "📥 Download Complete Wall Takeoff (CSV)",
+                data=csv_data,
+                file_name="Wall_Takeoff_Schedule.csv",
+                mime="text/csv",
+                key="download_wall_takeoff_csv"
+            )
+
+        st.markdown("#### 🔍 Section Inspector")
+        sel_wall_id = st.selectbox("Select Wall Section to Inspect", [s.wall_id for s in wb.wall_sections], key="select_inspect_wall")
+        sel_sec = next((s for s in wb.wall_sections if s.wall_id == sel_wall_id), None)
+        if sel_sec:
+            sc1, sc2, sc3, sc4 = st.columns(4)
+            with sc1:
+                st.markdown("**📐 Geometry**")
+                st.write(f"• Span: {sel_sec.col_start} → {sel_sec.col_end}")
+                st.write(f"• Type: {'Exterior (230mm)' if sel_sec.is_exterior else 'Interior (115mm)'}")
+                st.write(f"• Length: {sel_sec.length_m:.2f} m")
+                st.write(f"• Clear Height: {sel_sec.clear_height_m:.2f} m")
+                st.write(f"• Thickness: {int(sel_sec.core_thickness_m*1000)} mm")
+                st.write(f"• Gross Vol: {sel_sec.wall_volume_m3:.3f} m³")
+            with sc2:
+                st.markdown("**🧱 Brickwork Takeoff**")
+                st.write(f"• Bricks (per floor): {sel_sec.num_bricks} Nos")
+                st.write(f"• Bricks (building total): {sel_sec.num_bricks * num_stories} Nos")
+                st.write(f"• Solid Brick Vol: {sel_sec.total_brick_vol_m3:.3f} m³")
+                st.write(f"• Wet Mortar: {sel_sec.wet_mortar_vol_m3:.3f} m³")
+                st.write(f"• Dry Mortar: {sel_sec.dry_mortar_vol_m3:.3f} m³")
+            with sc3:
+                st.markdown("**🧪 Mortar & Plaster Materials**")
+                st.write(f"• Mortar Cement: {sel_sec.mortar_cement_kg:.1f} kg ({sel_sec.mortar_cement_bags} bags)")
+                st.write(f"• Mortar Sand: {sel_sec.mortar_sand_tonnes:.3f} T")
+                st.write(f"• Mortar Water: {sel_sec.mortar_water_litres:.1f} L")
+                st.write(f"• Plaster Area: {sel_sec.plaster_area_m2:.1f} m²")
+                st.write(f"• Plaster Cement: {sel_sec.plaster_cement_kg:.1f} kg ({sel_sec.plaster_cement_bags} bags)")
+                st.write(f"• Plaster Sand: {sel_sec.plaster_sand_tonnes:.3f} T")
+            with sc4:
+                st.markdown("**🎨 Surface Coatings & Paint**")
+                st.write(f"• Primer (1 coat): {sel_sec.primer_litres:.2f} L")
+                st.write(f"• Putty (2 coats): {sel_sec.putty_kg:.1f} kg")
+                st.write(f"• Interior Emulsion: {sel_sec.emulsion_int_litres:.2f} L")
+                st.write(f"• Exterior Emulsion: {sel_sec.emulsion_ext_litres:.2f} L")
 
     with w_tab2:
         st.markdown("### Masonry & Brickwork Material Breakdown")
