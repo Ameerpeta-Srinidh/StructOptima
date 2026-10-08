@@ -30,16 +30,23 @@ engineer_name = st.session_state.get('engineer_name', "STRUCTURAL ENGINEER")
 num_stories = gm.num_stories if gm else 1
 v_mode_str = st.session_state.get('view_mode', "Engineering")
 
-v_tab1, v_tab2 = st.tabs(["3D View", "2D Plan View"])
+v_tab1, v_tab2, v_tab3 = st.tabs(["3D View", "2D Plan View", "Interactive CAD"])
 
 with v_tab1:
     if gm and all_beams:
+        col_w_tgl, col_w_info = st.columns([1, 3])
+        with col_w_tgl:
+            show_walls = st.checkbox("🧱 Show Walls", value=st.session_state.get('show_3d_walls', True), key="toggle_show_3d_walls")
+        with col_w_info:
+            st.caption("Toggle walls ON/OFF to inspect structural RC frame (columns & beams) or full architectural wall layout.")
+
         scene = GeometryExporter.create_structure_scene(
             grid_mgr=gm, 
             beams=all_beams, 
             footings=footings, 
             view_mode=v_mode_str,
-            arch_walls=st.session_state.get('arch_walls')
+            arch_walls=st.session_state.get('arch_walls'),
+            show_walls=show_walls
         )
         glb_data = GeometryExporter.export_to_glb_base64(scene)
         
@@ -74,6 +81,25 @@ with v_tab2:
         level_sel = st.slider("Select Level", 1, max(1, num_stories), 1)
         fig_2d = viz.create_2d_plan(gm, all_beams, view_mode=v_mode_str, level=level_sel)
         st.plotly_chart(fig_2d, use_container_width=True)
+
+with v_tab3:
+    st.markdown("### Interactive Structural CAD")
+    st.info("💡 **Tip:** Scroll to zoom, click and drag to pan.")
+    if gm and all_beams:
+        # Generate temporary DXF for the viewer
+        temp_dxf = "temp_viewer.dxf"
+        StructuralDXFExporter.export_structural_dxf(gm, all_beams, temp_dxf)
+        
+        # Convert to SVG HTML
+        from src.svg_viewer import get_interactive_svg_html
+        svg_html = get_interactive_svg_html(temp_dxf, height=600)
+        
+        # Render in Streamlit
+        components.html(svg_html, height=620)
+        
+        import os
+        if os.path.exists(temp_dxf):
+            os.remove(temp_dxf)
 
 st.markdown("---")
 st.subheader("DXF Downloads")

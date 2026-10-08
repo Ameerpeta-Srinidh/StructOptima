@@ -159,6 +159,32 @@ with st.sidebar:
         wall_load = st.number_input("Wall Load (kN/m)", 0.0, 50.0, 12.0)
         sbc = st.number_input("SBC (kN/m²)", min_value=50.0, max_value=500.0, value=200.0)
         
+    with st.expander("🧱 Wall & Masonry Settings", expanded=False):
+        wall_thickness_choice = st.selectbox(
+            "Wall Thickness (finished)",
+            ["230 mm (Full Brick / External)", "115 mm (Half Brick / Partition)"],
+            index=0,
+            help="230mm has 200mm core brick + 15mm plaster each side. 115mm has 100mm core brick + 12mm plaster each side."
+        )
+        wall_core_thickness_mm = 200.0 if "230" in wall_thickness_choice else 100.0
+        
+        mortar_ratio_choice = st.selectbox(
+            "Mortar Proportion (Cement : Sand)",
+            ["1:4 (Standard External)", "1:3 (High Strength / Retaining)", "1:5 (General Masonry)", "1:6 (Internal Partition)"],
+            index=0,
+            help="IS 2250 mortar mix proportions. Cement:Sand = 1:4 is standard for exterior brickwork."
+        )
+        mortar_ratio = int(mortar_ratio_choice.split(":")[1].split()[0])
+        
+        wall_opening_fraction = st.slider(
+            "Opening Deduction (Doors/Windows)",
+            0.0, 0.5, 0.33, 0.05,
+            format="%.2f",
+            help="Fraction of wall area deducted for doors and windows per IS 1200."
+        )
+        include_interior_walls = st.checkbox("Include Interior Partition Walls", value=False, help="Generate internal partition walls along interior grid lines.")
+        show_3d_walls_default = st.checkbox("Show Walls in 3D Views", value=True)
+        
     with st.expander("🌍 Environmental (Seismic & Wind)", expanded=False):
         seismic_zone = st.selectbox(
             "Seismic Zone (IS 1893:2016)",
@@ -247,6 +273,13 @@ if st.session_state.get('analysis_done', False):
                     if auto_frame and not beams:
                         beams = gm.generate_beams()
                             
+                    if not gm.walls and hasattr(gm, 'generate_walls'):
+                        gm.generate_walls(
+                            wall_thickness_mm=wall_core_thickness_mm,
+                            opening_fraction=wall_opening_fraction,
+                            include_interior=include_interior_walls
+                        )
+                            
                     gm.num_stories = num_stories
                     gm.story_height_m = story_height
                     
@@ -317,6 +350,12 @@ if st.session_state.get('analysis_done', False):
                 gm.cantilever_len_m = 1.5
                 gm.generate_grid()
                 beams = gm.generate_beams()
+                gm.generate_walls(
+                    wall_thickness_mm=wall_core_thickness_mm,
+                    opening_fraction=wall_opening_fraction,
+                    include_interior=include_interior_walls,
+                    slab_thickness_mm=load_params.slab_thickness_mm if hasattr(load_params, 'slab_thickness_mm') else 125.0,
+                )
             
             st.session_state['gm'] = gm
             st.session_state['beams'] = beams
@@ -353,7 +392,7 @@ if st.session_state.get('analysis_done', False):
         gm.optimize_column_sizes(
             concrete=m_grade, 
             fy=415.0,
-            wall_thickness_mm=230.0,
+            wall_thickness_mm=wall_core_thickness_mm,
             align_to_wall=_is_residential,
             seismic_zone=seismic_zone
         )
@@ -388,6 +427,17 @@ if st.session_state.get('analysis_done', False):
             
         quantifier = Quantifier()
         bom = quantifier.calculate_bom(gm.columns, all_beams, footings, grid_mgr=gm, use_fly_ash=use_fly_ash)
+        
+        from src.wall_calculator import WallCalculator
+        wall_calc = WallCalculator(mortar_ratio=mortar_ratio, wc_ratio=0.50, opening_fraction=wall_opening_fraction)
+        wall_bom = wall_calc.calculate_all(
+            gm.walls,
+            num_stories=num_stories,
+            floor_height_m=story_height,
+            slab_thickness_mm=load_params.slab_thickness_mm if hasattr(load_params, 'slab_thickness_mm') else 125.0,
+            beam_depth_mm=400.0,
+        )
+        st.session_state['wall_bom'] = wall_bom
         
         from src.audit import StructuralAuditor
         auditor = StructuralAuditor(gm, all_beams, footings)
@@ -481,6 +531,12 @@ if st.session_state.get('analysis_done', False):
         st.session_state['load_params'] = load_params
         st.session_state['arch_walls'] = st.session_state.get('arch_walls')
         st.session_state['add_staircase'] = add_staircase
+        st.session_state['wall_bom'] = wall_bom
+        st.session_state['wall_thickness_choice'] = wall_thickness_choice
+        st.session_state['wall_core_thickness_mm'] = wall_core_thickness_mm
+        st.session_state['mortar_ratio'] = mortar_ratio
+        st.session_state['wall_opening_fraction'] = wall_opening_fraction
+        st.session_state['show_3d_walls'] = show_3d_walls_default
 
     render_project_header()
     
@@ -517,6 +573,24 @@ if st.session_state.get('analysis_done', False):
         render_metric_card("Est. Cost", f"INR {bom.total_cost_inr:,.2f}", icon="💰")
     with c4:
         render_metric_card("Carbon Footprint", f"{bom.total_carbon_kg/1000.0:.2f} Tons", icon="🌱")
+        
+    if st.session_state.get('wall_bom'):
+        wb = st.session_state['wall_bom']
+        total_cem_bags = wb.total_mortar_cement_bags + wb.total_plaster_cement_bags
+        with st.expander(f"🧱 Masonry & Finishes: {wb.total_bricks:,} Bricks | {total_cem_bags} Bags Cement | {wb.total_plaster_area_m2:.1f} m² Plaster", expanded=False):
+            wm1, wm2, wm3, wm4 = st.columns(4)
+            with wm1:
+                st.metric("Total Bricks", f"{wb.total_bricks:,} pcs")
+                st.caption(f"Wall Vol: {wb.total_wall_volume_m3:.2f} m³")
+            with wm2:
+                st.metric("Mortar (Wet)", f"{wb.total_mortar_cement_bags} bags cement")
+                st.caption(f"Sand: {wb.total_mortar_sand_tonnes:.2f} T | Water: {wb.total_mortar_water_litres:.0f} L")
+            with wm3:
+                st.metric("Plastering", f"{wb.total_plaster_area_m2:.1f} m²")
+                st.caption(f"Cement: {wb.total_plaster_cement_bags} bags | Sand: {wb.total_plaster_sand_tonnes:.2f} T")
+            with wm4:
+                st.metric("Paint / Putty", f"{wb.total_emulsion_int_litres + wb.total_emulsion_ext_litres:.1f} L")
+                st.caption(f"Primer: {wb.total_primer_litres:.1f} L | Putty: {wb.total_putty_kg:.1f} kg")
         
     failed_checks = [r for r in audit_results if r.status == "FAIL"]
     pass_count = len(audit_results) - len(failed_checks)

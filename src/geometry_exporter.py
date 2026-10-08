@@ -16,7 +16,8 @@ class GeometryExporter:
         footings: List[Footing],
         view_mode: str = "Engineering",
         arch_walls: Optional[List[Tuple[Tuple[float, float], Tuple[float, float]]]] = None,
-        height_m: float = 3.0
+        height_m: float = 3.0,
+        show_walls: bool = False,
     ) -> trimesh.Scene:
         scene = trimesh.Scene()
         
@@ -24,7 +25,14 @@ class GeometryExporter:
         col_color = [150, 150, 150, 255] # Grey
         beam_color = [200, 100, 50, 255] # Orange-ish
         footing_color = [100, 100, 100, 255] # Dark grey
-        wall_color = [100, 150, 250, 80] # Transparent blue
+        
+        # Wall colors by material (semi-transparent so structure is visible)
+        WALL_COLORS = {
+            "brick":     [210, 105, 30, 160],   # Terracotta brick
+            "aac_block": [200, 200, 200, 160],   # Light grey
+            "rcc":       [150, 150, 150, 180],   # Concrete grey
+        }
+        DEFAULT_WALL_COLOR = [210, 105, 30, 160]
         
         # 1. Add Columns
         for col in grid_mgr.columns:
@@ -36,7 +44,6 @@ class GeometryExporter:
             if h <= 0: h = height_m
             
             box = trimesh.creation.box(extents=[w, d, h])
-            # Apply translation
             transform = np.eye(4)
             transform[0, 3] = col.x
             transform[1, 3] = col.y
@@ -57,7 +64,7 @@ class GeometryExporter:
             transform = np.eye(4)
             transform[0, 3] = col.x
             transform[1, 3] = col.y
-            transform[2, 3] = -D/2.0  # Just below ground
+            transform[2, 3] = -D/2.0
             box.apply_transform(transform)
             box.visual.face_colors = footing_color
             scene.add_geometry(box)
@@ -106,8 +113,48 @@ class GeometryExporter:
                 
             scene.add_geometry(box)
             
-        # 4. Add Architectural Walls
-        if arch_walls and view_mode == "Architectural":
+        # 4. Add Walls (from Wall model — proper multi-story rendering)
+        if show_walls and hasattr(grid_mgr, 'walls') and grid_mgr.walls:
+            num_stories = getattr(grid_mgr, 'num_stories', 1)
+            
+            for wall in grid_mgr.walls:
+                x0 = wall.start_x
+                y0 = wall.start_y
+                x1 = wall.end_x
+                y1 = wall.end_y
+                
+                dx = x1 - x0
+                dy = y1 - y0
+                wall_len = math.hypot(dx, dy)
+                if wall_len < 0.01:
+                    continue
+                
+                wall_th = wall.thickness_mm / 1000.0
+                wall_h = wall.height_m
+                
+                material = getattr(wall, 'material', 'brick')
+                wall_color = WALL_COLORS.get(material, DEFAULT_WALL_COLOR)
+                
+                angle = math.atan2(dy, dx)
+                rot = trimesh.transformations.rotation_matrix(angle, [0, 0, 1])
+                
+                cx = (x0 + x1) / 2.0
+                cy = (y0 + y1) / 2.0
+                
+                # Render wall at each story level
+                for lvl in range(num_stories):
+                    z_bot = lvl * story_height
+                    cz = z_bot + wall_h / 2.0
+                    
+                    box = trimesh.creation.box(extents=[wall_len, wall_th, wall_h])
+                    trans = trimesh.transformations.translation_matrix([cx, cy, cz])
+                    tf = np.dot(trans, rot)
+                    box.apply_transform(tf)
+                    box.visual.face_colors = wall_color
+                    scene.add_geometry(box)
+        
+        # 4b. Fallback — old arch_walls for CAD import backward compatibility
+        elif show_walls and arch_walls:
             for (p1, p2) in arch_walls:
                 x0, y0 = p1
                 x1, y1 = p2
@@ -116,7 +163,7 @@ class GeometryExporter:
                 length = math.hypot(dx, dy)
                 if length < 0.01: continue
                 
-                wall_th = 0.15
+                wall_th = 0.20
                 wall_h = height_m
                 
                 box = trimesh.creation.box(extents=[length, wall_th, wall_h])
@@ -130,7 +177,7 @@ class GeometryExporter:
                 trans = trimesh.transformations.translation_matrix([cx, cy, cz])
                 transform = np.dot(trans, rot)
                 box.apply_transform(transform)
-                box.visual.face_colors = wall_color
+                box.visual.face_colors = DEFAULT_WALL_COLOR
                 scene.add_geometry(box)
                 
         # Rot Z to Y for model-viewer (glTF uses Y up)

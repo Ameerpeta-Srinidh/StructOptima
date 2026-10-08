@@ -417,8 +417,22 @@ class Visualizer:
                     fig.add_trace(go.Scatter(x=[x_dim, x_dim], y=[y_start, y_end], mode='lines+markers', marker=dict(symbol='line-ew', size=10), line=dict(color='black', width=1), showlegend=False))
                     fig.add_annotation(x=x_dim-0.5, y=mid_y, text=f"{dist:.2f}m", textangle=-90, showarrow=False, font=dict(size=10, color="black"))
 
-        # 1.5 Draw Architectural Traces
-        if arch_walls and level == 1: # Usually we show foundation trace primarily
+        # 1.5 Draw Architectural Traces / Masonry Walls
+        if hasattr(grid_mgr, 'walls') and grid_mgr.walls:
+            w_x, w_y = [], []
+            for w in grid_mgr.walls:
+                w_x.extend([w.start_x, w.end_x, None])
+                w_y.extend([w.start_y, w.end_y, None])
+            fig.add_trace(go.Scatter(
+                x=w_x, y=w_y,
+                mode='lines',
+                line=dict(color='rgba(210, 105, 30, 0.8)', width=4, dash='solid'),
+                name='Masonry Walls',
+                hoverinfo='text',
+                hovertext='Brick Wall',
+                showlegend=True
+            ))
+        elif arch_walls and level == 1: # Usually we show foundation trace primarily
             w_x, w_y = [], []
             for (p1, p2) in arch_walls:
                 w_x.extend([p1[0], p2[0], None])

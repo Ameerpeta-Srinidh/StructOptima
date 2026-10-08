@@ -1,4 +1,4 @@
-from typing import List, Dict, Union
+from typing import List, Dict, Union, Optional, Any
 from pydantic import BaseModel
 from .grid_manager import Column
 from .framing_logic import StructuralMember
@@ -19,6 +19,20 @@ class MaterialCost(BaseModel):
     mortar_vol_m3: float = 0.0
     plaster_area_m2: float = 0.0
     brickwork_cost_inr: float = 0.0
+    
+    # Detailed Masonry Breakdown per Indian Standards
+    wall_bom: Optional[Dict[str, Any]] = None
+    total_bricks: int = 0
+    total_mortar_cement_bags: int = 0
+    total_mortar_sand_tonnes: float = 0.0
+    total_mortar_water_litres: float = 0.0
+    total_plaster_cement_bags: int = 0
+    total_plaster_sand_tonnes: float = 0.0
+    total_plaster_water_litres: float = 0.0
+    total_primer_litres: float = 0.0
+    total_putty_kg: float = 0.0
+    total_emulsion_int_litres: float = 0.0
+    total_emulsion_ext_litres: float = 0.0
     
     # Cost Ranges (Min/Max)
     excavation_cost_range: Dict[str, float] = {} # {"min": 0, "max": 0}
@@ -331,32 +345,66 @@ class Quantifier:
         carbon_steel = total_steel * steel_factor
         total_carbon = carbon_conc + carbon_steel
         
-        # 6. Masonry Walls (NEW)
+        # 6. Masonry Walls (Detailed IS-standard calculation)
         brick_count = 0
         mortar_vol = 0.0
         plaster_area = 0.0
         brickwork_cost = 0.0
+        wall_bom_dict = None
+        tot_bricks = 0
+        m_cem_bags = 0
+        m_sand_tonnes = 0.0
+        m_water_l = 0.0
+        p_cem_bags = 0
+        p_sand_tonnes = 0.0
+        p_water_l = 0.0
+        primer_l = 0.0
+        putty_kg = 0.0
+        emulsion_int_l = 0.0
+        emulsion_ext_l = 0.0
         
         if grid_mgr and hasattr(grid_mgr, 'walls') and grid_mgr.walls:
+            from .wall_calculator import WallCalculator
+            wall_calc = WallCalculator(mortar_ratio=4, wc_ratio=0.50)
             num_stories = getattr(grid_mgr, 'num_stories', 1)
-            for w in grid_mgr.walls:
-                if w.material in ["brick", "aac_block"]:
-                    # Subtract openings
-                    eff_area = w.length_m * w.height_m * (1.0 - w.opening_fraction)
-                    wall_vol = eff_area * (w.thickness_mm / 1000.0)
-                    
-                    total_eff_area = eff_area * num_stories
-                    total_wall_vol = wall_vol * num_stories
-                    
-                    # Brick size: 0.23 x 0.115 x 0.075 m (nominal with mortar) -> ~500 bricks per m3
-                    # Mortar is ~30% of brickwork volume
-                    brick_count += int(total_wall_vol * 500)
-                    mortar_vol += total_wall_vol * 0.30
-                    plaster_area += total_eff_area * 2.0  # both sides
-                    
-                    # Costs (Rough estimate)
-                    rate = 6000 if w.material == "brick" else 5000
-                    brickwork_cost += total_wall_vol * rate
+            story_h = getattr(grid_mgr, 'story_height_m', 3.5)
+            
+            slab_th_mm = 125.0
+            if hasattr(grid_mgr, 'slab_schedule') and grid_mgr.slab_schedule:
+                th_list = [s.thickness_mm for s in grid_mgr.slab_schedule.values() if hasattr(s, 'thickness_mm')]
+                if th_list:
+                    slab_th_mm = sum(th_list) / len(th_list)
+
+            bm_depth_mm = 400.0
+            if beams:
+                d_list = [getattr(b.properties, 'depth_mm', 400.0) for b in beams if getattr(b, 'properties', None)]
+                if d_list:
+                    bm_depth_mm = sum(d_list) / len(d_list)
+
+            wall_bom_obj = wall_calc.calculate_all(
+                grid_mgr.walls,
+                num_stories=num_stories,
+                floor_height_m=story_h,
+                slab_thickness_mm=slab_th_mm,
+                beam_depth_mm=bm_depth_mm,
+            )
+            wall_bom_dict = wall_bom_obj.model_dump() if hasattr(wall_bom_obj, 'model_dump') else wall_bom_obj.dict()
+            brick_count = wall_bom_obj.total_bricks
+            tot_bricks = wall_bom_obj.total_bricks
+            mortar_vol = sum(w.wet_mortar_vol_m3 for w in wall_bom_obj.wall_sections) * num_stories
+            plaster_area = wall_bom_obj.total_plaster_area_m2
+            brickwork_cost = wall_bom_obj.total_wall_cost_inr
+            
+            m_cem_bags = wall_bom_obj.total_mortar_cement_bags
+            m_sand_tonnes = wall_bom_obj.total_mortar_sand_tonnes
+            m_water_l = wall_bom_obj.total_mortar_water_litres
+            p_cem_bags = wall_bom_obj.total_plaster_cement_bags
+            p_sand_tonnes = wall_bom_obj.total_plaster_sand_tonnes
+            p_water_l = wall_bom_obj.total_plaster_water_litres
+            primer_l = wall_bom_obj.total_primer_litres
+            putty_kg = wall_bom_obj.total_putty_kg
+            emulsion_int_l = wall_bom_obj.total_emulsion_int_litres
+            emulsion_ext_l = wall_bom_obj.total_emulsion_ext_litres
 
         # 7. Excavation & Finishes (Ranges)
         excavation_vol = footing_conc_vol * 3.0 # Rough approx: excavation is 3x concrete vol
@@ -411,6 +459,20 @@ class Quantifier:
             mortar_vol_m3=mortar_vol,
             plaster_area_m2=plaster_area,
             brickwork_cost_inr=brickwork_cost,
+            
+            # Detailed Masonry Breakdown
+            wall_bom=wall_bom_dict,
+            total_bricks=tot_bricks,
+            total_mortar_cement_bags=m_cem_bags,
+            total_mortar_sand_tonnes=m_sand_tonnes,
+            total_mortar_water_litres=m_water_l,
+            total_plaster_cement_bags=p_cem_bags,
+            total_plaster_sand_tonnes=p_sand_tonnes,
+            total_plaster_water_litres=p_water_l,
+            total_primer_litres=primer_l,
+            total_putty_kg=putty_kg,
+            total_emulsion_int_litres=emulsion_int_l,
+            total_emulsion_ext_litres=emulsion_ext_l,
             
             # New Fields
             total_excavation_vol_m3=excavation_vol,

@@ -52,6 +52,9 @@ class Wall(BaseModel):
     is_load_bearing: bool = True
     level: int = 0
     opening_fraction: float = 0.33  # 1/3 deducted for doors/windows (practical estimate)
+    col_start_id: str = ""   # Column at start of wall
+    col_end_id: str = ""     # Column at end of wall
+    is_exterior: bool = True # True for perimeter walls, False for interior partitions
     
     @property
     def length_m(self) -> float:
@@ -75,8 +78,8 @@ class GridManager(BaseModel):
     width_m: float
     length_m: float
     num_stories: int = 1
-    story_height_m: float = 3.5
-    max_span_m: float = 5.0  # IS 456 Table 26: economical residential slab span ≤ 5m
+    story_height_m: float = 3.0
+    max_span_m: float = 6.0  # IS 456 Table 26: economical residential slab span ≤ 5-6m
     
     # Cantilever Config (Phase 9)
     cantilever_dirs: List[str] = [] # "top","bottom","left","right"
@@ -682,6 +685,118 @@ class GridManager(BaseModel):
                     properties=MemberProperties(width_mm=230, depth_mm=450)))
                     
         return beams
+
+    def generate_walls(
+        self,
+        wall_thickness_mm: float = 200.0,
+        opening_fraction: float = 0.33,
+        include_interior: bool = False,
+        beam_depth_mm: float = 400.0,
+        slab_thickness_mm: float = 125.0,
+    ):
+        """Generate Wall objects between adjacent columns.
+        
+        Creates walls along the building perimeter (exterior walls).
+        Optionally creates interior partition walls along all interior beam lines.
+        
+        Wall clear height = story_height - slab_thickness - beam_depth
+        
+        Args:
+            wall_thickness_mm: Core brick thickness (200mm = full brick, 100mm = half brick).
+            opening_fraction: Fraction of wall area deducted for doors/windows (0-0.5).
+            include_interior: If True, also create interior partition walls.
+            beam_depth_mm: Beam depth for clear height calculation.
+            slab_thickness_mm: Slab thickness for clear height calculation.
+        """
+        self.walls = []
+        wall_count = 0
+        
+        if not self.x_grid_lines or not self.y_grid_lines:
+            return
+        
+        num_x = len(self.x_grid_lines)
+        num_y = len(self.y_grid_lines)
+        
+        # Clear wall height: Hv = Hf - ts - Db
+        clear_height = self.story_height_m - (slab_thickness_mm / 1000.0) - (beam_depth_mm / 1000.0)
+        clear_height = max(clear_height, 0.5)
+        
+        # Get level-0 columns for coordinate lookup
+        base_cols = [c for c in self.columns if c.level == 0]
+        
+        def find_col_at(x: float, y: float) -> str:
+            """Find column ID nearest to (x, y)."""
+            best_id = ""
+            best_dist = float('inf')
+            for c in base_cols:
+                d = math.hypot(c.x - x, c.y - y)
+                if d < best_dist:
+                    best_dist = d
+                    best_id = c.id
+            return best_id
+        
+        # --- Horizontal wall segments (along X axis) ---
+        for j, y in enumerate(self.y_grid_lines):
+            is_perimeter_y = (j == 0 or j == num_y - 1)
+            if not is_perimeter_y and not include_interior:
+                continue
+            
+            for i in range(num_x - 1):
+                x1 = self.x_grid_lines[i]
+                x2 = self.x_grid_lines[i + 1]
+                wall_count += 1
+                
+                col_s = find_col_at(x1, y)
+                col_e = find_col_at(x2, y)
+                
+                self.walls.append(Wall(
+                    id=f"W_H{wall_count}",
+                    start_x=x1,
+                    start_y=y,
+                    end_x=x2,
+                    end_y=y,
+                    thickness_mm=wall_thickness_mm,
+                    height_m=clear_height,
+                    material="brick",
+                    is_load_bearing=True,
+                    opening_fraction=opening_fraction,
+                    col_start_id=col_s,
+                    col_end_id=col_e,
+                    is_exterior=is_perimeter_y,
+                ))
+        
+        # --- Vertical wall segments (along Y axis) ---
+        for i, x in enumerate(self.x_grid_lines):
+            is_perimeter_x = (i == 0 or i == num_x - 1)
+            if not is_perimeter_x and not include_interior:
+                continue
+            
+            for j in range(num_y - 1):
+                y1 = self.y_grid_lines[j]
+                y2 = self.y_grid_lines[j + 1]
+                wall_count += 1
+                
+                col_s = find_col_at(x, y1)
+                col_e = find_col_at(x, y2)
+                
+                self.walls.append(Wall(
+                    id=f"W_V{wall_count}",
+                    start_x=x,
+                    start_y=y1,
+                    end_x=x,
+                    end_y=y2,
+                    thickness_mm=wall_thickness_mm,
+                    height_m=clear_height,
+                    material="brick",
+                    is_load_bearing=True,
+                    opening_fraction=opening_fraction,
+                    col_start_id=col_s,
+                    col_end_id=col_e,
+                    is_exterior=is_perimeter_x,
+                ))
+        
+        logger.info(f"Generated {len(self.walls)} walls (exterior perimeter"
+                     f"{' + interior' if include_interior else ''}).")
 
     def detail_beams(self, beams: List[Any]):
         from .rebar_detailer import RebarDetailer

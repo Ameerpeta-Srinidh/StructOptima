@@ -227,6 +227,160 @@ if hasattr(gm, 'rebar_schedule') and gm.rebar_schedule:
 else:
     st.info("Math Inspector requires rebar schedule data.")
 
+st.divider()
+
+# 7. Wall Schedule & Masonry Takeoff
+st.markdown("## 🧱 Wall Schedule & Masonry Takeoff")
+st.caption("Quantities calculated per IS 1077 (Clay Bricks), IS 2250 (Mortar Mixes), IS 1200 (Opening Deductions), and IS 1661 / IS 2402 (Plastering).")
+
+wall_bom = st.session_state.get('wall_bom')
+if not wall_bom and gm and hasattr(gm, 'walls') and gm.walls:
+    from src.wall_calculator import WallCalculator
+    m_ratio = st.session_state.get('mortar_ratio', 4)
+    w_op = st.session_state.get('wall_opening_fraction', 0.33)
+    wall_calc = WallCalculator(mortar_ratio=m_ratio, wc_ratio=0.50, opening_fraction=w_op)
+    wall_bom = wall_calc.calculate_all(
+        gm.walls,
+        num_stories=getattr(gm, 'num_stories', 1),
+        floor_height_m=getattr(gm, 'story_height_m', 3.5),
+        slab_thickness_mm=125.0,
+        beam_depth_mm=400.0,
+    )
+    st.session_state['wall_bom'] = wall_bom
+
+if wall_bom:
+    wb = wall_bom
+    num_stories = getattr(wb, 'num_stories', 1)
+    tot_cem_bags = wb.total_mortar_cement_bags + wb.total_plaster_cement_bags
+    tot_sand_t = wb.total_mortar_sand_tonnes + wb.total_plaster_sand_tonnes
+    tot_water_l = wb.total_mortar_water_litres + wb.total_plaster_water_litres
+
+    # Metric Cards
+    kpi1, kpi2, kpi3, kpi4, kpi5 = st.columns(5)
+    with kpi1:
+        st.metric("Total Bricks", f"{wb.total_bricks:,} pcs")
+        st.caption(f"Modular: 20×20×10 cm")
+    with kpi2:
+        st.metric("Total Cement", f"{tot_cem_bags:,} Bags")
+        st.caption(f"{wb.total_mortar_cement_bags} Mortar + {wb.total_plaster_cement_bags} Plaster")
+    with kpi3:
+        st.metric("Total Sand", f"{tot_sand_t:.2f} Tonnes")
+        st.caption(f"{wb.total_mortar_sand_tonnes:.2f}T Mortar + {wb.total_plaster_sand_tonnes:.2f}T Plaster")
+    with kpi4:
+        st.metric("Total Water", f"{tot_water_l:,.0f} L")
+        st.caption(f"W:C = 0.50 (Mortar & Plaster)")
+    with kpi5:
+        st.metric("Plaster Area", f"{wb.total_plaster_area_m2:,.1f} m²")
+        st.caption("Both sides (Ext 15mm / Int 12mm)")
+
+    # Tabs for detailed breakdown
+    w_tab1, w_tab2, w_tab3, w_tab4, w_tab5 = st.tabs([
+        "📋 Wall Sections", 
+        "🧱 Brickwork Takeoff", 
+        "🎨 Plastering Takeoff", 
+        "🖌️ Paint & Finishes", 
+        "📐 Formula Reference"
+    ])
+
+    with w_tab1:
+        st.markdown("### Individual Wall Section Schedule")
+        st.caption(f"Showing floor-level wall segments (total {len(wb.wall_sections)} perimeter/partition walls across {num_stories} stories).")
+        wall_rows = []
+        for sec in wb.wall_sections:
+            wall_rows.append({
+                "Wall ID": sec.wall_id,
+                "Start Col": sec.col_start,
+                "End Col": sec.col_end,
+                "Type": "Exterior (230mm)" if sec.is_exterior else "Interior (115mm)",
+                "Length (m)": f"{sec.length_m:.2f}",
+                "Clear Ht (m)": f"{sec.clear_height_m:.2f}",
+                "Thickness (mm)": int(sec.core_thickness_m * 1000),
+                "Vol (m³)": f"{sec.wall_volume_m3:.2f}",
+                "Bricks/Floor": sec.num_bricks,
+                "Total Bricks": sec.num_bricks * num_stories,
+                "Wet Mortar (m³)": f"{sec.wet_mortar_vol_m3:.3f}",
+                "Plaster (m²)": f"{sec.plaster_area_m2:.1f}",
+            })
+        if wall_rows:
+            st.dataframe(pd.DataFrame(wall_rows), use_container_width=True, hide_index=True)
+
+    with w_tab2:
+        st.markdown("### Masonry & Brickwork Material Breakdown")
+        m_data = [
+            {"Material / Parameter": "Clay Bricks (Nominal Module 20×20×10 cm)", "Formula / Factor": "V_wall / 0.004 = 250 × V_wall", "Total Quantity": f"{wb.total_bricks:,}", "Unit": "Nos", "IS Standard": "IS 1077:1992"},
+            {"Material / Parameter": "Total Wall Gross Volume", "Formula / Factor": "Σ (Length × Thickness × Clear Height)", "Total Quantity": f"{wb.total_wall_volume_m3:.2f}", "Unit": "m³", "IS Standard": "IS 1905:1987"},
+            {"Material / Parameter": "Actual Solid Brick Volume (19×19×9 cm)", "Formula / Factor": "No. of bricks × 0.003249 m³", "Total Quantity": f"{sum(s.total_brick_vol_m3 for s in wb.wall_sections)*num_stories:.2f}", "Unit": "m³", "IS Standard": "IS 1077:1992"},
+            {"Material / Parameter": "Wet Mortar Volume", "Formula / Factor": "V_wall − Solid Brick Volume", "Total Quantity": f"{sum(s.wet_mortar_vol_m3 for s in wb.wall_sections)*num_stories:.2f}", "Unit": "m³", "IS Standard": "IS 2250:1981"},
+            {"Material / Parameter": "Dry Mortar Volume", "Formula / Factor": "Wet Volume × 1.33", "Total Quantity": f"{sum(s.dry_mortar_vol_m3 for s in wb.wall_sections)*num_stories:.2f}", "Unit": "m³", "IS Standard": "IS 2250:1981"},
+            {"Material / Parameter": "Cement in Brickwork Mortar", "Formula / Factor": "Dry Vol × 1/(1+R) × 1440 kg/m³", "Total Quantity": f"{wb.total_mortar_cement_kg:,.0f} ({wb.total_mortar_cement_bags} bags)", "Unit": "kg (Bags)", "IS Standard": "IS 269 / IS 8112"},
+            {"Material / Parameter": "Sand in Brickwork Mortar", "Formula / Factor": "Dry Vol × R/(1+R) × 1600 kg/m³", "Total Quantity": f"{wb.total_mortar_sand_tonnes:.2f}", "Unit": "Tonnes", "IS Standard": "IS 383:2016"},
+            {"Material / Parameter": "Water for Masonry Mortar", "Formula / Factor": "0.50 × Weight of Cement", "Total Quantity": f"{wb.total_mortar_water_litres:,.0f}", "Unit": "Litres", "IS Standard": "IS 456 / IS 2250"},
+        ]
+        st.dataframe(pd.DataFrame(m_data), use_container_width=True, hide_index=True)
+
+    with w_tab3:
+        st.markdown("### Plastering Material Takeoff")
+        p_data = [
+            {"Application": "Internal Wall Plaster (Both/Inner Sides)", "Thickness": "12 mm (0.012 m)", "Mix Ratio": "1:6 (Cement : Sand)", "Dry Factor": "1.33", "IS Standard": "IS 1661:1972"},
+            {"Application": "External Wall Plaster (Outer Face)", "Thickness": "15 mm (0.015 m)", "Mix Ratio": "1:4 (Cement : Sand)", "Dry Factor": "1.33", "IS Standard": "IS 2402:1963"},
+            {"Application": "Total Plaster Area (All Stories)", "Thickness": "Both faces", "Mix Ratio": "-", "Dry Factor": f"{wb.total_plaster_area_m2:.1f} m²", "IS Standard": "IS 1200 Part 12"},
+            {"Application": "Plastering Cement Required", "Thickness": "-", "Mix Ratio": "-", "Dry Factor": f"{wb.total_plaster_cement_kg:,.0f} kg ({wb.total_plaster_cement_bags} bags)", "IS Standard": "IS 269:2015"},
+            {"Application": "Plastering Sand Required", "Thickness": "-", "Mix Ratio": "-", "Dry Factor": f"{wb.total_plaster_sand_tonnes:.2f} Tonnes", "IS Standard": "IS 383 Zone II/III"},
+            {"Application": "Plastering Water Required", "Thickness": "-", "Mix Ratio": "W:C = 0.50", "Dry Factor": f"{wb.total_plaster_water_litres:,.0f} Litres", "IS Standard": "IS 456 Cl 5.4"},
+        ]
+        st.dataframe(pd.DataFrame(p_data), use_container_width=True, hide_index=True)
+
+    with w_tab4:
+        st.markdown("### Paint & Architectural Surface Coatings")
+        paint_data = [
+            {"Coating Layer": "Primer (Internal & External)", "Coats": f"{1} coat", "Film Thickness": "25–40 microns", "Coverage": "8 m²/Litre", "Total Required": f"{wb.total_primer_litres:.1f} Litres"},
+            {"Coating Layer": "Wall Putty (Internal Faces)", "Coats": f"{2} coats", "Layer Thickness": "1–2 mm total", "Consumption": "1.5 kg/m²", "Total Required": f"{wb.total_putty_kg:,.1f} kg"},
+            {"Coating Layer": "Interior Acrylic Emulsion", "Coats": f"{2} coats", "Film Thickness": "30–40 microns/coat", "Coverage": "12 m²/Litre", "Total Required": f"{wb.total_emulsion_int_litres:.1f} Litres"},
+            {"Coating Layer": "Exterior Weather-Proof Emulsion", "Coats": f"{2} coats", "Film Thickness": "40–60 microns/coat", "Coverage": "10 m²/Litre", "Total Required": f"{wb.total_emulsion_ext_litres:.1f} Litres"},
+        ]
+        st.dataframe(pd.DataFrame(paint_data), use_container_width=True, hide_index=True)
+
+    with w_tab5:
+        st.markdown("### Mathematical Derivations & Engineering Logic")
+        st.markdown("""
+```text
+1. WALL GEOMETRY:
+   - Clear Wall Height:  Hv = Hf - ts - Db
+     where Hf = Floor-to-floor height, ts = Slab thickness, Db = Beam depth
+   - Gross Wall Volume:  Vw = Length × Thickness × Hv
+
+2. BRICKWORK QUANTITIES (IS 1077 Modular Bricks):
+   - Brick Size with mortar: 20 cm × 20 cm × 10 cm = 0.004 m³
+   - Number of bricks:       Nb = Vw / 0.004 = 250 × Vw
+   - Solid Brick Size:       19 cm × 19 cm × 9 cm = 0.003249 m³
+   - Solid Brick Volume:     Vbrick = Nb × 0.003249 m³
+
+3. MORTAR CALCULATIONS (IS 2250):
+   - Wet Mortar Volume:      Vm,wet = Vw - Vbrick
+   - Dry Mortar Volume:      Vm,dry = Vm,wet × 1.33  (accounts for voids in dry ingredients)
+   - Cement Volume:          Vc = Vm,dry × (1 / (1 + R))  where R = Sand parts in 1:R mix
+   - Cement Mass:            Wc = Vc × 1440 kg/m³
+   - Cement Bags:            Nb_bags = ceil(Wc / 50 kg)
+   - Sand Volume:            Vs = Vm,dry × (R / (1 + R))
+   - Sand Mass:              Ws = Vs × 1600 kg/m³  (Dry sand bulk density)
+   - Sand Tonnes:            Ws / 1000
+   - Water Mass:             Wwater = 0.50 × Wc  (W:C ratio = 0.50)
+
+4. PLASTERING QUANTITIES:
+   - Internal Plaster:       12 mm thickness, 1:6 cement:sand mix
+   - External Plaster:       15 mm thickness, 1:4 cement:sand mix
+   - Dry Conversion:         Wet Plaster Volume × 1.33
+
+5. PAINT & SURFACE COATING:
+   - Primer:                 1 coat (25–40 microns) @ 8 m²/L
+   - Putty:                  2 coats (1–2 mm) @ 1.5 kg/m²
+   - Interior Emulsion:      2 coats (30–40 microns) @ 12 m²/L
+   - Exterior Emulsion:      2 coats (40–60 microns) @ 10 m²/L
+```
+""")
+else:
+    st.info("Run analysis on the main Dashboard to generate wall design calculations.")
+
 # Sidebar
 with st.sidebar:
     render_is_code_reference()
