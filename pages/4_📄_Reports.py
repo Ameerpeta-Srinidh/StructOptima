@@ -89,7 +89,21 @@ def generate_zip_package():
             audit_file = os.path.join(tmpdirname, "Audit_Report.pdf")
             reporter.generate_audit_report(audit_file, gm, audit_results, auditor_math)
             
-        # 4. Floor-wise Reports
+        # 4. Design & Finishes Schedules Report
+        try:
+            sched_file = os.path.join(tmpdirname, "Design_and_Finishes_Schedules.pdf")
+            reporter.generate_schedule_report(sched_file, gm, footings=footings, project_name=project_name)
+        except Exception:
+            pass
+
+        # 5. Masonry, Plaster & Paint BOQ Report
+        try:
+            masonry_file = os.path.join(tmpdirname, "Masonry_Plaster_Paint_Takeoff.pdf")
+            reporter.generate_masonry_report(masonry_file, gm, project_name=project_name)
+        except Exception:
+            pass
+
+        # 6. Floor-wise Reports
         for lvl in range(num_stories):
             floor_pdf = os.path.join(tmpdirname, f"Floor_{lvl}_Report.pdf")
             reporter.generate_floor_report(floor_pdf, gm, lvl)
@@ -163,7 +177,7 @@ st.subheader("📄 Individual Reports")
 reporter = ReportGenerator()
 bbs_reporter = BBSReportGenerator()
 
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3, col4, col5, col6 = st.columns(6)
 
 with col1:
     with st.spinner("Generating Report..."):
@@ -184,25 +198,44 @@ with col1:
                 footings=footings,
             )
         with open(tmp.name, "rb") as f:
-            st.download_button("📑 Complete Report", f.read(), "Structural_Design_Report.pdf", "application/pdf")
+            st.download_button("📑 Complete Report", f.read(), "Structural_Design_Report.pdf", "application/pdf", key="dl_complete_report")
 
 with col2:
     if project_bbs:
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
             bbs_reporter.generate_bbs_report(tmp.name, project_bbs, "Bar Bending Schedule")
         with open(tmp.name, "rb") as f:
-            st.download_button("🔩 BBS Report", f.read(), "BBS_Report.pdf", "application/pdf")
+            st.download_button("🔩 BBS Report", f.read(), "BBS_Report.pdf", "application/pdf", key="dl_bbs_report")
 
 with col3:
     if audit_results and auditor_math:
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
             reporter.generate_audit_report(tmp.name, gm, audit_results, auditor_math)
         with open(tmp.name, "rb") as f:
-            st.download_button("✅ Audit Report", f.read(), "Audit_Report.pdf", "application/pdf")
+            st.download_button("✅ Audit Report", f.read(), "Audit_Report.pdf", "application/pdf", key="dl_audit_report")
 
 with col4:
     xls_data = ExcelExporter.export_to_excel(gm, all_beams, bom)
-    st.download_button("📊 Excel Data", xls_data, "Structural_Data.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    st.download_button("📊 Excel Data", xls_data, "Structural_Data.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_excel_data")
+
+with col5:
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            reporter.generate_schedule_report(tmp.name, gm, footings=footings, project_name=project_name)
+        with open(tmp.name, "rb") as f:
+            st.download_button("📋 Schedules Report", f.read(), "Design_and_Finishes_Schedules.pdf", "application/pdf", key="dl_schedules_report")
+    except Exception:
+        pass
+
+with col6:
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            reporter.generate_masonry_report(tmp.name, gm, project_name=project_name)
+        with open(tmp.name, "rb") as f:
+            st.download_button("🧱 Masonry BOQ", f.read(), "Masonry_Plaster_Paint_Takeoff.pdf", "application/pdf", key="dl_masonry_boq")
+    except Exception:
+        pass
+
 
 st.markdown("---")
 st.subheader("🏢 Floor-wise Reports")

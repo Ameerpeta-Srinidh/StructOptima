@@ -24,6 +24,7 @@ gm.optimize_column_sizes(concrete=m_grade, fy=415.0)
 gm.detail_columns(concrete=m_grade, fy=415.0)
 gm.detail_beams(beams)
 gm.detail_slabs()
+gm.generate_walls(wall_thickness_mm=200.0, include_interior=True)
 
 # Foundation
 level_0_cols = [c for c in gm.columns if c.level == 0]

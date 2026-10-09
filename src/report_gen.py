@@ -1,13 +1,532 @@
+import math
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from reportlab.lib import colors
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, PageBreak
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from typing import List
+from typing import List, Any, Dict, Optional
 from .quantifier import MaterialCost
 from .grid_manager import GridManager, Column
 
 class ReportGenerator:
+    @staticmethod
+    def _ensure_walls(grid_mgr: GridManager, **kwargs) -> List[Any]:
+        """Ensure grid_mgr has a non-empty walls list, auto-generating if necessary."""
+        if hasattr(grid_mgr, 'walls') and grid_mgr.walls:
+            return grid_mgr.walls
+        
+        passed_walls = kwargs.get('walls')
+        if passed_walls:
+            grid_mgr.walls = passed_walls
+            return grid_mgr.walls
+            
+        arch_walls = kwargs.get('arch_walls')
+        sh = float(getattr(grid_mgr, 'story_height_m', 3.0) or 3.0)
+        clear_h = max(sh - 0.125 - 0.40, 2.0)
+        
+        if arch_walls:
+            from .grid_manager import Wall
+            walls = []
+            for i, item in enumerate(arch_walls):
+                try:
+                    p1, p2 = item[0], item[1]
+                    walls.append(Wall(
+                        id=f"W_CAD_{i+1}",
+                        start_x=float(p1[0]),
+                        start_y=float(p1[1]),
+                        end_x=float(p2[0]),
+                        end_y=float(p2[1]),
+                        thickness_mm=200.0,
+                        height_m=clear_h,
+                        is_exterior=True
+                    ))
+                except Exception:
+                    continue
+            if walls:
+                grid_mgr.walls = walls
+                return grid_mgr.walls
+        
+        if hasattr(grid_mgr, 'generate_walls'):
+            try:
+                w = float(getattr(grid_mgr, 'width_m', 12.0) or 12.0)
+                l = float(getattr(grid_mgr, 'length_m', 9.0) or 9.0)
+                if not getattr(grid_mgr, 'x_grid_lines', None) or not getattr(grid_mgr, 'y_grid_lines', None):
+                    if getattr(grid_mgr, 'columns', None):
+                        xs = sorted(list(set([round(c.x, 2) for c in grid_mgr.columns])))
+                        ys = sorted(list(set([round(c.y, 2) for c in grid_mgr.columns])))
+                        if len(xs) > 1: grid_mgr.x_grid_lines = xs
+                        if len(ys) > 1: grid_mgr.y_grid_lines = ys
+                    if not getattr(grid_mgr, 'x_grid_lines', None):
+                        grid_mgr.x_grid_lines = [0.0, round(w / 2.0, 2), w]
+                    if not getattr(grid_mgr, 'y_grid_lines', None):
+                        grid_mgr.y_grid_lines = [0.0, round(l / 2.0, 2), l]
+                
+                grid_mgr.generate_walls(
+                    wall_thickness_mm=200.0,
+                    opening_fraction=0.33,
+                    include_interior=True,
+                    beam_depth_mm=400.0,
+                    slab_thickness_mm=125.0
+                )
+                if grid_mgr.walls:
+                    return grid_mgr.walls
+            except Exception:
+                pass
+        
+        from .grid_manager import Wall
+        w = float(getattr(grid_mgr, 'width_m', 12.0) or 12.0)
+        l = float(getattr(grid_mgr, 'length_m', 9.0) or 9.0)
+        grid_mgr.walls = [
+            Wall(id="W_EXT_1", start_x=0.0, start_y=0.0, end_x=w, end_y=0.0, thickness_mm=200.0, height_m=clear_h, is_exterior=True),
+            Wall(id="W_EXT_2", start_x=w, start_y=0.0, end_x=w, end_y=l, thickness_mm=200.0, height_m=clear_h, is_exterior=True),
+            Wall(id="W_EXT_3", start_x=w, start_y=l, end_x=0.0, end_y=l, thickness_mm=200.0, height_m=clear_h, is_exterior=True),
+            Wall(id="W_EXT_4", start_x=0.0, start_y=l, end_x=0.0, end_y=0.0, thickness_mm=200.0, height_m=clear_h, is_exterior=True),
+        ]
+        return grid_mgr.walls
+
+    @staticmethod
+    def _create_brickwork_schedule_table(wb: Any, num_stories: int = 1) -> Table:
+        """Create full brickwork & mortar schedule table per IS 1077 & IS 2250."""
+        headers = [
+            "Wall ID", "Span / Cols", "Len (m)", "Ht (m)", "Thk", "Gross (m³)",
+            "Bricks (Nos)", "Brick Vol", "Wet Mor", "Dry Mor", "Cem Bags", "Cem (kg)", "Sand (T)", "Water (L)"
+        ]
+        brick_data = [headers]
+        if not wb or not getattr(wb, 'wall_sections', None):
+            brick_data.append(["N/A", "-", "-", "-", "-", "-", "-", "-", "-", "-", "-", "-", "-", "-"])
+            t = Table(brick_data, repeatRows=1, colWidths=[36, 44, 28, 26, 28, 38, 38, 36, 38, 38, 36, 38, 36, 34])
+            t.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.darkorange),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+                ('FONTSIZE', (0, 0), (-1, -1), 6.5),
+            ]))
+            return t
+
+        for sec in wb.wall_sections:
+            span_label = f"{sec.col_start}→{sec.col_end}" if (sec.col_start and sec.col_end) else "Bay"
+            brick_data.append([
+                sec.wall_id,
+                span_label,
+                f"{sec.length_m:.2f}",
+                f"{sec.clear_height_m:.2f}",
+                f"{int(sec.core_thickness_m * 1000)}mm",
+                f"{sec.wall_volume_m3 * num_stories:.2f}",
+                f"{sec.num_bricks * num_stories:,}",
+                f"{sec.total_brick_vol_m3 * num_stories:.2f}",
+                f"{sec.wet_mortar_vol_m3 * num_stories:.3f}",
+                f"{sec.dry_mortar_vol_m3 * num_stories:.3f}",
+                f"{int(math.ceil(sec.mortar_cement_kg * num_stories / 50.0))}",
+                f"{sec.mortar_cement_kg * num_stories:.1f}",
+                f"{sec.mortar_sand_tonnes * num_stories:.2f}",
+                f"{sec.mortar_water_litres * num_stories:.0f}",
+            ])
+
+        tot_vol = sum(s.wall_volume_m3 for s in wb.wall_sections) * num_stories
+        tot_bricks = sum(s.num_bricks for s in wb.wall_sections) * num_stories
+        tot_brk_vol = sum(s.total_brick_vol_m3 for s in wb.wall_sections) * num_stories
+        tot_wet = sum(s.wet_mortar_vol_m3 for s in wb.wall_sections) * num_stories
+        tot_dry = sum(s.dry_mortar_vol_m3 for s in wb.wall_sections) * num_stories
+        tot_cem_kg = sum(s.mortar_cement_kg for s in wb.wall_sections) * num_stories
+        tot_cem_bags = int(math.ceil(tot_cem_kg / 50.0))
+        tot_sand_t = sum(s.mortar_sand_tonnes for s in wb.wall_sections) * num_stories
+        tot_water_l = sum(s.mortar_water_litres for s in wb.wall_sections) * num_stories
+
+        brick_data.append([
+            "TOTAL", "All Walls", "-", "-", "-",
+            f"{tot_vol:.2f}", f"{tot_bricks:,}", f"{tot_brk_vol:.2f}",
+            f"{tot_wet:.2f}", f"{tot_dry:.2f}", f"{tot_cem_bags:,}",
+            f"{tot_cem_kg:,.0f}", f"{tot_sand_t:.2f}", f"{tot_water_l:,.0f}"
+        ])
+
+        t = Table(brick_data, repeatRows=1, colWidths=[36, 44, 28, 26, 28, 38, 38, 36, 38, 38, 36, 38, 36, 34])
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.darkorange),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('FONTSIZE', (0, 0), (-1, -1), 6.5),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('BACKGROUND', (0, -1), (-1, -1), colors.lightyellow),
+            ('FONTWEIGHT', (0, -1), (-1, -1), 'BOLD'),
+        ]))
+        return t
+
+    @staticmethod
+    def _create_plaster_schedule_table(wb: Any, num_stories: int = 1, grid_mgr: Optional[GridManager] = None) -> Table:
+        """Create plaster schedule table per IS 1661 & IS 2402 including ceiling soffits."""
+        headers = [
+            "Surface ID", "Location & Mix Spec", "Area (m²)", "Thk (mm)", "Mix",
+            "Wet Vol (m³)", "Dry Vol (m³)", "Cem (Bags)", "Cem (kg)", "Sand (T)", "Water (L)"
+        ]
+        plaster_data = [headers]
+        if not wb or not getattr(wb, 'wall_sections', None):
+            plaster_data.append(["N/A", "-", "-", "-", "-", "-", "-", "-", "-", "-", "-"])
+            t = Table(plaster_data, repeatRows=1, colWidths=[44, 86, 44, 34, 32, 42, 42, 42, 46, 42, 38])
+            t.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.Color(0.1, 0.45, 0.45)),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+                ('FONTSIZE', (0, 0), (-1, -1), 6.5),
+            ]))
+            return t
+
+        tot_p_area = 0.0
+        tot_p_wet = 0.0
+        tot_p_dry = 0.0
+        tot_p_cem_kg = 0.0
+        tot_p_sand_t = 0.0
+        tot_p_water_l = 0.0
+
+        for sec in wb.wall_sections:
+            if sec.is_exterior:
+                # Ext side: 15mm, 1:4
+                a_ext = (sec.length_m * sec.clear_height_m) * num_stories
+                w_ext = a_ext * 0.015
+                d_ext = w_ext * 1.33
+                c_ext_kg = (d_ext / 5.0) * 1440.0
+                c_ext_bags = int(math.ceil(c_ext_kg / 50.0))
+                s_ext_t = ((d_ext * 4.0 / 5.0) * 1600.0) / 1000.0
+                wat_ext_l = c_ext_kg * 0.50
+                plaster_data.append([
+                    f"{sec.wall_id}_EXT", "Ext Render (15mm 1:4)", f"{a_ext:.1f}", "15", "1:4",
+                    f"{w_ext:.3f}", f"{d_ext:.3f}", f"{c_ext_bags}", f"{c_ext_kg:.1f}", f"{s_ext_t:.2f}", f"{wat_ext_l:.0f}"
+                ])
+                tot_p_area += a_ext
+                tot_p_wet += w_ext
+                tot_p_dry += d_ext
+                tot_p_cem_kg += c_ext_kg
+                tot_p_sand_t += s_ext_t
+                tot_p_water_l += wat_ext_l
+
+                # Int side: 12mm, 1:6
+                a_int = (sec.length_m * sec.clear_height_m) * num_stories
+                w_int = a_int * 0.012
+                d_int = w_int * 1.33
+                c_int_kg = (d_int / 7.0) * 1440.0
+                c_int_bags = int(math.ceil(c_int_kg / 50.0))
+                s_int_t = ((d_int * 6.0 / 7.0) * 1600.0) / 1000.0
+                wat_int_l = c_int_kg * 0.50
+                plaster_data.append([
+                    f"{sec.wall_id}_INT", "Int Wall (12mm 1:6)", f"{a_int:.1f}", "12", "1:6",
+                    f"{w_int:.3f}", f"{d_int:.3f}", f"{c_int_bags}", f"{c_int_kg:.1f}", f"{s_int_t:.2f}", f"{wat_int_l:.0f}"
+                ])
+                tot_p_area += a_int
+                tot_p_wet += w_int
+                tot_p_dry += d_int
+                tot_p_cem_kg += c_int_kg
+                tot_p_sand_t += s_int_t
+                tot_p_water_l += wat_int_l
+            else:
+                # Both sides interior: 12mm, 1:6
+                a_int = (sec.length_m * sec.clear_height_m * 2.0) * num_stories
+                w_int = a_int * 0.012
+                d_int = w_int * 1.33
+                c_int_kg = (d_int / 7.0) * 1440.0
+                c_int_bags = int(math.ceil(c_int_kg / 50.0))
+                s_int_t = ((d_int * 6.0 / 7.0) * 1600.0) / 1000.0
+                wat_int_l = c_int_kg * 0.50
+                plaster_data.append([
+                    f"{sec.wall_id}", "Int Part (2-Face 12mm 1:6)", f"{a_int:.1f}", "12", "1:6",
+                    f"{w_int:.3f}", f"{d_int:.3f}", f"{c_int_bags}", f"{c_int_kg:.1f}", f"{s_int_t:.2f}", f"{wat_int_l:.0f}"
+                ])
+                tot_p_area += a_int
+                tot_p_wet += w_int
+                tot_p_dry += d_int
+                tot_p_cem_kg += c_int_kg
+                tot_p_sand_t += s_int_t
+                tot_p_water_l += wat_int_l
+
+        # Ceiling Soffit Plaster
+        if grid_mgr and hasattr(grid_mgr, 'width_m') and hasattr(grid_mgr, 'length_m'):
+            w_m = float(getattr(grid_mgr, 'width_m', 0.0) or 0.0)
+            l_m = float(getattr(grid_mgr, 'length_m', 0.0) or 0.0)
+            a_ceil = w_m * l_m * num_stories
+            if a_ceil > 0.0:
+                w_ceil = a_ceil * 0.006  # 6mm ceiling plaster
+                d_ceil = w_ceil * 1.33
+                c_ceil_kg = (d_ceil / 4.0) * 1440.0  # 1:3 mix
+                c_ceil_bags = int(math.ceil(c_ceil_kg / 50.0))
+                s_ceil_t = ((d_ceil * 3.0 / 4.0) * 1600.0) / 1000.0
+                wat_ceil_l = c_ceil_kg * 0.50
+                plaster_data.append([
+                    "Ceiling Soffit", "Slab Bottom (6mm 1:3)", f"{a_ceil:.1f}", "6", "1:3",
+                    f"{w_ceil:.3f}", f"{d_ceil:.3f}", f"{c_ceil_bags}", f"{c_ceil_kg:.1f}", f"{s_ceil_t:.2f}", f"{wat_ceil_l:.0f}"
+                ])
+                tot_p_area += a_ceil
+                tot_p_wet += w_ceil
+                tot_p_dry += d_ceil
+                tot_p_cem_kg += c_ceil_kg
+                tot_p_sand_t += s_ceil_t
+                tot_p_water_l += wat_ceil_l
+
+        tot_p_cem_bags = int(math.ceil(tot_p_cem_kg / 50.0))
+        plaster_data.append([
+            "TOTAL", "All Plaster Surfaces", f"{tot_p_area:.1f}", "-", "-",
+            f"{tot_p_wet:.3f}", f"{tot_p_dry:.3f}", f"{tot_p_cem_bags:,}", f"{tot_p_cem_kg:,.0f}", f"{tot_p_sand_t:.2f}", f"{tot_p_water_l:,.0f}"
+        ])
+
+        t = Table(plaster_data, repeatRows=1, colWidths=[44, 86, 44, 34, 32, 42, 42, 42, 46, 42, 38])
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.Color(0.1, 0.45, 0.45)),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('FONTSIZE', (0, 0), (-1, -1), 6.5),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('BACKGROUND', (0, -1), (-1, -1), colors.lightyellow),
+            ('FONTWEIGHT', (0, -1), (-1, -1), 'BOLD'),
+        ]))
+        return t
+
+    @staticmethod
+    def _create_paint_schedule_table(wb: Any, num_stories: int = 1, grid_mgr: Optional[GridManager] = None) -> Table:
+        """Create painting schedule table per NBC 2016 SP7 including ceiling finishes."""
+        headers = [
+            "Surface ID", "Location & Specification", "Finish Area (m²)",
+            "Primer 1-Ct (L)", "Putty 2-Ct (kg)", "Int Emulsion 2-Ct (L)", "Ext Weather 2-Ct (L)"
+        ]
+        paint_data = [headers]
+        if not wb or not getattr(wb, 'wall_sections', None):
+            paint_data.append(["N/A", "-", "-", "-", "-", "-", "-"])
+            t = Table(paint_data, repeatRows=1, colWidths=[55, 115, 50, 65, 70, 70, 70])
+            t.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.Color(0.2, 0.25, 0.5)),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+                ('FONTSIZE', (0, 0), (-1, -1), 7),
+            ]))
+            return t
+
+        tot_pt_area = 0.0
+        tot_primer = 0.0
+        tot_putty = 0.0
+        tot_em_int = 0.0
+        tot_em_ext = 0.0
+
+        for sec in wb.wall_sections:
+            if sec.is_exterior:
+                a_ext = (sec.length_m * sec.clear_height_m) * num_stories
+                pr_ext = a_ext / 8.0
+                we_ext = (a_ext * 2.0) / 10.0
+                paint_data.append([
+                    f"{sec.wall_id}_EXT", "External Weather Guard", f"{a_ext:.1f}", f"{pr_ext:.1f}", "—", "—", f"{we_ext:.1f}"
+                ])
+                tot_pt_area += a_ext
+                tot_primer += pr_ext
+                tot_em_ext += we_ext
+
+                a_int = (sec.length_m * sec.clear_height_m) * num_stories
+                pr_int = a_int / 8.0
+                pu_int = a_int * 1.5
+                em_int = (a_int * 2.0) / 12.0
+                paint_data.append([
+                    f"{sec.wall_id}_INT", "Internal Acrylic Emulsion", f"{a_int:.1f}", f"{pr_int:.1f}", f"{pu_int:.1f}", f"{em_int:.1f}", "—"
+                ])
+                tot_pt_area += a_int
+                tot_primer += pr_int
+                tot_putty += pu_int
+                tot_em_int += em_int
+            else:
+                a_int = (sec.length_m * sec.clear_height_m * 2.0) * num_stories
+                pr_int = a_int / 8.0
+                pu_int = a_int * 1.5
+                em_int = (a_int * 2.0) / 12.0
+                paint_data.append([
+                    f"{sec.wall_id}", "Internal Partition Emulsion", f"{a_int:.1f}", f"{pr_int:.1f}", f"{pu_int:.1f}", f"{em_int:.1f}", "—"
+                ])
+                tot_pt_area += a_int
+                tot_primer += pr_int
+                tot_putty += pu_int
+                tot_em_int += em_int
+
+        if grid_mgr and hasattr(grid_mgr, 'width_m') and hasattr(grid_mgr, 'length_m'):
+            w_m = float(getattr(grid_mgr, 'width_m', 0.0) or 0.0)
+            l_m = float(getattr(grid_mgr, 'length_m', 0.0) or 0.0)
+            a_ceil = w_m * l_m * num_stories
+            if a_ceil > 0.0:
+                pr_ceil = a_ceil / 8.0
+                pu_ceil = a_ceil * 1.5
+                em_ceil = (a_ceil * 2.0) / 12.0
+                paint_data.append([
+                    "Ceiling Soffit", "Slab Underside (White Emulsion)", f"{a_ceil:.1f}", f"{pr_ceil:.1f}", f"{pu_ceil:.1f}", f"{em_ceil:.1f}", "—"
+                ])
+                tot_pt_area += a_ceil
+                tot_primer += pr_ceil
+                tot_putty += pu_ceil
+                tot_em_int += em_ceil
+
+        paint_data.append([
+            "TOTAL", "All Surfaces (Walls + Ceilings)", f"{tot_pt_area:.1f}", f"{tot_primer:.1f}", f"{tot_putty:,.1f}", f"{tot_em_int:.1f}", f"{tot_em_ext:.1f}"
+        ])
+
+        t = Table(paint_data, repeatRows=1, colWidths=[55, 115, 50, 65, 70, 70, 70])
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.Color(0.2, 0.25, 0.5)),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('FONTSIZE', (0, 0), (-1, -1), 7),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('BACKGROUND', (0, -1), (-1, -1), colors.lightyellow),
+            ('FONTWEIGHT', (0, -1), (-1, -1), 'BOLD'),
+        ]))
+        return t
+
+    @staticmethod
+    def _create_masonry_summary_table(wb: Any, num_stories: int = 1, grid_mgr: Optional[GridManager] = None) -> Table:
+        """Create consolidated masonry, plaster and paint summary BOQ table."""
+        if not wb or not getattr(wb, 'wall_sections', None):
+            t = Table([["Material", "Spec", "Quantity", "Unit", "Standard"], ["N/A", "-", "-", "-", "-"]], colWidths=[135, 140, 95, 55, 70])
+            return t
+
+        tot_vol = sum(s.wall_volume_m3 for s in wb.wall_sections) * num_stories
+        tot_bricks = sum(s.num_bricks for s in wb.wall_sections) * num_stories
+        tot_brk_vol = sum(s.total_brick_vol_m3 for s in wb.wall_sections) * num_stories
+        tot_wet = sum(s.wet_mortar_vol_m3 for s in wb.wall_sections) * num_stories
+        tot_dry = sum(s.dry_mortar_vol_m3 for s in wb.wall_sections) * num_stories
+        tot_m_cem_kg = sum(s.mortar_cement_kg for s in wb.wall_sections) * num_stories
+        tot_m_cem_bags = int(math.ceil(tot_m_cem_kg / 50.0))
+        tot_m_sand_t = sum(s.mortar_sand_tonnes for s in wb.wall_sections) * num_stories
+        tot_m_water_l = sum(s.mortar_water_litres for s in wb.wall_sections) * num_stories
+
+        wall_p_area = sum(s.plaster_area_m2 for s in wb.wall_sections) * num_stories
+        wall_p_cem_kg = sum(s.plaster_cement_kg for s in wb.wall_sections) * num_stories
+        wall_p_sand_t = sum(s.plaster_sand_tonnes for s in wb.wall_sections) * num_stories
+        wall_p_water_l = sum(s.plaster_water_litres for s in wb.wall_sections) * num_stories
+
+        ceil_area = 0.0
+        ceil_cem_kg = 0.0
+        ceil_sand_t = 0.0
+        ceil_water_l = 0.0
+        ceil_primer_l = 0.0
+        ceil_putty_kg = 0.0
+        ceil_em_l = 0.0
+
+        if grid_mgr and hasattr(grid_mgr, 'width_m') and hasattr(grid_mgr, 'length_m'):
+            w_m = float(getattr(grid_mgr, 'width_m', 0.0) or 0.0)
+            l_m = float(getattr(grid_mgr, 'length_m', 0.0) or 0.0)
+            ceil_area = w_m * l_m * num_stories
+            if ceil_area > 0.0:
+                c_d_vol = (ceil_area * 0.006) * 1.33
+                ceil_cem_kg = (c_d_vol / 4.0) * 1440.0
+                ceil_sand_t = ((c_d_vol * 3.0 / 4.0) * 1600.0) / 1000.0
+                ceil_water_l = ceil_cem_kg * 0.50
+                ceil_primer_l = ceil_area / 8.0
+                ceil_putty_kg = ceil_area * 1.5
+                ceil_em_l = (ceil_area * 2.0) / 12.0
+
+        tot_p_area = wall_p_area + ceil_area
+        tot_p_cem_kg = wall_p_cem_kg + ceil_cem_kg
+        tot_p_cem_bags = int(math.ceil(tot_p_cem_kg / 50.0))
+        tot_p_sand_t = wall_p_sand_t + ceil_sand_t
+        tot_p_water_l = wall_p_water_l + ceil_water_l
+
+        tot_primer_l = (sum(s.primer_litres for s in wb.wall_sections) * num_stories) + ceil_primer_l
+        tot_putty_kg = (sum(s.putty_kg for s in wb.wall_sections) * num_stories) + ceil_putty_kg
+        tot_em_int_l = (sum(s.emulsion_int_litres for s in wb.wall_sections) * num_stories) + ceil_em_l
+        tot_em_ext_l = sum(s.emulsion_ext_litres for s in wb.wall_sections) * num_stories
+
+        grand_cem_bags = tot_m_cem_bags + tot_p_cem_bags
+        grand_cem_kg = tot_m_cem_kg + tot_p_cem_kg
+        grand_sand_t = tot_m_sand_t + tot_p_sand_t
+        grand_water_l = tot_m_water_l + tot_p_water_l
+
+        summary_rows = [
+            ["Item / Material Description", "Specification / Mix Proportion", "Building Total", "Unit", "IS Standard"],
+            ["Total Wall Gross Volume", "L × t × Hv (clear story height)", f"{tot_vol:.2f}", "m³", "IS 1905:1987"],
+            ["Clay Modular Building Bricks", "Standard modular 20×20×10 cm", f"{tot_bricks:,}", "Nos", "IS 1077:1992"],
+            ["Net Solid Brickwork Volume", "Actual brick body volume (excl. mortar)", f"{tot_brk_vol:.2f}", "m³", "IS 1077:1992"],
+            ["Wet Brickwork Mortar Volume", "Gross Wall Volume − Solid Brick Vol", f"{tot_wet:.2f}", "m³", "IS 2250:1981"],
+            ["Dry Brickwork Mortar Volume", "Wet Volume × 1.33 dry factor", f"{tot_dry:.2f}", "m³", "IS 2250:1981"],
+            ["Brickwork Cement", "1:4 Mix Proportion (OPC / PPC)", f"{tot_m_cem_bags:,} ({tot_m_cem_kg:,.0f} kg)", "Bags (50kg)", "IS 269:2015"],
+            ["Brickwork Sand", "Coarse sand, dry density 1600 kg/m³", f"{tot_m_sand_t:.2f}", "Tonnes", "IS 383 Zone II"],
+            ["Brickwork Water", "Water:Cement ratio = 0.50", f"{tot_m_water_l:,.0f}", "Litres", "IS 456 Cl 5.4"],
+            ["Wall Plastering Surface Area", "Internal (12mm 1:6) + External (15mm 1:4)", f"{wall_p_area:.1f}", "m²", "IS 1200 Pt 12"],
+            ["Ceiling Soffit Plaster Area", "Soffit bottom of slabs (6mm 1:3 mix)", f"{ceil_area:.1f}", "m²", "IS 1661:1972"],
+            ["Total Plaster Surface Area", "Combined wall + ceiling surface", f"{tot_p_area:.1f}", "m²", "IS 1200 Pt 12"],
+            ["Plastering Cement", "Combined wall & ceiling plaster", f"{tot_p_cem_bags:,} ({tot_p_cem_kg:,.0f} kg)", "Bags (50kg)", "IS 1661 / IS 2402"],
+            ["Plastering Sand", "Clean plaster sand (Zone III/IV)", f"{tot_p_sand_t:.2f}", "Tonnes", "IS 383:2016"],
+            ["Plastering Water", "Water:Cement ratio = 0.50", f"{tot_p_water_l:,.0f}", "Litres", "IS 456 Cl 5.4"],
+            ["Surface Primer", "Water-thinnable primer @ 8 m²/L (1 coat)", f"{tot_primer_l:.1f}", "Litres", "NBC 2016 SP7"],
+            ["Polymer Wall Putty", "2 coats (1–2 mm) @ 1.5 kg/m²", f"{tot_putty_kg:,.1f}", "kg", "NBC 2016 SP7"],
+            ["Interior Acrylic Emulsion", "2 coats (30–40 microns) @ 12 m²/L", f"{tot_em_int_l:.1f}", "Litres", "NBC 2016 SP7"],
+            ["Exterior Weather Emulsion", "2 coats (40–60 microns) @ 10 m²/L", f"{tot_em_ext_l:.1f}", "Litres", "NBC 2016 SP7"],
+            ["GRAND TOTAL CEMENT (Mortar + Plaster)", "All masonry + plastering works combined", f"{grand_cem_bags:,} bags ({grand_cem_kg:,.0f} kg)", "Bags", "IS 269:2015"],
+            ["GRAND TOTAL SAND (Mortar + Plaster)", "All masonry + plastering sand combined", f"{grand_sand_t:.2f}", "Tonnes", "IS 383:2016"],
+            ["GRAND TOTAL WATER (Mortar + Plaster)", "All masonry + plastering water combined", f"{grand_water_l:,.0f}", "Litres", "IS 456 Cl 5.4"],
+        ]
+
+        t = Table(summary_rows, repeatRows=1, colWidths=[135, 140, 95, 55, 70])
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.darkslategray),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('ALIGN', (0, 1), (1, -1), 'LEFT'),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('FONTSIZE', (0, 0), (-1, -1), 6.5),
+            ('BACKGROUND', (0, -3), (-1, -1), colors.lightyellow),
+            ('FONTWEIGHT', (0, -3), (-1, -1), 'BOLD'),
+        ]))
+        return t
+
+    @staticmethod
+    def _create_masonry_cost_table(wb: Any, num_stories: int = 1, grid_mgr: Optional[GridManager] = None) -> Table:
+        """Create masonry, plaster and finishes trade cost estimate table."""
+        if not wb or not getattr(wb, 'wall_sections', None):
+            t = Table([["Trade", "Quantity", "Rate", "Subtotal"], ["N/A", "-", "-", "-"]], colWidths=[155, 110, 100, 130])
+            return t
+
+        tot_bricks = sum(s.num_bricks for s in wb.wall_sections) * num_stories
+        tot_m_cem_kg = sum(s.mortar_cement_kg for s in wb.wall_sections) * num_stories
+        tot_m_cem_bags = int(math.ceil(tot_m_cem_kg / 50.0))
+        tot_m_sand_t = sum(s.mortar_sand_tonnes for s in wb.wall_sections) * num_stories
+
+        wall_p_area = sum(s.plaster_area_m2 for s in wb.wall_sections) * num_stories
+        ceil_area = 0.0
+        if grid_mgr and hasattr(grid_mgr, 'width_m') and hasattr(grid_mgr, 'length_m'):
+            ceil_area = float(getattr(grid_mgr, 'width_m', 0.0) or 0.0) * float(getattr(grid_mgr, 'length_m', 0.0) or 0.0) * num_stories
+        tot_p_area = wall_p_area + ceil_area
+
+        rate_brick = 9.0
+        rate_cem = 380.0
+        rate_sand = 1500.0
+        rate_plast = 280.0
+        rate_paint = 120.0
+
+        c_bricks = tot_bricks * rate_brick
+        c_m_cem = tot_m_cem_bags * rate_cem
+        c_m_sand = tot_m_sand_t * rate_sand
+        c_plaster = tot_p_area * rate_plast
+        c_paint = tot_p_area * rate_paint
+        tot_mas_cost = c_bricks + c_m_cem + c_m_sand + c_plaster + c_paint
+
+        cost_rows = [
+            ["Trade / Material Component", "Quantity", "Rate (INR)", "Subtotal (INR)"],
+            ["Clay Modular Bricks (IS 1077)", f"{tot_bricks:,} Nos", f"₹{rate_brick:.0f} / brick", f"₹{c_bricks:,.2f}"],
+            ["Brickwork Mortar Cement", f"{tot_m_cem_bags:,} Bags", f"₹{rate_cem:.0f} / bag", f"₹{c_m_cem:,.2f}"],
+            ["Brickwork Mortar Sand", f"{tot_m_sand_t:.2f} Tonnes", f"₹{rate_sand:,.0f} / Tonne", f"₹{c_m_sand:,.2f}"],
+            ["Plastering Work (12/15/6mm)", f"{tot_p_area:.1f} m²", f"₹{rate_plast:.0f} / m²", f"₹{c_plaster:,.2f}"],
+            ["Surface Finishes (Primer + Putty + Paint)", f"{tot_p_area:.1f} m²", f"₹{rate_paint:.0f} / m²", f"₹{c_paint:,.2f}"],
+            ["TOTAL MASONRY, PLASTER & FINISHES", "", "", f"₹{tot_mas_cost:,.2f}"]
+        ]
+
+        t = Table(cost_rows, colWidths=[155, 110, 100, 130])
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.saddlebrown),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('ALIGN', (0, 1), (0, -1), 'LEFT'),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('FONTSIZE', (0, 0), (-1, -1), 7.5),
+            ('BACKGROUND', (0, -1), (-1, -1), colors.lightyellow),
+            ('FONTWEIGHT', (0, -1), (-1, -1), 'BOLD'),
+        ]))
+        return t
+
     def generate_report(self, filename: str, grid_mgr: GridManager, bom: MaterialCost,
                         audit_results: List = [], math_breakdown: List[str] = [],
                         project_name: str = "Structural Design Report", use_fly_ash: bool = False,
@@ -15,7 +534,22 @@ class ReportGenerator:
                         all_beams=None, conc_grade: str = "M25",
                         live_load: float = 0, building_weight: float = 0,
                         seismic_zone: str = "II", **kwargs):
-        doc = SimpleDocTemplate(filename, pagesize=A4)
+        # Guarantee walls exist and are quantified
+        ReportGenerator._ensure_walls(grid_mgr, **kwargs)
+        from .wall_calculator import WallCalculator
+        wall_calc = WallCalculator(mortar_ratio=4, wc_ratio=0.50)
+        num_st = getattr(grid_mgr, 'num_stories', 1) or 1
+        story_h = getattr(grid_mgr, 'story_height_m', 3.0) or 3.0
+        
+        wall_bom_rep = wall_calc.calculate_all(
+            grid_mgr.walls,
+            num_stories=num_st,
+            floor_height_m=story_h,
+            slab_thickness_mm=125.0,
+            beam_depth_mm=400.0,
+        )
+
+        doc = SimpleDocTemplate(filename, pagesize=A4, leftMargin=36, rightMargin=36, topMargin=36, bottomMargin=36)
         elements = []
         styles = getSampleStyleSheet()
         
@@ -26,16 +560,22 @@ class ReportGenerator:
         
         # 1. Executive Summary
         elements.append(Paragraph("1. Executive Summary", styles["Heading1"]))
-        num_st = getattr(grid_mgr, 'num_stories', 1)
         tot_b = getattr(bom, 'total_bricks', getattr(bom, 'brick_count', 0))
         tot_cem = getattr(bom, 'total_mortar_cement_bags', 0) + getattr(bom, 'total_plaster_cement_bags', 0)
         tot_sand = getattr(bom, 'total_mortar_sand_tonnes', 0.0) + getattr(bom, 'total_plaster_sand_tonnes', 0.0)
         tot_plast = getattr(bom, 'total_plaster_area_m2', getattr(bom, 'plaster_area_m2', 0.0))
+        
+        if (not tot_b or tot_b == 0) and wall_bom_rep:
+            tot_b = wall_bom_rep.total_bricks
+            tot_cem = wall_bom_rep.total_mortar_cement_bags + wall_bom_rep.total_plaster_cement_bags
+            tot_sand = wall_bom_rep.total_mortar_sand_tonnes + wall_bom_rep.total_plaster_sand_tonnes
+            tot_plast = wall_bom_rep.total_plaster_area_m2
+            
         proj_cost = getattr(bom, 'final_project_cost', getattr(bom, 'base_project_cost', bom.total_cost_inr))
         
         summary_data = [
             ["Total Floor Area", f"{grid_mgr.width_m * grid_mgr.length_m:.2f} m²"],
-            ["Stories / Height", f"{num_st} Stories / {num_st * getattr(grid_mgr, 'story_height_m', 3.0):.1f} m"],
+            ["Stories / Height", f"{num_st} Stories / {num_st * story_h:.1f} m"],
             ["RCC Concrete Volume", f"{bom.total_concrete_vol_m3:.2f} m³"],
             ["Reinforcement Steel", f"{bom.total_steel_weight_kg:.0f} kg"],
             ["Clay Modular Bricks", f"{tot_b:,} Nos" if tot_b else "N/A"],
@@ -264,101 +804,38 @@ class ReportGenerator:
         elements.append(t_slab)
         elements.append(Spacer(1, 12))
 
-        # 8. Masonry Wall Design & Material Takeoff (IS 1077, IS 2250, IS 1661)
-        elements.append(Paragraph("8. Masonry Wall Design & Material Takeoff", styles["Heading1"]))
-        from .wall_calculator import WallCalculator
-        wall_calc = WallCalculator(mortar_ratio=4, wc_ratio=0.50)
-        num_stories = getattr(grid_mgr, 'num_stories', 1)
-        story_h = getattr(grid_mgr, 'story_height_m', 3.0)
-        
-        elements.append(Paragraph("<b>8.1 Individual Wall Section Material Takeoff</b>", styles["Heading2"]))
-        elements.append(Paragraph("<font size=8>Quantities per wall segment per floor: Bricks = 250 × Vol (IS 1077), Mortar dry factor = 1.33 (IS 2250), Plaster 12/15mm (IS 1661/2402).</font>", styles["Normal"]))
+        # 8. Brickwork Schedule & Material Takeoff (IS 1077, IS 2250)
+        elements.append(Paragraph("8. Brickwork Schedule & Material Takeoff (IS 1077, IS 2250)", styles["Heading1"]))
+        elements.append(Paragraph("<font size=8>Modular clay bricks 200×200×100 mm with mortar (190×190×90 mm solid core, 250 bricks/m³ per IS 1077). Mortar 1:4 mix proportion with 1.33 dry volume factor per IS 2250. W:C ratio = 0.50.</font>", styles["Normal"]))
         elements.append(Spacer(1, 4))
-        
-        wall_data = [["Wall ID", "Span / Cols", "Len (m)", "Ht (m)", "Thk", "Vol (m3)", "Bricks", "Mortar (m3)", "Cem (kg)", "Sand (T)", "Plaster (m2)"]]
-        
-        wall_bom_rep = None
-        if hasattr(grid_mgr, 'walls') and grid_mgr.walls:
-            wall_bom_rep = wall_calc.calculate_all(
-                grid_mgr.walls,
-                num_stories=num_stories,
-                floor_height_m=story_h,
-                slab_thickness_mm=125.0,
-                beam_depth_mm=400.0,
-            )
-            for sec in wall_bom_rep.wall_sections:
-                span_label = f"{sec.col_start}→{sec.col_end}" if (sec.col_start and sec.col_end) else "Bay"
-                wall_data.append([
-                    sec.wall_id,
-                    span_label,
-                    f"{sec.length_m:.2f}",
-                    f"{sec.clear_height_m:.2f}",
-                    f"{int(sec.core_thickness_m * 1000)}mm",
-                    f"{sec.wall_volume_m3:.2f}",
-                    f"{sec.num_bricks:,}",
-                    f"{sec.wet_mortar_vol_m3:.3f}",
-                    f"{sec.mortar_cement_kg:.1f}",
-                    f"{sec.mortar_sand_tonnes:.2f}",
-                    f"{sec.plaster_area_m2:.1f}",
-                ])
-        else:
-            wall_data.append(["N/A", "-", "-", "-", "-", "-", "-", "-", "-", "-", "-"])
-            
-        t_wall = Table(wall_data, repeatRows=1, colWidths=[45, 55, 40, 35, 35, 45, 45, 55, 45, 45, 50])
-        t_wall.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.darkorange),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-            ('FONTSIZE', (0, 0), (-1, -1), 7),
-            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ]))
-        elements.append(t_wall)
-        elements.append(Spacer(1, 10))
-        
-        # 8.2 Overall Masonry & Finishes Summary
-        elements.append(Paragraph("<b>8.2 Overall Masonry & Finishes Material Summary (All Stories)</b>", styles["Heading2"]))
-        if wall_bom_rep:
-            wb = wall_bom_rep
-            tot_cem_bags = wb.total_mortar_cement_bags + wb.total_plaster_cement_bags
-            tot_sand_t = wb.total_mortar_sand_tonnes + wb.total_plaster_sand_tonnes
-            
-            summary_masonry = [
-                ["Item / Material", "Specification / Mix", "Building Total", "Unit", "IS Standard"],
-                ["Total Wall Gross Volume", "L × t × Hv (clear height)", f"{wb.total_wall_volume_m3:.2f}", "m³", "IS 1905:1987"],
-                ["Clay Building Bricks", "Modular 20×20×10 cm (with mortar)", f"{wb.total_bricks:,}", "Nos", "IS 1077:1992"],
-                ["Wet Mortar Volume", "Wall Vol − Solid Brick Vol", f"{sum(s.wet_mortar_vol_m3 for s in wb.wall_sections)*num_stories:.2f}", "m³", "IS 2250:1981"],
-                ["Dry Mortar Volume", "Wet Volume × 1.33 factor", f"{sum(s.dry_mortar_vol_m3 for s in wb.wall_sections)*num_stories:.2f}", "m³", "IS 2250:1981"],
-                ["Brickwork Cement", "1:4 Mix Proportion", f"{wb.total_mortar_cement_bags:,} ({wb.total_mortar_cement_kg:,.0f} kg)", "Bags (50kg)", "IS 269:2015"],
-                ["Brickwork Sand", "Dry bulk density 1600 kg/m³", f"{wb.total_mortar_sand_tonnes:.2f}", "Tonnes", "IS 383 Zone II"],
-                ["Masonry Water", "W:C ratio = 0.50", f"{wb.total_mortar_water_litres:,.0f}", "Litres", "IS 456 Cl 5.4"],
-                ["Total Plaster Surface Area", "Both sides (12mm int / 15mm ext)", f"{wb.total_plaster_area_m2:.1f}", "m²", "IS 1200 Pt 12"],
-                ["Plastering Cement", "1:6 internal, 1:4 external", f"{wb.total_plaster_cement_bags:,} ({wb.total_plaster_cement_kg:,.0f} kg)", "Bags (50kg)", "IS 1661 / IS 2402"],
-                ["Plastering Sand", "Clean river / M-sand", f"{wb.total_plaster_sand_tonnes:.2f}", "Tonnes", "IS 383 Zone III"],
-                ["Plastering Water", "W:C ratio = 0.50", f"{wb.total_plaster_water_litres:,.0f}", "Litres", "IS 456 Cl 5.4"],
-                ["Surface Primer", "1 coat (25–40 microns) @ 8 m²/L", f"{wb.total_primer_litres:.1f}", "Litres", "NBC 2016"],
-                ["Wall Putty", "2 coats (1–2 mm) @ 1.5 kg/m²", f"{wb.total_putty_kg:,.1f}", "kg", "NBC 2016"],
-                ["Interior Acrylic Emulsion", "2 coats (30–40 microns) @ 12 m²/L", f"{wb.total_emulsion_int_litres:.1f}", "Litres", "NBC 2016"],
-                ["Exterior Weather Emulsion", "2 coats (40–60 microns) @ 10 m²/L", f"{wb.total_emulsion_ext_litres:.1f}", "Litres", "NBC 2016"],
-                ["TOTAL CEMENT (Masonry + Plaster)", "Mortar + Plaster combined", f"{tot_cem_bags:,} bags ({tot_cem_bags*50:,.0f} kg)", "Bags", "IS 269"],
-                ["TOTAL SAND (Masonry + Plaster)", "Mortar + Plaster combined", f"{tot_sand_t:.2f}", "Tonnes", "IS 383"],
-            ]
-            t_mas_sum = Table(summary_masonry, repeatRows=1, colWidths=[140, 130, 90, 60, 70])
-            t_mas_sum.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.darkslategray),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('ALIGN', (0, 1), (1, -1), 'LEFT'),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-                ('FONTSIZE', (0, 0), (-1, -1), 7),
-                ('BACKGROUND', (0, -2), (-1, -1), colors.lightyellow),
-                ('FONTWEIGHT', (0, -2), (-1, -1), 'BOLD'),
-            ]))
-            elements.append(t_mas_sum)
-            elements.append(Spacer(1, 12))
+        elements.append(ReportGenerator._create_brickwork_schedule_table(wall_bom_rep, num_stories=num_st))
+        elements.append(Spacer(1, 12))
 
-        # 9. Structural Layout Plan
-        elements.append(Paragraph("9. Structural Layout Plan", styles["Heading1"]))
+        # 9. Plastering Schedule & Quantities (IS 1661, IS 2402, IS 1200)
+        elements.append(Paragraph("9. Plastering Schedule & Quantities (IS 1661, IS 2402, IS 1200)", styles["Heading1"]))
+        elements.append(Paragraph("<font size=8>External wall plastering: 15mm thick in 1:4 cement:sand mix (IS 2402). Internal wall plastering: 12mm thick in 1:6 mix (IS 1661). Ceiling soffit plastering: 6mm thick in 1:3 mix per IS 1661 Cl. 12.3. Dry volume factor = 1.33.</font>", styles["Normal"]))
+        elements.append(Spacer(1, 4))
+        elements.append(ReportGenerator._create_plaster_schedule_table(wall_bom_rep, num_stories=num_st, grid_mgr=grid_mgr))
+        elements.append(Spacer(1, 12))
+
+        # 10. Painting & Surface Finishes Schedule (NBC 2016 SP7)
+        elements.append(Paragraph("10. Painting & Surface Finishes Schedule (NBC 2016 SP7)", styles["Heading1"]))
+        elements.append(Paragraph("<font size=8>Surface preparation & coatings per NBC 2016 SP7: Water-thinnable primer (1 coat @ 8 m²/L), polymer wall putty (2 coats @ 1.5 kg/m²), interior acrylic emulsion (2 coats @ 12 m²/L), exterior weather-guard acrylic emulsion (2 coats @ 10 m²/L).</font>", styles["Normal"]))
+        elements.append(Spacer(1, 4))
+        elements.append(ReportGenerator._create_paint_schedule_table(wall_bom_rep, num_stories=num_st, grid_mgr=grid_mgr))
+        elements.append(Spacer(1, 12))
+
+        # 11. Consolidated Masonry & Finishes BOQ & Cost (IS 1905, CPWD DSR)
+        elements.append(Paragraph("11. Consolidated Masonry & Finishes BOQ & Cost (IS 1905, CPWD DSR)", styles["Heading1"]))
+        elements.append(Paragraph("<b>11.1 Comprehensive Bill of Materials</b>", styles["Heading2"]))
+        elements.append(ReportGenerator._create_masonry_summary_table(wall_bom_rep, num_stories=num_st, grid_mgr=grid_mgr))
+        elements.append(Spacer(1, 10))
+        elements.append(Paragraph("<b>11.2 Trade-wise Cost Takeoff</b>", styles["Heading2"]))
+        elements.append(ReportGenerator._create_masonry_cost_table(wall_bom_rep, num_stories=num_st, grid_mgr=grid_mgr))
+        elements.append(Spacer(1, 12))
+
+        # 12. Structural Layout Plan
+        elements.append(Paragraph("12. Structural Layout Plan", styles["Heading1"]))
         
         # ... (Existing Map Logic)
         coords_text = "Column Coordinates:\n"
@@ -369,8 +846,8 @@ class ReportGenerator:
         elements.append(Paragraph(f"<pre>{coords_text}</pre>", styles["Code"]))
         elements.append(Spacer(1, 12))
         
-        # 10. Steel Material Breakdown
-        elements.append(Paragraph("10. Integrated Steel Breakdown", styles["Heading1"]))
+        # 13. Steel Material Breakdown
+        elements.append(Paragraph("13. Integrated Steel Breakdown", styles["Heading1"]))
         
         steel_data = [["Bar Diameter", "Total Weight (kg)"]]
         
@@ -403,8 +880,8 @@ class ReportGenerator:
         
         elements.append(Spacer(1, 12))
         
-        # 10. Structural Audit (Phase 14)
-        elements.append(Paragraph("10. Structural Audit Report", styles["Heading1"]))
+        # 14. Structural Audit
+        elements.append(Paragraph("14. Structural Audit Report", styles["Heading1"]))
         
         if audit_results:
              audit_data = [["Member", "Check", "Design Val", "Limit", "Status"]]
@@ -419,11 +896,6 @@ class ReportGenerator:
                      f"{res.limit_value:.1f}",
                      status_str
                  ])
-             
-             # No limit
-             # if len(audit_data) > 50:
-             #    audit_data = audit_data[:50]
-             #    audit_data.append(["...", "...", "...", "...", "..."])
                  
              t_audit = Table(audit_data, repeatRows=1, colWidths=[60, 120, 80, 80, 60])
              t_audit.setStyle(TableStyle([
@@ -432,9 +904,6 @@ class ReportGenerator:
                 ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
              ]))
-             # Color rows based on status? 
-             # ReportLab logic for row conditional formatting is verbose. Skipping for now.
-             
              elements.append(t_audit)
              elements.append(Spacer(1, 12))
              
@@ -447,8 +916,8 @@ class ReportGenerator:
         else:
              elements.append(Paragraph("No audit results available.", styles["Normal"]))
         
-        # 11. Sustainability & Carbon Audit (NEW)
-        elements.append(Paragraph("11. Sustainability Audit", styles["Heading1"]))
+        # 15. Sustainability & Carbon Audit
+        elements.append(Paragraph("15. Sustainability Audit", styles["Heading1"]))
         
         green_status = "Optimized (Green Concrete)" if use_fly_ash else "Standard (OPC)"
         elements.append(Paragraph(f"<b>Design Strategy:</b> {green_status}", styles["Normal"]))
@@ -492,8 +961,8 @@ class ReportGenerator:
             elements.append(Paragraph(success_text, styles["Normal"]))
         
         
-        # 12. Serviceability Checks (Deflection)
-        elements.append(Paragraph("12. Serviceability Checks (Deflection)", styles["Heading1"]))
+        # 16. Serviceability Checks (Deflection)
+        elements.append(Paragraph("16. Serviceability Checks (Deflection)", styles["Heading1"]))
         
         # Filter for beam deflection checks
         beam_checks = [r for r in audit_results if "Beam Deflection" in r.check_name]
@@ -501,13 +970,9 @@ class ReportGenerator:
         if beam_checks:
             serv_data = [["Beam ID", "Description", "Actual (mm)", "Limit (mm)", "Status"]]
             
-            # Show top 30 to avoid overflow? use slicing
             top_checks = beam_checks[:30]
             
             for bc in top_checks:
-                 # Notes format: "Defl: 5.23mm vs Limit 12.00mm"
-                 # Extract values roughly or use AuditResult
-                 # Actually AuditResult has exact values
                  serv_data.append([
                      bc.member_id,
                      "Span/250 Check",
@@ -531,8 +996,8 @@ class ReportGenerator:
              elements.append(Paragraph("No beam serviceability checks performed.", styles["Normal"]))
              
         
-        # 13. Staircase Design Schedule (NEW)
-        elements.append(Paragraph("13. Staircase Design Schedule (Dog-Legged)", styles["Heading1"]))
+        # 17. Staircase Design Schedule
+        elements.append(Paragraph("17. Staircase Design Schedule (Dog-Legged)", styles["Heading1"]))
         
         if hasattr(grid_mgr, 'staircase_schedule') and grid_mgr.staircase_schedule:
             stair_data = [["ID", "Riser/Tread", "Waist Slab", "Main Steel", "Dist Steel"]]
@@ -556,7 +1021,6 @@ class ReportGenerator:
             ]))
             elements.append(t_stair)
             
-            # Add note about geometry
             note_text = f"""
             <b>Geometry Notes:</b><br/>
             - Flight designed for floor height: {grid_mgr.story_height_m:.2f} m<br/>
@@ -569,12 +1033,12 @@ class ReportGenerator:
              elements.append(Paragraph("No staircase selected for design.", styles["Normal"]))
         
         
-        # NEW SECTIONS: Seismic, Wind, Material Breakdown, Beam L/d, Stability (Changes 4 & 10)
+        # NEW SECTIONS: Seismic, Wind, Material Breakdown, Beam L/d, Stability
         import math as _math
         
-        # --- Seismic Analysis ---
+        # 18. Seismic Analysis
         if seismic_result:
-            elements.append(Paragraph("Seismic Analysis (IS 1893:2016)", styles["Heading1"]))
+            elements.append(Paragraph("18. Seismic Analysis (IS 1893:2016)", styles["Heading1"]))
             try:
                 _z = getattr(seismic_result.parameters, 'zone_factor', '—')
                 _ah = getattr(seismic_result.parameters, 'design_acceleration', 0)
@@ -604,9 +1068,9 @@ class ReportGenerator:
                 elements.append(Paragraph(f"Seismic data available but error rendering: {_e}", styles["Normal"]))
             elements.append(Spacer(1, 12))
         
-        # --- Wind Analysis ---
+        # 19. Wind Analysis
         if wind_result and hasattr(wind_result, 'pressure_results') and wind_result.pressure_results:
-            elements.append(Paragraph("Wind Analysis (IS 875 Part 3)", styles["Heading1"]))
+            elements.append(Paragraph("19. Wind Analysis (IS 875 Part 3)", styles["Heading1"]))
             try:
                 _vd = wind_result.pressure_results[-1].design_wind_speed_ms
                 _vwx = getattr(wind_result, 'total_base_shear_x_kn', 0)
@@ -628,9 +1092,9 @@ class ReportGenerator:
                 elements.append(Paragraph(f"Wind data available but error rendering: {_e}", styles["Normal"]))
             elements.append(Spacer(1, 12))
         
-        # --- Concrete Material Breakdown (IS 10262:2019) ---
+        # 20. Concrete Material Breakdown
         if bom and bom.total_concrete_vol_m3 > 0:
-            elements.append(Paragraph("Concrete Material Breakdown (IS 10262:2019)", styles["Heading1"]))
+            elements.append(Paragraph("20. Concrete Material Breakdown (IS 10262:2019)", styles["Heading1"]))
             try:
                 from .site_calculators import mix_design_table
                 _mix = mix_design_table(conc_grade)
@@ -662,9 +1126,9 @@ class ReportGenerator:
                 elements.append(Paragraph(f"Mix design data error: {_e}", styles["Normal"]))
             elements.append(Spacer(1, 12))
         
-        # --- Beam L/d Check ---
+        # 21. Beam L/d Deflection Check
         if all_beams:
-            elements.append(Paragraph("Beam L/d Deflection Check (IS 456 Cl 23.2)", styles["Heading1"]))
+            elements.append(Paragraph("21. Beam L/d Deflection Check (IS 456 Cl 23.2)", styles["Heading1"]))
             try:
                 ld_tbl = [["Beam ID", "Span (mm)", "Depth (mm)", "Actual L/d", "Allowable", "Status"]]
                 for _b in all_beams:
@@ -693,9 +1157,9 @@ class ReportGenerator:
                 elements.append(Paragraph(f"L/d check error: {_e}", styles["Normal"]))
             elements.append(Spacer(1, 12))
         
-        # --- Stability & Fire Resistance ---
+        # 22. Stability & Fire Resistance
         if stab_checks and stab_summary:
-            elements.append(Paragraph("Stability & Fire Resistance (IS 456 Table 16A)", styles["Heading1"]))
+            elements.append(Paragraph("22. Stability & Fire Resistance (IS 456 Table 16A)", styles["Heading1"]))
             try:
                 _total = stab_summary.total_members
                 _pass_st = stab_summary.passed_stability
@@ -711,9 +1175,9 @@ class ReportGenerator:
                 elements.append(Paragraph(f"Stability data error: {_e}", styles["Normal"]))
             elements.append(Spacer(1, 12))
         
-        # --- Code Compliance Audit ---
+        # 23. Code Compliance Audit
         if audit_results:
-            elements.append(Paragraph("Code Compliance Audit", styles["Heading1"]))
+            elements.append(Paragraph("23. Code Compliance Audit", styles["Heading1"]))
             audit_tbl = [["Check", "Status", "Notes"]]
             for _ar in audit_results:
                 _chk = getattr(_ar, 'check_name', getattr(_ar, 'rule', str(_ar)))
@@ -730,9 +1194,9 @@ class ReportGenerator:
             elements.append(t_audit)
             elements.append(Spacer(1, 12))
 
-        # 14. PROFESSIONAL DISCLAIMER (CRITICAL)
+        # 24. PROFESSIONAL DISCLAIMER (CRITICAL)
         elements.append(Spacer(1, 24))
-        elements.append(Paragraph("14. Professional Disclaimer", styles["Heading1"]))
+        elements.append(Paragraph("24. Professional Disclaimer", styles["Heading1"]))
         
         disclaimer_text = """
         <b>IMPORTANT NOTICE - READ CAREFULLY</b><br/><br/>
@@ -784,8 +1248,33 @@ class ReportGenerator:
 
         doc.build(elements)
 
-    def generate_summary_report(self, filename: str, grid_mgr: GridManager, bom: MaterialCost, use_fly_ash: bool = False):
-        """Generate executive summary and cost report."""
+    def generate_summary_report(self, filename: str, grid_mgr: GridManager, bom: MaterialCost, use_fly_ash: bool = False, **kwargs):
+        """Generate executive summary and cost report with full masonry takeoff."""
+        ReportGenerator._ensure_walls(grid_mgr, **kwargs)
+        from .wall_calculator import WallCalculator
+        wall_calc = WallCalculator(mortar_ratio=4, wc_ratio=0.50)
+        num_st = getattr(grid_mgr, 'num_stories', 1) or 1
+        story_h = getattr(grid_mgr, 'story_height_m', 3.0) or 3.0
+        
+        wb = wall_calc.calculate_all(
+            grid_mgr.walls,
+            num_stories=num_st,
+            floor_height_m=story_h,
+            slab_thickness_mm=125.0,
+            beam_depth_mm=400.0,
+        )
+
+        tot_b = getattr(bom, 'total_bricks', getattr(bom, 'brick_count', 0))
+        tot_cem = getattr(bom, 'total_mortar_cement_bags', 0) + getattr(bom, 'total_plaster_cement_bags', 0)
+        tot_sand = getattr(bom, 'total_mortar_sand_tonnes', 0.0) + getattr(bom, 'total_plaster_sand_tonnes', 0.0)
+        tot_plast = getattr(bom, 'total_plaster_area_m2', getattr(bom, 'plaster_area_m2', 0.0))
+
+        if (not tot_b or tot_b == 0) and wb:
+            tot_b = wb.total_bricks
+            tot_cem = wb.total_mortar_cement_bags + wb.total_plaster_cement_bags
+            tot_sand = wb.total_mortar_sand_tonnes + wb.total_plaster_sand_tonnes
+            tot_plast = wb.total_plaster_area_m2
+
         doc = SimpleDocTemplate(filename, pagesize=A4)
         elements = []
         styles = getSampleStyleSheet()
@@ -803,7 +1292,13 @@ class ReportGenerator:
             ["Total Columns", f"{len(grid_mgr.columns)}"],
             ["Total Concrete", f"{bom.total_concrete_vol_m3:.2f} m³"],
             ["Total Steel", f"{bom.total_steel_weight_kg:.0f} kg"],
-            ["Estimated Cost", f"INR {bom.total_cost_inr:,.2f}"],
+            ["Clay Modular Bricks", f"{tot_b:,} Nos"],
+            ["Masonry & Plaster Cement", f"{tot_cem:,} Bags (50kg)"],
+            ["Masonry & Plaster Sand", f"{tot_sand:.2f} Tonnes"],
+            ["Plaster Surface Area", f"{tot_plast:.1f} m²"],
+            ["Estimated Structure Cost", f"INR {bom.total_cost_inr:,.2f}"],
+            ["Estimated Masonry & Finishes Cost", f"INR {wb.total_wall_cost_inr:,.2f}"],
+            ["Total Projected Cost", f"INR {bom.total_cost_inr + wb.total_wall_cost_inr:,.2f}"],
             ["Carbon Footprint", f"{bom.total_carbon_kg/1000:.2f} Tonnes CO2e"]
         ]
         
@@ -813,9 +1308,11 @@ class ReportGenerator:
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('GRID', (0, 0), (-1, -1), 1, colors.black),
             ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('BACKGROUND', (0, -2), (-1, -2), colors.lightyellow),
+            ('FONTWEIGHT', (0, -2), (-1, -2), 'BOLD'),
         ]))
         elements.append(t)
-        elements.append(Spacer(1, 20))
+        elements.append(Spacer(1, 15))
         
         # Cost Breakdown
         elements.append(Paragraph("Cost Breakdown", styles["Heading1"]))
@@ -823,19 +1320,21 @@ class ReportGenerator:
             ["Item", "Quantity", "Rate", "Amount (INR)"],
             ["Concrete", f"{bom.total_concrete_vol_m3:.2f} m³", "₹5,000/m³", f"₹{bom.concrete_cost_inr:,.2f}"],
             ["Steel", f"{bom.total_steel_weight_kg:.0f} kg", "₹60/kg", f"₹{bom.steel_cost_inr:,.2f}"],
-            ["TOTAL", "", "", f"₹{bom.total_cost_inr:,.2f}"]
+            ["Masonry & Bricks", f"{wb.total_bricks:,} Nos", "₹9/brick + mortar", f"₹{wb.total_bricks * 9.0 + wb.total_mortar_cement_bags * 380.0 + wb.total_mortar_sand_tonnes * 1500.0:,.2f}"],
+            ["Plaster & Finishes", f"{wb.total_plaster_area_m2:.1f} m²", "₹400/m²", f"₹{wb.total_plaster_area_m2 * 400.0:,.2f}"],
+            ["TOTAL PROJECT COST", "", "", f"₹{bom.total_cost_inr + wb.total_wall_cost_inr:,.2f}"]
         ]
         
-        t = Table(cost_data, colWidths=[100, 100, 100, 100])
+        t = Table(cost_data, colWidths=[110, 100, 90, 100])
         t.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
             ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
-            ('BACKGROUND', (0, -1), (-1, -1), colors.lightgrey),
+            ('BACKGROUND', (0, -1), (-1, -1), colors.lightyellow),
         ]))
         elements.append(t)
-        elements.append(Spacer(1, 20))
+        elements.append(Spacer(1, 15))
         
         # Sustainability
         elements.append(Paragraph("Sustainability Metrics", styles["Heading1"]))
@@ -862,16 +1361,30 @@ class ReportGenerator:
         doc.build(elements)
     
     def generate_schedule_report(self, filename: str, grid_mgr: GridManager, footings=None, *args, **kwargs):
-        """Generate member schedules (columns, beams, slabs, footings)."""
-        doc = SimpleDocTemplate(filename, pagesize=A4)
+        """Generate comprehensive structural & finishes schedules (columns, beams, slabs, footings, brickwork, plaster, paint)."""
+        ReportGenerator._ensure_walls(grid_mgr, **kwargs)
+        from .wall_calculator import WallCalculator
+        wall_calc = WallCalculator(mortar_ratio=4, wc_ratio=0.50)
+        num_st = getattr(grid_mgr, 'num_stories', 1) or 1
+        story_h = getattr(grid_mgr, 'story_height_m', 3.0) or 3.0
+        
+        wall_bom_rep = wall_calc.calculate_all(
+            grid_mgr.walls,
+            num_stories=num_st,
+            floor_height_m=story_h,
+            slab_thickness_mm=125.0,
+            beam_depth_mm=400.0,
+        )
+        
+        doc = SimpleDocTemplate(filename, pagesize=A4, leftMargin=36, rightMargin=36, topMargin=36, bottomMargin=36)
         elements = []
         styles = getSampleStyleSheet()
         
-        elements.append(Paragraph("Design Schedules Report", styles["Title"]))
+        elements.append(Paragraph("Design & Construction Schedules Report", styles["Title"]))
         elements.append(Spacer(1, 12))
         
-        # Column Schedule
-        elements.append(Paragraph("Column Schedule", styles["Heading1"]))
+        # 1. Column Schedule
+        elements.append(Paragraph("1. Column Schedule & Reinforcement (IS 456 Cl. 26.5.3)", styles["Heading1"]))
         col_data = [["ID", "Level", "Size (mm)", "Load (kN)", "Main Steel", "Stirrups"]]
         
         sorted_cols = sorted(grid_mgr.columns, key=lambda c: (c.x, c.y, c.level))
@@ -897,10 +1410,10 @@ class ReportGenerator:
             ('FONTSIZE', (0, 0), (-1, -1), 8),
         ]))
         elements.append(t)
-        elements.append(Spacer(1, 20))
+        elements.append(Spacer(1, 15))
         
-        # Beam Schedule
-        elements.append(Paragraph("Beam Schedule", styles["Heading1"]))
+        # 2. Beam Schedule
+        elements.append(Paragraph("2. Beam Schedule & Quantities (IS 456 Cl. 26.5.1)", styles["Heading1"]))
         beam_data = [["ID", "Size", "Top Steel", "Bottom Steel", "Stirrups"]]
         
         if hasattr(grid_mgr, 'beam_schedule') and grid_mgr.beam_schedule:
@@ -910,19 +1423,21 @@ class ReportGenerator:
                     bid, det.size_label,
                     det.top_bars_desc, det.bottom_bars_desc, det.stirrups_desc
                 ])
+        else:
+            beam_data.append(["N/A", "-", "-", "-", "-"])
         
-        t = Table(beam_data, repeatRows=1, colWidths=[50, 60, 80, 80, 100])
-        t.setStyle(TableStyle([
+        t_bm = Table(beam_data, repeatRows=1, colWidths=[50, 60, 80, 80, 100])
+        t_bm.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.darkorange),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
             ('FONTSIZE', (0, 0), (-1, -1), 8),
         ]))
-        elements.append(t)
-        elements.append(Spacer(1, 20))
+        elements.append(t_bm)
+        elements.append(Spacer(1, 15))
         
-        # Slab Schedule
-        elements.append(Paragraph("Slab Schedule", styles["Heading1"]))
+        # 3. Slab Schedule
+        elements.append(Paragraph("3. Slab Schedule & Reinforcement (IS 456)", styles["Heading1"]))
         slab_data = [["ID", "Thickness (mm)", "Main Steel", "Distribution Steel"]]
         
         if hasattr(grid_mgr, 'slab_schedule') and grid_mgr.slab_schedule:
@@ -931,18 +1446,20 @@ class ReportGenerator:
                     sid, f"{det.thickness_mm:.0f}",
                     det.main_steel_desc, det.dist_steel_desc
                 ])
+        else:
+            slab_data.append(["N/A", "-", "-", "-"])
         
-        t = Table(slab_data, repeatRows=1, colWidths=[80, 80, 120, 120])
-        t.setStyle(TableStyle([
+        t_sl = Table(slab_data, repeatRows=1, colWidths=[80, 80, 120, 120])
+        t_sl.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.purple),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
         ]))
-        elements.append(t)
-        elements.append(Spacer(1, 20))
+        elements.append(t_sl)
+        elements.append(Spacer(1, 15))
         
-        # Foundation Schedule
-        elements.append(Paragraph("Foundation Schedule", styles["Heading1"]))
+        # 4. Foundation Schedule
+        elements.append(Paragraph("4. Foundation Schedule & Quantities (IS 456 Cl. 34)", styles["Heading1"]))
         ft_data = [["Col ID", "Load (kN)", "Size (m)", "Depth (mm)", "Concrete (m³)"]]
         passed_footings = footings if footings is not None else kwargs.get('footings', [])
         if isinstance(passed_footings, dict):
@@ -956,48 +1473,47 @@ class ReportGenerator:
                         f"{getattr(ft, 'length_m', 0.0):.2f}x{getattr(ft, 'width_m', 0.0):.2f}",
                         f"{getattr(ft, 'thickness_mm', 0.0):.0f}", f"{getattr(ft, 'concrete_vol_m3', 0.0):.2f}"
                     ])
+        else:
+            ft_data.append(["N/A", "-", "-", "-", "-"])
         
-        t = Table(ft_data, repeatRows=1, colWidths=[60, 60, 100, 70, 80])
-        t.setStyle(TableStyle([
+        t_ft = Table(ft_data, repeatRows=1, colWidths=[60, 60, 100, 70, 80])
+        t_ft.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.darkblue),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
         ]))
-        elements.append(t)
+        elements.append(t_ft)
+        elements.append(Spacer(1, 15))
         
-        # Wall Schedule & Material Takeoff
-        elements.append(Spacer(1, 20))
-        elements.append(Paragraph("Masonry Wall Schedule & Material Takeoff", styles["Heading1"]))
-        wall_data = [["Wall ID", "Span / Cols", "Len (m)", "Ht (m)", "Thk", "Bricks", "Mortar (m3)", "Cem (kg)", "Sand (T)", "Plaster (m2)"]]
-        if hasattr(grid_mgr, 'walls') and grid_mgr.walls:
-            from .wall_calculator import WallCalculator
-            wall_calc = WallCalculator(mortar_ratio=4, wc_ratio=0.50)
-            wall_bom_rep = wall_calc.calculate_all(
-                grid_mgr.walls,
-                num_stories=getattr(grid_mgr, 'num_stories', 1),
-                floor_height_m=getattr(grid_mgr, 'story_height_m', 3.0),
-                slab_thickness_mm=125.0,
-                beam_depth_mm=400.0,
-            )
-            for sec in wall_bom_rep.wall_sections:
-                span_label = f"{sec.col_start}→{sec.col_end}" if (sec.col_start and sec.col_end) else "Bay"
-                wall_data.append([
-                    sec.wall_id, span_label, f"{sec.length_m:.2f}", f"{sec.clear_height_m:.2f}",
-                    f"{int(sec.core_thickness_m * 1000)}mm", f"{sec.num_bricks:,}", f"{sec.wet_mortar_vol_m3:.3f}",
-                    f"{sec.mortar_cement_kg:.1f}", f"{sec.mortar_sand_tonnes:.2f}", f"{sec.plaster_area_m2:.1f}"
-                ])
-        else:
-            wall_data.append(["N/A", "-", "-", "-", "-", "-", "-", "-", "-", "-"])
-            
-        t_w_sched = Table(wall_data, repeatRows=1, colWidths=[50, 60, 45, 40, 40, 50, 60, 50, 50, 55])
-        t_w_sched.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.darkorange),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-            ('FONTSIZE', (0, 0), (-1, -1), 7.5),
-        ]))
-        elements.append(t_w_sched)
+        # 5. Masonry Brickwork Schedule
+        elements.append(Paragraph("5. Masonry Brickwork Schedule & Takeoff (IS 1077, IS 2250)", styles["Heading1"]))
+        elements.append(Paragraph("<font size=8>Bricks modular 200×200×100 mm (250 Nos/m³). Mortar 1:4 mix proportion, dry factor 1.33, W:C = 0.50.</font>", styles["Normal"]))
+        elements.append(Spacer(1, 4))
+        elements.append(ReportGenerator._create_brickwork_schedule_table(wall_bom_rep, num_stories=num_st))
+        elements.append(Spacer(1, 15))
+        
+        # 6. Plastering Schedule
+        elements.append(Paragraph("6. Plastering Schedule & Quantities (IS 1661, IS 2402, IS 1200)", styles["Heading1"]))
+        elements.append(Paragraph("<font size=8>Ext: 15mm 1:4 render; Int: 12mm 1:6 plaster; Ceiling: 6mm 1:3 soffit plaster per IS 1661 Cl. 12.3. Dry factor 1.33.</font>", styles["Normal"]))
+        elements.append(Spacer(1, 4))
+        elements.append(ReportGenerator._create_plaster_schedule_table(wall_bom_rep, num_stories=num_st, grid_mgr=grid_mgr))
+        elements.append(Spacer(1, 15))
+        
+        # 7. Painting Schedule
+        elements.append(Paragraph("7. Painting & Surface Finishes Schedule (NBC 2016 SP7)", styles["Heading1"]))
+        elements.append(Paragraph("<font size=8>1 coat primer @ 8 m²/L, 2 coats polymer putty @ 1.5 kg/m², 2 coats emulsion (interior 12 m²/L, exterior 10 m²/L).</font>", styles["Normal"]))
+        elements.append(Spacer(1, 4))
+        elements.append(ReportGenerator._create_paint_schedule_table(wall_bom_rep, num_stories=num_st, grid_mgr=grid_mgr))
+        elements.append(Spacer(1, 15))
+        
+        # 8. Consolidated Material Summary
+        elements.append(Paragraph("8. Consolidated Masonry, Plaster & Paint Material Takeoff", styles["Heading1"]))
+        elements.append(ReportGenerator._create_masonry_summary_table(wall_bom_rep, num_stories=num_st, grid_mgr=grid_mgr))
+        elements.append(Spacer(1, 15))
+
+        # 9. Cost Takeoff
+        elements.append(Paragraph("9. Masonry & Finishes Trade Cost Estimate (CPWD DSR)", styles["Heading1"]))
+        elements.append(ReportGenerator._create_masonry_cost_table(wall_bom_rep, num_stories=num_st, grid_mgr=grid_mgr))
         
         doc.build(elements)
     
@@ -1052,27 +1568,37 @@ class ReportGenerator:
         
         doc.build(elements)
     
-    def generate_floor_report(self, filename: str, grid_mgr: GridManager, level: int, bom: 'MaterialCost' = None):
-        """Generate structural report for a specific floor level."""
-        doc = SimpleDocTemplate(filename, pagesize=A4)
+    def generate_floor_report(self, filename: str, grid_mgr: GridManager, level: int, bom: 'MaterialCost' = None, **kwargs):
+        """Generate structural report for a specific floor level including complete brickwork, plaster, and paint takeoff."""
+        ReportGenerator._ensure_walls(grid_mgr, **kwargs)
+        from .wall_calculator import WallCalculator
+        wall_calc = WallCalculator(mortar_ratio=4, wc_ratio=0.50)
+        story_h = getattr(grid_mgr, 'story_height_m', 3.0) or 3.0
+        
+        wb_floor = wall_calc.calculate_all(
+            grid_mgr.walls,
+            num_stories=1,
+            floor_height_m=story_h,
+            slab_thickness_mm=125.0,
+            beam_depth_mm=400.0,
+        )
+        
+        doc = SimpleDocTemplate(filename, pagesize=A4, leftMargin=36, rightMargin=36, topMargin=36, bottomMargin=36)
         elements = []
         styles = getSampleStyleSheet()
         
-        elements.append(Paragraph(f"Floor {level} Structural Report", styles["Title"]))
+        elements.append(Paragraph(f"Floor {level} Structural & Finishes Report", styles["Title"]))
         elements.append(Spacer(1, 12))
         
         # Floor Summary
         cols_at_level = [c for c in grid_mgr.columns if c.level == level]
-        elements.append(Paragraph("Floor Summary", styles["Heading1"]))
-        elements.append(Paragraph(f"<b>Level:</b> {level}", styles["Normal"]))
-        elements.append(Paragraph(f"<b>Floor Height:</b> {grid_mgr.story_height_m:.2f} m", styles["Normal"]))
-        elements.append(Paragraph(f"<b>Columns at this level:</b> {len(cols_at_level)}", styles["Normal"]))
-        elements.append(Spacer(1, 20))
+        elements.append(Paragraph("1. Floor Summary", styles["Heading1"]))
+        elements.append(Paragraph(f"<b>Level:</b> {level} | <b>Floor Height:</b> {story_h:.2f} m | <b>Columns at Level:</b> {len(cols_at_level)}", styles["Normal"]))
+        elements.append(Spacer(1, 12))
         
-        # Column Schedule for this level
-        elements.append(Paragraph("Column Schedule", styles["Heading1"]))
+        # Column Schedule
+        elements.append(Paragraph("2. Column Schedule for Level", styles["Heading1"]))
         col_data = [["ID", "Location (x,y)", "Size (mm)", "Load (kN)", "Main Steel", "Stirrups"]]
-        
         for col in cols_at_level:
             main_rebar = "-"
             ties = "-"
@@ -1080,27 +1606,24 @@ class ReportGenerator:
                 res = grid_mgr.rebar_schedule[col.id]
                 main_rebar = res.main_bars_desc
                 ties = res.links_desc
-            
             col_data.append([
                 col.id, f"({col.x:.2f}, {col.y:.2f})",
                 f"{int(col.width_nb)}x{int(col.depth_nb)}",
                 f"{col.load_kn:.1f}", main_rebar, ties
             ])
-        
-        t = Table(col_data, repeatRows=1, colWidths=[50, 80, 60, 60, 80, 80])
-        t.setStyle(TableStyle([
+        t_col = Table(col_data, repeatRows=1, colWidths=[50, 80, 60, 60, 80, 80])
+        t_col.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
             ('FONTSIZE', (0, 0), (-1, -1), 8),
         ]))
-        elements.append(t)
-        elements.append(Spacer(1, 20))
+        elements.append(t_col)
+        elements.append(Spacer(1, 15))
         
         # Beam Schedule
-        elements.append(Paragraph("Beam Schedule", styles["Heading1"]))
+        elements.append(Paragraph("3. Beam Schedule for Level", styles["Heading1"]))
         beam_data = [["ID", "Size", "Top Steel", "Bottom Steel", "Stirrups"]]
-        
         if hasattr(grid_mgr, 'beam_schedule') and grid_mgr.beam_schedule:
             for bid in sorted(grid_mgr.beam_schedule.keys()):
                 det = grid_mgr.beam_schedule[bid]
@@ -1108,34 +1631,141 @@ class ReportGenerator:
                     bid, det.size_label,
                     det.top_bars_desc, det.bottom_bars_desc, det.stirrups_desc
                 ])
-        
-        t = Table(beam_data, repeatRows=1, colWidths=[50, 60, 80, 80, 100])
-        t.setStyle(TableStyle([
+        else:
+            beam_data.append(["N/A", "-", "-", "-", "-"])
+        t_bm = Table(beam_data, repeatRows=1, colWidths=[50, 60, 80, 80, 100])
+        t_bm.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.darkorange),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
             ('FONTSIZE', (0, 0), (-1, -1), 8),
         ]))
-        elements.append(t)
-        elements.append(Spacer(1, 20))
+        elements.append(t_bm)
+        elements.append(Spacer(1, 15))
         
-        # Slab at this level
-        elements.append(Paragraph("Slab Schedule", styles["Heading1"]))
+        # Slab Schedule
+        elements.append(Paragraph("4. Slab Schedule for Level", styles["Heading1"]))
         slab_data = [["ID", "Thickness (mm)", "Main Steel", "Distribution Steel"]]
-        
         if hasattr(grid_mgr, 'slab_schedule') and grid_mgr.slab_schedule:
             for sid, det in grid_mgr.slab_schedule.items():
                 slab_data.append([
                     sid, f"{det.thickness_mm:.0f}",
                     det.main_steel_desc, det.dist_steel_desc
                 ])
-        
-        t = Table(slab_data, repeatRows=1, colWidths=[80, 80, 120, 120])
-        t.setStyle(TableStyle([
+        else:
+            slab_data.append(["N/A", "-", "-", "-"])
+        t_sl = Table(slab_data, repeatRows=1, colWidths=[80, 80, 120, 120])
+        t_sl.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.purple),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
         ]))
-        elements.append(t)
+        elements.append(t_sl)
+        elements.append(Spacer(1, 15))
+        
+        # Floor Brickwork Schedule
+        elements.append(Paragraph(f"5. Floor {level} Masonry Brickwork Schedule (IS 1077, IS 2250)", styles["Heading1"]))
+        elements.append(ReportGenerator._create_brickwork_schedule_table(wb_floor, num_stories=1))
+        elements.append(Spacer(1, 15))
+
+        # Floor Plastering Schedule
+        elements.append(Paragraph(f"6. Floor {level} Plastering Schedule (IS 1661, IS 2402)", styles["Heading1"]))
+        elements.append(ReportGenerator._create_plaster_schedule_table(wb_floor, num_stories=1, grid_mgr=grid_mgr))
+        elements.append(Spacer(1, 15))
+
+        # Floor Painting Schedule
+        elements.append(Paragraph(f"7. Floor {level} Painting & Finishes Schedule (NBC 2016)", styles["Heading1"]))
+        elements.append(ReportGenerator._create_paint_schedule_table(wb_floor, num_stories=1, grid_mgr=grid_mgr))
+        elements.append(Spacer(1, 15))
+
+        # Floor Material Summary
+        elements.append(Paragraph(f"8. Floor {level} Masonry & Finishes Material Takeoff", styles["Heading1"]))
+        elements.append(ReportGenerator._create_masonry_summary_table(wb_floor, num_stories=1, grid_mgr=grid_mgr))
+        
+        doc.build(elements)
+
+    def generate_masonry_report(self, filename: str, grid_mgr: GridManager, project_name: str = "Masonry & Finishes Takeoff Report", **kwargs):
+        """Generate standalone professional Masonry & Finishes Bill of Quantities PDF report."""
+        ReportGenerator._ensure_walls(grid_mgr, **kwargs)
+        from .wall_calculator import WallCalculator
+        wall_calc = WallCalculator(mortar_ratio=4, wc_ratio=0.50)
+        num_stories = getattr(grid_mgr, 'num_stories', 1) or 1
+        story_h = getattr(grid_mgr, 'story_height_m', 3.0) or 3.0
+        
+        wb = wall_calc.calculate_all(
+            grid_mgr.walls,
+            num_stories=num_stories,
+            floor_height_m=story_h,
+            slab_thickness_mm=125.0,
+            beam_depth_mm=400.0,
+        )
+        
+        doc = SimpleDocTemplate(filename, pagesize=A4, leftMargin=36, rightMargin=36, topMargin=36, bottomMargin=36)
+        elements = []
+        styles = getSampleStyleSheet()
+        
+        elements.append(Paragraph(f"{project_name} — Masonry, Plaster & Finishes BOQ Report", styles["Title"]))
+        elements.append(Spacer(1, 10))
+        
+        # 1. Executive Summary
+        elements.append(Paragraph("1. Executive Summary & Code Compliance", styles["Heading1"]))
+        exec_data = [
+            ["Item / Parameter", "Value", "Standard Reference"],
+            ["Building Footprint", f"{grid_mgr.width_m:.2f} m × {grid_mgr.length_m:.2f} m", "Architectural Layout"],
+            ["Total Stories / Height", f"{num_stories} Stories / {num_stories * story_h:.1f} m", "NBC 2016 Part 3"],
+            ["Total Clay Bricks", f"{wb.total_bricks:,} Nos", "IS 1077:1992 (Modular 20×20×10 cm)"],
+            ["Total Mortar Cement", f"{wb.total_mortar_cement_bags:,} Bags ({wb.total_mortar_cement_kg:,.0f} kg)", "IS 269:2015 (1:4 Mix Proportion)"],
+            ["Total Mortar Sand", f"{wb.total_mortar_sand_tonnes:.2f} Tonnes", "IS 383:2016 Zone II"],
+            ["Total Plaster Surface Area", f"{wb.total_plaster_area_m2:.1f} m²", "IS 1200 Part 12"],
+            ["Total Plaster Cement", f"{wb.total_plaster_cement_bags:,} Bags ({wb.total_plaster_cement_kg:,.0f} kg)", "IS 1661:1972 (12mm int, 15mm ext)"],
+            ["Total Plaster Sand", f"{wb.total_plaster_sand_tonnes:.2f} Tonnes", "IS 383:2016 Zone III"],
+            ["Estimated Wall & Finishes Cost", f"INR {wb.total_wall_cost_inr:,.2f}", "CPWD DSR 2023"],
+        ]
+        t_exec = Table(exec_data, colWidths=[150, 150, 190])
+        t_exec.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.saddlebrown),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('BACKGROUND', (0, -1), (-1, -1), colors.lightyellow),
+            ('FONTWEIGHT', (0, -1), (-1, -1), 'BOLD'),
+        ]))
+        elements.append(t_exec)
+        elements.append(Spacer(1, 15))
+        
+        # 2. Brickwork Schedule & Takeoff
+        elements.append(Paragraph("2. Masonry Brickwork Schedule & Material Takeoff (IS 1077, IS 2250)", styles["Heading1"]))
+        elements.append(Paragraph("<font size=8>Bricks modular 200×200×100 mm (250 Nos/m³). Mortar 1:4 mix proportion, dry factor 1.33, W:C = 0.50.</font>", styles["Normal"]))
+        elements.append(Spacer(1, 4))
+        elements.append(ReportGenerator._create_brickwork_schedule_table(wb, num_stories=num_stories))
+        elements.append(Spacer(1, 15))
+        
+        # 3. Plastering Schedule
+        elements.append(Paragraph("3. Plastering Schedule & Quantities (IS 1661, IS 2402, IS 1200)", styles["Heading1"]))
+        elements.append(Paragraph("<font size=8>Ext: 15mm 1:4 render; Int: 12mm 1:6 plaster; Ceiling: 6mm 1:3 soffit plaster per IS 1661 Cl. 12.3. Dry factor 1.33.</font>", styles["Normal"]))
+        elements.append(Spacer(1, 4))
+        elements.append(ReportGenerator._create_plaster_schedule_table(wb, num_stories=num_stories, grid_mgr=grid_mgr))
+        elements.append(Spacer(1, 15))
+
+        # 4. Painting Schedule
+        elements.append(Paragraph("4. Painting & Surface Finishes Schedule (NBC 2016 SP7)", styles["Heading1"]))
+        elements.append(Paragraph("<font size=8>1 coat primer @ 8 m²/L, 2 coats polymer putty @ 1.5 kg/m², 2 coats emulsion (interior 12 m²/L, exterior 10 m²/L).</font>", styles["Normal"]))
+        elements.append(Spacer(1, 4))
+        elements.append(ReportGenerator._create_paint_schedule_table(wb, num_stories=num_stories, grid_mgr=grid_mgr))
+        elements.append(Spacer(1, 15))
+
+        # 5. Grand Material Breakdown
+        elements.append(Paragraph("5. Consolidated Material Takeoff Summary (All Stories)", styles["Heading1"]))
+        elements.append(ReportGenerator._create_masonry_summary_table(wb, num_stories=num_stories, grid_mgr=grid_mgr))
+        elements.append(Spacer(1, 15))
+        
+        # 6. Cost Takeoff
+        elements.append(Paragraph("6. Trade-wise Cost Estimate (CPWD DSR)", styles["Heading1"]))
+        elements.append(ReportGenerator._create_masonry_cost_table(wb, num_stories=num_stories, grid_mgr=grid_mgr))
+        elements.append(Spacer(1, 15))
+
+        # Footer
+        footer_text = "<i>Report generated by StructOptima · Compliant with IS 1077, IS 2250, IS 1200, IS 1661, IS 1905, NBC 2016</i>"
+        elements.append(Paragraph(footer_text, styles["Normal"]))
         
         doc.build(elements)
