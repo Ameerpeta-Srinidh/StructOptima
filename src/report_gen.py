@@ -85,382 +85,364 @@ class ReportGenerator:
         return grid_mgr.walls
 
     @staticmethod
-    def _create_brickwork_schedule_table(wb: Any, num_stories: int = 1) -> Table:
-        """Create full brickwork & mortar schedule table per IS 1077 & IS 2250."""
+    def _create_brickwork_schedule_table(wb, num_stories=1):
+        """Per-floor, per-wall brickwork schedule — IS 1077 & IS 2250.
+        One row per wall per floor: W_H1_F0, W_H1_F1, …
+        All quantities are PER WALL PANEL (one floor) — no num_stories multiplication on rows.
+        Totals from WallBOM already include num_stories.
+        """
+        import math as _math
+        from reportlab.platypus import Table, TableStyle
+        from reportlab.lib import colors
         headers = [
-            "Wall ID", "Span / Cols", "Len (m)", "Ht (m)", "Thk", "Gross (m³)",
-            "Bricks (Nos)", "Brick Vol", "Wet Mor", "Dry Mor", "Cem Bags", "Cem (kg)", "Sand (T)", "Water (L)"
+            "Wall ID", "Fl", "Span / Cols", "Len (m)", "Ht (m)", "Thk (mm)",
+            "Gross Vol (m\u00b3)", "Bricks (Nos)", "Brick Vol (m\u00b3)",
+            "Wet Mortar (m\u00b3)", "Dry Mortar (m\u00b3)", "Cem Bags", "Cem (kg)",
+            "Sand (T)", "Water (L)"
         ]
-        brick_data = [headers]
+        COL_W = [40, 20, 50, 30, 28, 28, 36, 36, 34, 36, 36, 32, 34, 30, 30]
+        data = [headers]
         if not wb or not getattr(wb, 'wall_sections', None):
-            brick_data.append(["N/A", "-", "-", "-", "-", "-", "-", "-", "-", "-", "-", "-", "-", "-"])
-            t = Table(brick_data, repeatRows=1, colWidths=[36, 44, 28, 26, 28, 38, 38, 36, 38, 38, 36, 38, 36, 34])
-            t.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.darkorange),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-                ('FONTSIZE', (0, 0), (-1, -1), 6.5),
-            ]))
-            return t
-
-        for sec in wb.wall_sections:
-            span_label = f"{sec.col_start}→{sec.col_end}" if (sec.col_start and sec.col_end) else "Bay"
-            brick_data.append([
-                sec.wall_id,
-                span_label,
-                f"{sec.length_m:.2f}",
-                f"{sec.clear_height_m:.2f}",
-                f"{int(sec.core_thickness_m * 1000)}mm",
-                f"{sec.wall_volume_m3 * num_stories:.2f}",
-                f"{sec.num_bricks * num_stories:,}",
-                f"{sec.total_brick_vol_m3 * num_stories:.2f}",
-                f"{sec.wet_mortar_vol_m3 * num_stories:.3f}",
-                f"{sec.dry_mortar_vol_m3 * num_stories:.3f}",
-                f"{int(math.ceil(sec.mortar_cement_kg * num_stories / 50.0))}",
-                f"{sec.mortar_cement_kg * num_stories:.1f}",
-                f"{sec.mortar_sand_tonnes * num_stories:.2f}",
-                f"{sec.mortar_water_litres * num_stories:.0f}",
+            data.append(["N/A"] + ["-"] * (len(headers) - 1))
+        else:
+            ns = int(getattr(wb, 'num_stories', num_stories) or num_stories)
+            for floor in range(ns):
+                for sec in wb.wall_sections:
+                    span = (f"{sec.col_start}\u2192{sec.col_end}"
+                            if sec.col_start and sec.col_end else "Bay")
+                    data.append([
+                        f"{sec.wall_id}_F{floor}",
+                        f"F{floor}",
+                        span,
+                        f"{sec.length_m:.2f}",
+                        f"{sec.clear_height_m:.2f}",
+                        f"{int(sec.core_thickness_m * 1000)}",
+                        f"{sec.wall_volume_m3:.3f}",
+                        f"{sec.num_bricks:,}",
+                        f"{sec.total_brick_vol_m3:.3f}",
+                        f"{sec.wet_mortar_vol_m3:.3f}",
+                        f"{sec.dry_mortar_vol_m3:.3f}",
+                        f"{int(_math.ceil(sec.mortar_cement_kg / 50.0))}",
+                        f"{sec.mortar_cement_kg:.1f}",
+                        f"{sec.mortar_sand_tonnes:.3f}",
+                        f"{sec.mortar_water_litres:.0f}",
+                    ])
+            # Totals — use WallBOM aggregated fields (already × num_stories)
+            ns2 = ns
+            tot_brk_vol = sum(s.total_brick_vol_m3 for s in wb.wall_sections) * ns2
+            tot_wet = sum(s.wet_mortar_vol_m3 for s in wb.wall_sections) * ns2
+            tot_dry = sum(s.dry_mortar_vol_m3 for s in wb.wall_sections) * ns2
+            data.append([
+                "TOTAL", f"{ns}Fl", "All Walls", "-", "-", "-",
+                f"{wb.total_wall_volume_m3:.2f}",
+                f"{wb.total_bricks:,}",
+                f"{tot_brk_vol:.2f}",
+                f"{tot_wet:.2f}",
+                f"{tot_dry:.2f}",
+                f"{wb.total_mortar_cement_bags:,}",
+                f"{wb.total_mortar_cement_kg:,.0f}",
+                f"{wb.total_mortar_sand_tonnes:.2f}",
+                f"{wb.total_mortar_water_litres:,.0f}",
             ])
 
-        tot_vol = sum(s.wall_volume_m3 for s in wb.wall_sections) * num_stories
-        tot_bricks = sum(s.num_bricks for s in wb.wall_sections) * num_stories
-        tot_brk_vol = sum(s.total_brick_vol_m3 for s in wb.wall_sections) * num_stories
-        tot_wet = sum(s.wet_mortar_vol_m3 for s in wb.wall_sections) * num_stories
-        tot_dry = sum(s.dry_mortar_vol_m3 for s in wb.wall_sections) * num_stories
-        tot_cem_kg = sum(s.mortar_cement_kg for s in wb.wall_sections) * num_stories
-        tot_cem_bags = int(math.ceil(tot_cem_kg / 50.0))
-        tot_sand_t = sum(s.mortar_sand_tonnes for s in wb.wall_sections) * num_stories
-        tot_water_l = sum(s.mortar_water_litres for s in wb.wall_sections) * num_stories
-
-        brick_data.append([
-            "TOTAL", "All Walls", "-", "-", "-",
-            f"{tot_vol:.2f}", f"{tot_bricks:,}", f"{tot_brk_vol:.2f}",
-            f"{tot_wet:.2f}", f"{tot_dry:.2f}", f"{tot_cem_bags:,}",
-            f"{tot_cem_kg:,.0f}", f"{tot_sand_t:.2f}", f"{tot_water_l:,.0f}"
-        ])
-
-        t = Table(brick_data, repeatRows=1, colWidths=[36, 44, 28, 26, 28, 38, 38, 36, 38, 38, 36, 38, 36, 34])
+        t = Table(data, repeatRows=1, colWidths=COL_W)
         t.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.darkorange),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('ALIGN', (0, 1), (2, -2), 'LEFT'),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-            ('FONTSIZE', (0, 0), (-1, -1), 6.5),
+            ('FONTSIZE', (0, 0), (-1, -1), 5.5),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ('BACKGROUND', (0, -1), (-1, -1), colors.lightyellow),
-            ('FONTWEIGHT', (0, -1), (-1, -1), 'BOLD'),
+            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
         ]))
         return t
 
     @staticmethod
-    def _create_plaster_schedule_table(wb: Any, num_stories: int = 1, grid_mgr: Optional[GridManager] = None) -> Table:
-        """Create plaster schedule table per IS 1661 & IS 2402 including ceiling soffits."""
+    def _create_plaster_schedule_table(wb, num_stories=1, grid_mgr=None):
+        """Per-floor, per-wall-face plaster schedule — IS 1661, IS 2402.
+        Exterior wall: two rows per floor (EXT + INT face).
+        Interior wall: one row (2-face combined).
+        Ceiling soffit: one row per floor.
+        """
+        import math as _math
+        from reportlab.platypus import Table, TableStyle
+        from reportlab.lib import colors
+        DRY = 1.33
         headers = [
-            "Surface ID", "Location & Mix Spec", "Area (m²)", "Thk (mm)", "Mix",
-            "Wet Vol (m³)", "Dry Vol (m³)", "Cem (Bags)", "Cem (kg)", "Sand (T)", "Water (L)"
+            "Surface ID", "Fl", "Location & Mix Spec",
+            "Area (m\u00b2)", "Thk (mm)", "Mix",
+            "Wet Vol (m\u00b3)", "Dry Vol (m\u00b3)",
+            "Cem Bags", "Cem (kg)", "Sand (T)", "Water (L)"
         ]
-        plaster_data = [headers]
+        COL_W = [52, 20, 100, 34, 28, 24, 34, 34, 30, 40, 34, 30]
+        data = [headers]
         if not wb or not getattr(wb, 'wall_sections', None):
-            plaster_data.append(["N/A", "-", "-", "-", "-", "-", "-", "-", "-", "-", "-"])
-            t = Table(plaster_data, repeatRows=1, colWidths=[44, 86, 44, 34, 32, 42, 42, 42, 46, 42, 38])
-            t.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.Color(0.1, 0.45, 0.45)),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-                ('FONTSIZE', (0, 0), (-1, -1), 6.5),
-            ]))
-            return t
+            data.append(["N/A"] + ["-"] * (len(headers) - 1))
+        else:
+            ns = int(getattr(wb, 'num_stories', num_stories) or num_stories)
+            tot_area = tot_wet = tot_dry = tot_cem = tot_sand = tot_water = 0.0
+            for floor in range(ns):
+                fl = f"F{floor}"
+                for sec in wb.wall_sections:
+                    one = sec.length_m * sec.clear_height_m
+                    if sec.is_exterior:
+                        # External face: 15mm, 1:4
+                        a = one;  w = a * 0.015; d = w * DRY
+                        ck = (d / 5.0) * 1440.0; sk = ((d * 4.0 / 5.0) * 1600.0) / 1000.0
+                        wt = ck * 0.50
+                        data.append([
+                            f"{sec.wall_id}_EXT_F{floor}", fl, "Ext Render (15mm 1:4)",
+                            f"{a:.2f}", "15", "1:4",
+                            f"{w:.3f}", f"{d:.3f}",
+                            f"{int(_math.ceil(ck/50))}", f"{ck:.1f}", f"{sk:.3f}", f"{wt:.0f}"
+                        ])
+                        tot_area+=a; tot_wet+=w; tot_dry+=d; tot_cem+=ck; tot_sand+=sk; tot_water+=wt
 
-        tot_p_area = 0.0
-        tot_p_wet = 0.0
-        tot_p_dry = 0.0
-        tot_p_cem_kg = 0.0
-        tot_p_sand_t = 0.0
-        tot_p_water_l = 0.0
+                        # Internal face of exterior wall: 12mm, 1:6
+                        a = one;  w = a * 0.012; d = w * DRY
+                        ck = (d / 7.0) * 1440.0; sk = ((d * 6.0 / 7.0) * 1600.0) / 1000.0
+                        wt = ck * 0.50
+                        data.append([
+                            f"{sec.wall_id}_INT_F{floor}", fl, "Int Wall (12mm 1:6)",
+                            f"{a:.2f}", "12", "1:6",
+                            f"{w:.3f}", f"{d:.3f}",
+                            f"{int(_math.ceil(ck/50))}", f"{ck:.1f}", f"{sk:.3f}", f"{wt:.0f}"
+                        ])
+                        tot_area+=a; tot_wet+=w; tot_dry+=d; tot_cem+=ck; tot_sand+=sk; tot_water+=wt
+                    else:
+                        # Both faces interior: 2 x 12mm, 1:6
+                        a = one * 2.0;  w = a * 0.012; d = w * DRY
+                        ck = (d / 7.0) * 1440.0; sk = ((d * 6.0 / 7.0) * 1600.0) / 1000.0
+                        wt = ck * 0.50
+                        data.append([
+                            f"{sec.wall_id}_F{floor}", fl, "Int Partition 2-Face (12mm 1:6)",
+                            f"{a:.2f}", "12", "1:6",
+                            f"{w:.3f}", f"{d:.3f}",
+                            f"{int(_math.ceil(ck/50))}", f"{ck:.1f}", f"{sk:.3f}", f"{wt:.0f}"
+                        ])
+                        tot_area+=a; tot_wet+=w; tot_dry+=d; tot_cem+=ck; tot_sand+=sk; tot_water+=wt
 
-        for sec in wb.wall_sections:
-            if sec.is_exterior:
-                # Ext side: 15mm, 1:4
-                a_ext = (sec.length_m * sec.clear_height_m) * num_stories
-                w_ext = a_ext * 0.015
-                d_ext = w_ext * 1.33
-                c_ext_kg = (d_ext / 5.0) * 1440.0
-                c_ext_bags = int(math.ceil(c_ext_kg / 50.0))
-                s_ext_t = ((d_ext * 4.0 / 5.0) * 1600.0) / 1000.0
-                wat_ext_l = c_ext_kg * 0.50
-                plaster_data.append([
-                    f"{sec.wall_id}_EXT", "Ext Render (15mm 1:4)", f"{a_ext:.1f}", "15", "1:4",
-                    f"{w_ext:.3f}", f"{d_ext:.3f}", f"{c_ext_bags}", f"{c_ext_kg:.1f}", f"{s_ext_t:.2f}", f"{wat_ext_l:.0f}"
-                ])
-                tot_p_area += a_ext
-                tot_p_wet += w_ext
-                tot_p_dry += d_ext
-                tot_p_cem_kg += c_ext_kg
-                tot_p_sand_t += s_ext_t
-                tot_p_water_l += wat_ext_l
+            # Ceiling soffit per floor: 6mm, 1:3
+            if grid_mgr:
+                wm = float(getattr(grid_mgr, 'width_m', 0.0) or 0.0)
+                lm = float(getattr(grid_mgr, 'length_m', 0.0) or 0.0)
+                if wm * lm > 0:
+                    for floor in range(ns):
+                        fl = f"F{floor}"
+                        a = wm * lm; w = a * 0.006; d = w * DRY
+                        ck = (d / 4.0) * 1440.0; sk = ((d * 3.0 / 4.0) * 1600.0) / 1000.0
+                        wt = ck * 0.50
+                        data.append([
+                            f"Ceil_F{floor}", fl, "Slab Soffit (6mm 1:3)",
+                            f"{a:.2f}", "6", "1:3",
+                            f"{w:.3f}", f"{d:.3f}",
+                            f"{int(_math.ceil(ck/50))}", f"{ck:.1f}", f"{sk:.3f}", f"{wt:.0f}"
+                        ])
+                        tot_area+=a; tot_wet+=w; tot_dry+=d; tot_cem+=ck; tot_sand+=sk; tot_water+=wt
 
-                # Int side: 12mm, 1:6
-                a_int = (sec.length_m * sec.clear_height_m) * num_stories
-                w_int = a_int * 0.012
-                d_int = w_int * 1.33
-                c_int_kg = (d_int / 7.0) * 1440.0
-                c_int_bags = int(math.ceil(c_int_kg / 50.0))
-                s_int_t = ((d_int * 6.0 / 7.0) * 1600.0) / 1000.0
-                wat_int_l = c_int_kg * 0.50
-                plaster_data.append([
-                    f"{sec.wall_id}_INT", "Int Wall (12mm 1:6)", f"{a_int:.1f}", "12", "1:6",
-                    f"{w_int:.3f}", f"{d_int:.3f}", f"{c_int_bags}", f"{c_int_kg:.1f}", f"{s_int_t:.2f}", f"{wat_int_l:.0f}"
-                ])
-                tot_p_area += a_int
-                tot_p_wet += w_int
-                tot_p_dry += d_int
-                tot_p_cem_kg += c_int_kg
-                tot_p_sand_t += s_int_t
-                tot_p_water_l += wat_int_l
-            else:
-                # Both sides interior: 12mm, 1:6
-                a_int = (sec.length_m * sec.clear_height_m * 2.0) * num_stories
-                w_int = a_int * 0.012
-                d_int = w_int * 1.33
-                c_int_kg = (d_int / 7.0) * 1440.0
-                c_int_bags = int(math.ceil(c_int_kg / 50.0))
-                s_int_t = ((d_int * 6.0 / 7.0) * 1600.0) / 1000.0
-                wat_int_l = c_int_kg * 0.50
-                plaster_data.append([
-                    f"{sec.wall_id}", "Int Part (2-Face 12mm 1:6)", f"{a_int:.1f}", "12", "1:6",
-                    f"{w_int:.3f}", f"{d_int:.3f}", f"{c_int_bags}", f"{c_int_kg:.1f}", f"{s_int_t:.2f}", f"{wat_int_l:.0f}"
-                ])
-                tot_p_area += a_int
-                tot_p_wet += w_int
-                tot_p_dry += d_int
-                tot_p_cem_kg += c_int_kg
-                tot_p_sand_t += s_int_t
-                tot_p_water_l += wat_int_l
+            data.append([
+                "TOTAL", f"{ns}Fl", "All Plaster Surfaces",
+                f"{tot_area:.1f}", "-", "-",
+                f"{tot_wet:.3f}", f"{tot_dry:.3f}",
+                f"{int(_math.ceil(tot_cem/50)):,}", f"{tot_cem:,.0f}",
+                f"{tot_sand:.2f}", f"{tot_water:,.0f}"
+            ])
 
-        # Ceiling Soffit Plaster
-        if grid_mgr and hasattr(grid_mgr, 'width_m') and hasattr(grid_mgr, 'length_m'):
-            w_m = float(getattr(grid_mgr, 'width_m', 0.0) or 0.0)
-            l_m = float(getattr(grid_mgr, 'length_m', 0.0) or 0.0)
-            a_ceil = w_m * l_m * num_stories
-            if a_ceil > 0.0:
-                w_ceil = a_ceil * 0.006  # 6mm ceiling plaster
-                d_ceil = w_ceil * 1.33
-                c_ceil_kg = (d_ceil / 4.0) * 1440.0  # 1:3 mix
-                c_ceil_bags = int(math.ceil(c_ceil_kg / 50.0))
-                s_ceil_t = ((d_ceil * 3.0 / 4.0) * 1600.0) / 1000.0
-                wat_ceil_l = c_ceil_kg * 0.50
-                plaster_data.append([
-                    "Ceiling Soffit", "Slab Bottom (6mm 1:3)", f"{a_ceil:.1f}", "6", "1:3",
-                    f"{w_ceil:.3f}", f"{d_ceil:.3f}", f"{c_ceil_bags}", f"{c_ceil_kg:.1f}", f"{s_ceil_t:.2f}", f"{wat_ceil_l:.0f}"
-                ])
-                tot_p_area += a_ceil
-                tot_p_wet += w_ceil
-                tot_p_dry += d_ceil
-                tot_p_cem_kg += c_ceil_kg
-                tot_p_sand_t += s_ceil_t
-                tot_p_water_l += wat_ceil_l
-
-        tot_p_cem_bags = int(math.ceil(tot_p_cem_kg / 50.0))
-        plaster_data.append([
-            "TOTAL", "All Plaster Surfaces", f"{tot_p_area:.1f}", "-", "-",
-            f"{tot_p_wet:.3f}", f"{tot_p_dry:.3f}", f"{tot_p_cem_bags:,}", f"{tot_p_cem_kg:,.0f}", f"{tot_p_sand_t:.2f}", f"{tot_p_water_l:,.0f}"
-        ])
-
-        t = Table(plaster_data, repeatRows=1, colWidths=[44, 86, 44, 34, 32, 42, 42, 42, 46, 42, 38])
+        t = Table(data, repeatRows=1, colWidths=COL_W)
         t.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.Color(0.1, 0.45, 0.45)),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('ALIGN', (0, 1), (2, -2), 'LEFT'),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-            ('FONTSIZE', (0, 0), (-1, -1), 6.5),
+            ('FONTSIZE', (0, 0), (-1, -1), 5.5),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ('BACKGROUND', (0, -1), (-1, -1), colors.lightyellow),
-            ('FONTWEIGHT', (0, -1), (-1, -1), 'BOLD'),
+            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
         ]))
         return t
 
     @staticmethod
-    def _create_paint_schedule_table(wb: Any, num_stories: int = 1, grid_mgr: Optional[GridManager] = None) -> Table:
-        """Create painting schedule table per NBC 2016 SP7 including ceiling finishes."""
+    def _create_paint_schedule_table(wb, num_stories=1, grid_mgr=None):
+        """Per-floor, per-wall-face paint schedule — NBC 2016 SP7."""
+        from reportlab.platypus import Table, TableStyle
+        from reportlab.lib import colors
+        PR = 8.0; EM_INT = 12.0; EM_EXT = 10.0; PUTTY = 1.5; COATS = 2
         headers = [
-            "Surface ID", "Location & Specification", "Finish Area (m²)",
-            "Primer 1-Ct (L)", "Putty 2-Ct (kg)", "Int Emulsion 2-Ct (L)", "Ext Weather 2-Ct (L)"
+            "Surface ID", "Fl", "Location & Specification",
+            "Area (m\u00b2)", "Primer 1-Ct (L)", "Putty 2-Ct (kg)",
+            "Int Em 2-Ct (L)", "Ext Guard 2-Ct (L)"
         ]
-        paint_data = [headers]
+        COL_W = [55, 20, 115, 38, 48, 52, 52, 52]
+        data = [headers]
         if not wb or not getattr(wb, 'wall_sections', None):
-            paint_data.append(["N/A", "-", "-", "-", "-", "-", "-"])
-            t = Table(paint_data, repeatRows=1, colWidths=[55, 115, 50, 65, 70, 70, 70])
-            t.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.Color(0.2, 0.25, 0.5)),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-                ('FONTSIZE', (0, 0), (-1, -1), 7),
-            ]))
-            return t
+            data.append(["N/A"] + ["-"] * (len(headers) - 1))
+        else:
+            ns = int(getattr(wb, 'num_stories', num_stories) or num_stories)
+            tot_area = tot_pr = tot_pu = tot_ei = tot_ee = 0.0
+            for floor in range(ns):
+                fl = f"F{floor}"
+                for sec in wb.wall_sections:
+                    one = sec.length_m * sec.clear_height_m
+                    if sec.is_exterior:
+                        # External face
+                        a = one
+                        pr = a / PR; we = (a * COATS) / EM_EXT
+                        data.append([
+                            f"{sec.wall_id}_EXT_F{floor}", fl, "External Weather Guard",
+                            f"{a:.2f}", f"{pr:.2f}", "\u2014", "\u2014", f"{we:.2f}"
+                        ])
+                        tot_area+=a; tot_pr+=pr; tot_ee+=we
+                        # Internal face
+                        a = one
+                        pr = a / PR; pu = a * PUTTY * COATS; ei = (a * COATS) / EM_INT
+                        data.append([
+                            f"{sec.wall_id}_INT_F{floor}", fl, "Int Acrylic Emulsion",
+                            f"{a:.2f}", f"{pr:.2f}", f"{pu:.2f}", f"{ei:.2f}", "\u2014"
+                        ])
+                        tot_area+=a; tot_pr+=pr; tot_pu+=pu; tot_ei+=ei
+                    else:
+                        a = one * 2.0
+                        pr = a / PR; pu = a * PUTTY * COATS; ei = (a * COATS) / EM_INT
+                        data.append([
+                            f"{sec.wall_id}_F{floor}", fl, "Int Partition Emulsion (2 Faces)",
+                            f"{a:.2f}", f"{pr:.2f}", f"{pu:.2f}", f"{ei:.2f}", "\u2014"
+                        ])
+                        tot_area+=a; tot_pr+=pr; tot_pu+=pu; tot_ei+=ei
 
-        tot_pt_area = 0.0
-        tot_primer = 0.0
-        tot_putty = 0.0
-        tot_em_int = 0.0
-        tot_em_ext = 0.0
+            if grid_mgr:
+                wm = float(getattr(grid_mgr, 'width_m', 0.0) or 0.0)
+                lm = float(getattr(grid_mgr, 'length_m', 0.0) or 0.0)
+                if wm * lm > 0:
+                    for floor in range(ns):
+                        fl = f"F{floor}"
+                        a = wm * lm
+                        pr = a / PR; pu = a * PUTTY * COATS; ei = (a * COATS) / EM_INT
+                        data.append([
+                            f"Ceil_F{floor}", fl, "Slab Soffit (White Emulsion)",
+                            f"{a:.2f}", f"{pr:.2f}", f"{pu:.2f}", f"{ei:.2f}", "\u2014"
+                        ])
+                        tot_area+=a; tot_pr+=pr; tot_pu+=pu; tot_ei+=ei
 
-        for sec in wb.wall_sections:
-            if sec.is_exterior:
-                a_ext = (sec.length_m * sec.clear_height_m) * num_stories
-                pr_ext = a_ext / 8.0
-                we_ext = (a_ext * 2.0) / 10.0
-                paint_data.append([
-                    f"{sec.wall_id}_EXT", "External Weather Guard", f"{a_ext:.1f}", f"{pr_ext:.1f}", "—", "—", f"{we_ext:.1f}"
-                ])
-                tot_pt_area += a_ext
-                tot_primer += pr_ext
-                tot_em_ext += we_ext
+            data.append([
+                "TOTAL", f"{ns}Fl", "All Surfaces (Walls + Ceilings)",
+                f"{tot_area:.1f}", f"{tot_pr:.1f}", f"{tot_pu:,.1f}",
+                f"{tot_ei:.1f}", f"{tot_ee:.1f}"
+            ])
 
-                a_int = (sec.length_m * sec.clear_height_m) * num_stories
-                pr_int = a_int / 8.0
-                pu_int = a_int * 1.5
-                em_int = (a_int * 2.0) / 12.0
-                paint_data.append([
-                    f"{sec.wall_id}_INT", "Internal Acrylic Emulsion", f"{a_int:.1f}", f"{pr_int:.1f}", f"{pu_int:.1f}", f"{em_int:.1f}", "—"
-                ])
-                tot_pt_area += a_int
-                tot_primer += pr_int
-                tot_putty += pu_int
-                tot_em_int += em_int
-            else:
-                a_int = (sec.length_m * sec.clear_height_m * 2.0) * num_stories
-                pr_int = a_int / 8.0
-                pu_int = a_int * 1.5
-                em_int = (a_int * 2.0) / 12.0
-                paint_data.append([
-                    f"{sec.wall_id}", "Internal Partition Emulsion", f"{a_int:.1f}", f"{pr_int:.1f}", f"{pu_int:.1f}", f"{em_int:.1f}", "—"
-                ])
-                tot_pt_area += a_int
-                tot_primer += pr_int
-                tot_putty += pu_int
-                tot_em_int += em_int
-
-        if grid_mgr and hasattr(grid_mgr, 'width_m') and hasattr(grid_mgr, 'length_m'):
-            w_m = float(getattr(grid_mgr, 'width_m', 0.0) or 0.0)
-            l_m = float(getattr(grid_mgr, 'length_m', 0.0) or 0.0)
-            a_ceil = w_m * l_m * num_stories
-            if a_ceil > 0.0:
-                pr_ceil = a_ceil / 8.0
-                pu_ceil = a_ceil * 1.5
-                em_ceil = (a_ceil * 2.0) / 12.0
-                paint_data.append([
-                    "Ceiling Soffit", "Slab Underside (White Emulsion)", f"{a_ceil:.1f}", f"{pr_ceil:.1f}", f"{pu_ceil:.1f}", f"{em_ceil:.1f}", "—"
-                ])
-                tot_pt_area += a_ceil
-                tot_primer += pr_ceil
-                tot_putty += pu_ceil
-                tot_em_int += em_ceil
-
-        paint_data.append([
-            "TOTAL", "All Surfaces (Walls + Ceilings)", f"{tot_pt_area:.1f}", f"{tot_primer:.1f}", f"{tot_putty:,.1f}", f"{tot_em_int:.1f}", f"{tot_em_ext:.1f}"
-        ])
-
-        t = Table(paint_data, repeatRows=1, colWidths=[55, 115, 50, 65, 70, 70, 70])
+        t = Table(data, repeatRows=1, colWidths=COL_W)
         t.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.Color(0.2, 0.25, 0.5)),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
             ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('ALIGN', (0, 1), (2, -2), 'LEFT'),
             ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
-            ('FONTSIZE', (0, 0), (-1, -1), 7),
+            ('FONTSIZE', (0, 0), (-1, -1), 5.5),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ('BACKGROUND', (0, -1), (-1, -1), colors.lightyellow),
-            ('FONTWEIGHT', (0, -1), (-1, -1), 'BOLD'),
+            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
         ]))
         return t
 
     @staticmethod
-    def _create_masonry_summary_table(wb: Any, num_stories: int = 1, grid_mgr: Optional[GridManager] = None) -> Table:
-        """Create consolidated masonry, plaster and paint summary BOQ table."""
+    def _create_masonry_summary_table(wb, num_stories=1, grid_mgr=None):
+        """Consolidated BOQ summary using WallBOM aggregated totals."""
+        import math as _math
+        from reportlab.platypus import Table, TableStyle
+        from reportlab.lib import colors
+        DRY = 1.33
         if not wb or not getattr(wb, 'wall_sections', None):
-            t = Table([["Material", "Spec", "Quantity", "Unit", "Standard"], ["N/A", "-", "-", "-", "-"]], colWidths=[135, 140, 95, 55, 70])
+            t = Table([["Material", "Spec", "Quantity", "Unit", "Standard"],
+                       ["N/A", "-", "-", "-", "-"]], colWidths=[135, 140, 95, 55, 70])
             return t
 
-        tot_vol = sum(s.wall_volume_m3 for s in wb.wall_sections) * num_stories
-        tot_bricks = sum(s.num_bricks for s in wb.wall_sections) * num_stories
-        tot_brk_vol = sum(s.total_brick_vol_m3 for s in wb.wall_sections) * num_stories
-        tot_wet = sum(s.wet_mortar_vol_m3 for s in wb.wall_sections) * num_stories
-        tot_dry = sum(s.dry_mortar_vol_m3 for s in wb.wall_sections) * num_stories
-        tot_m_cem_kg = sum(s.mortar_cement_kg for s in wb.wall_sections) * num_stories
-        tot_m_cem_bags = int(math.ceil(tot_m_cem_kg / 50.0))
-        tot_m_sand_t = sum(s.mortar_sand_tonnes for s in wb.wall_sections) * num_stories
-        tot_m_water_l = sum(s.mortar_water_litres for s in wb.wall_sections) * num_stories
+        ns = int(getattr(wb, 'num_stories', num_stories) or num_stories)
 
-        wall_p_area = sum(s.plaster_area_m2 for s in wb.wall_sections) * num_stories
-        wall_p_cem_kg = sum(s.plaster_cement_kg for s in wb.wall_sections) * num_stories
-        wall_p_sand_t = sum(s.plaster_sand_tonnes for s in wb.wall_sections) * num_stories
-        wall_p_water_l = sum(s.plaster_water_litres for s in wb.wall_sections) * num_stories
+        # Use WallBOM aggregated totals (already multiplied by num_stories)
+        tot_vol     = wb.total_wall_volume_m3
+        tot_bricks  = wb.total_bricks
+        tot_brk_vol = sum(s.total_brick_vol_m3 for s in wb.wall_sections) * ns
+        tot_wet     = sum(s.wet_mortar_vol_m3 for s in wb.wall_sections) * ns
+        tot_dry     = sum(s.dry_mortar_vol_m3 for s in wb.wall_sections) * ns
+        tot_m_cem_kg   = wb.total_mortar_cement_kg
+        tot_m_cem_bags = wb.total_mortar_cement_bags
+        tot_m_sand_t   = wb.total_mortar_sand_tonnes
+        tot_m_water_l  = wb.total_mortar_water_litres
 
-        ceil_area = 0.0
-        ceil_cem_kg = 0.0
-        ceil_sand_t = 0.0
-        ceil_water_l = 0.0
-        ceil_primer_l = 0.0
-        ceil_putty_kg = 0.0
-        ceil_em_l = 0.0
+        # Plaster totals — recalculate per face per floor
+        wall_p_area = wall_p_cem = wall_p_sand = wall_p_water = 0.0
+        for sec in wb.wall_sections:
+            one = sec.length_m * sec.clear_height_m
+            if sec.is_exterior:
+                d_e = (one * 0.015) * DRY; d_i = (one * 0.012) * DRY
+                wall_p_area  += (one * 2) * ns
+                wall_p_cem   += ((d_e / 5.0 + d_i / 7.0) * 1440.0) * ns
+                wall_p_sand  += (((d_e * 4.0 / 5.0) + (d_i * 6.0 / 7.0)) * 1600.0 / 1000.0) * ns
+                wall_p_water += ((d_e / 5.0 + d_i / 7.0) * 1440.0 * 0.50) * ns
+            else:
+                d = (one * 2 * 0.012) * DRY
+                wall_p_area  += (one * 2) * ns
+                wall_p_cem   += (d / 7.0 * 1440.0) * ns
+                wall_p_sand  += (d * 6.0 / 7.0 * 1600.0 / 1000.0) * ns
+                wall_p_water += (d / 7.0 * 1440.0 * 0.50) * ns
 
-        if grid_mgr and hasattr(grid_mgr, 'width_m') and hasattr(grid_mgr, 'length_m'):
-            w_m = float(getattr(grid_mgr, 'width_m', 0.0) or 0.0)
-            l_m = float(getattr(grid_mgr, 'length_m', 0.0) or 0.0)
-            ceil_area = w_m * l_m * num_stories
-            if ceil_area > 0.0:
-                c_d_vol = (ceil_area * 0.006) * 1.33
-                ceil_cem_kg = (c_d_vol / 4.0) * 1440.0
-                ceil_sand_t = ((c_d_vol * 3.0 / 4.0) * 1600.0) / 1000.0
-                ceil_water_l = ceil_cem_kg * 0.50
-                ceil_primer_l = ceil_area / 8.0
-                ceil_putty_kg = ceil_area * 1.5
-                ceil_em_l = (ceil_area * 2.0) / 12.0
+        ceil_area = ceil_cem = ceil_sand = ceil_water = 0.0
+        ceil_primer = ceil_putty = ceil_em = 0.0
+        if grid_mgr:
+            wm = float(getattr(grid_mgr, 'width_m', 0.0) or 0.0)
+            lm = float(getattr(grid_mgr, 'length_m', 0.0) or 0.0)
+            ceil_area = wm * lm * ns
+            if ceil_area > 0:
+                d = (ceil_area * 0.006) * DRY
+                ceil_cem   = (d / 4.0) * 1440.0
+                ceil_sand  = ((d * 3.0 / 4.0) * 1600.0) / 1000.0
+                ceil_water = ceil_cem * 0.50
+                ceil_primer = ceil_area / 8.0
+                ceil_putty  = ceil_area * 1.5 * 2
+                ceil_em     = (ceil_area * 2.0) / 12.0
 
-        tot_p_area = wall_p_area + ceil_area
-        tot_p_cem_kg = wall_p_cem_kg + ceil_cem_kg
-        tot_p_cem_bags = int(math.ceil(tot_p_cem_kg / 50.0))
-        tot_p_sand_t = wall_p_sand_t + ceil_sand_t
-        tot_p_water_l = wall_p_water_l + ceil_water_l
+        tot_p_area  = wall_p_area + ceil_area
+        tot_p_cem   = wall_p_cem + ceil_cem
+        tot_p_cem_bags = int(_math.ceil(tot_p_cem / 50.0))
+        tot_p_sand  = wall_p_sand + ceil_sand
+        tot_p_water = wall_p_water + ceil_water
 
-        tot_primer_l = (sum(s.primer_litres for s in wb.wall_sections) * num_stories) + ceil_primer_l
-        tot_putty_kg = (sum(s.putty_kg for s in wb.wall_sections) * num_stories) + ceil_putty_kg
-        tot_em_int_l = (sum(s.emulsion_int_litres for s in wb.wall_sections) * num_stories) + ceil_em_l
-        tot_em_ext_l = sum(s.emulsion_ext_litres for s in wb.wall_sections) * num_stories
+        tot_primer = wb.total_primer_litres + ceil_primer
+        tot_putty  = wb.total_putty_kg + ceil_putty
+        tot_em_int = wb.total_emulsion_int_litres + ceil_em
+        tot_em_ext = wb.total_emulsion_ext_litres
+        gc_bags    = tot_m_cem_bags + tot_p_cem_bags
+        gc_kg      = tot_m_cem_kg + tot_p_cem
+        gs_t       = tot_m_sand_t + tot_p_sand
+        gw_l       = tot_m_water_l + tot_p_water
 
-        grand_cem_bags = tot_m_cem_bags + tot_p_cem_bags
-        grand_cem_kg = tot_m_cem_kg + tot_p_cem_kg
-        grand_sand_t = tot_m_sand_t + tot_p_sand_t
-        grand_water_l = tot_m_water_l + tot_p_water_l
-
-        summary_rows = [
+        rows = [
             ["Item / Material Description", "Specification / Mix Proportion", "Building Total", "Unit", "IS Standard"],
-            ["Total Wall Gross Volume", "L × t × Hv (clear story height)", f"{tot_vol:.2f}", "m³", "IS 1905:1987"],
-            ["Clay Modular Building Bricks", "Standard modular 20×20×10 cm", f"{tot_bricks:,}", "Nos", "IS 1077:1992"],
-            ["Net Solid Brickwork Volume", "Actual brick body volume (excl. mortar)", f"{tot_brk_vol:.2f}", "m³", "IS 1077:1992"],
-            ["Wet Brickwork Mortar Volume", "Gross Wall Volume − Solid Brick Vol", f"{tot_wet:.2f}", "m³", "IS 2250:1981"],
-            ["Dry Brickwork Mortar Volume", "Wet Volume × 1.33 dry factor", f"{tot_dry:.2f}", "m³", "IS 2250:1981"],
-            ["Brickwork Cement", "1:4 Mix Proportion (OPC / PPC)", f"{tot_m_cem_bags:,} ({tot_m_cem_kg:,.0f} kg)", "Bags (50kg)", "IS 269:2015"],
-            ["Brickwork Sand", "Coarse sand, dry density 1600 kg/m³", f"{tot_m_sand_t:.2f}", "Tonnes", "IS 383 Zone II"],
+            ["Total Wall Gross Volume", "L \u00d7 t \u00d7 Hv (clear storey height)", f"{tot_vol:.2f}", "m\u00b3", "IS 1905:1987"],
+            ["Clay Modular Building Bricks", "Standard modular 20\u00d720\u00d710 cm", f"{tot_bricks:,}", "Nos", "IS 1077:1992"],
+            ["Net Solid Brickwork Volume", "Actual brick body vol. (excl. mortar)", f"{tot_brk_vol:.2f}", "m\u00b3", "IS 1077:1992"],
+            ["Wet Brickwork Mortar Volume", "Gross Wall Vol \u2212 Solid Brick Vol", f"{tot_wet:.2f}", "m\u00b3", "IS 2250:1981"],
+            ["Dry Brickwork Mortar Volume", "Wet Volume \u00d7 1.33 dry factor", f"{tot_dry:.2f}", "m\u00b3", "IS 2250:1981"],
+            ["Brickwork Cement", "1:4 Mix Proportion (OPC/PPC)", f"{tot_m_cem_bags:,} ({tot_m_cem_kg:,.0f} kg)", "Bags 50kg", "IS 269:2015"],
+            ["Brickwork Sand", "Coarse sand, dry density 1600 kg/m\u00b3", f"{tot_m_sand_t:.2f}", "Tonnes", "IS 383 Zone II"],
             ["Brickwork Water", "Water:Cement ratio = 0.50", f"{tot_m_water_l:,.0f}", "Litres", "IS 456 Cl 5.4"],
-            ["Wall Plastering Surface Area", "Internal (12mm 1:6) + External (15mm 1:4)", f"{wall_p_area:.1f}", "m²", "IS 1200 Pt 12"],
-            ["Ceiling Soffit Plaster Area", "Soffit bottom of slabs (6mm 1:3 mix)", f"{ceil_area:.1f}", "m²", "IS 1661:1972"],
-            ["Total Plaster Surface Area", "Combined wall + ceiling surface", f"{tot_p_area:.1f}", "m²", "IS 1200 Pt 12"],
-            ["Plastering Cement", "Combined wall & ceiling plaster", f"{tot_p_cem_bags:,} ({tot_p_cem_kg:,.0f} kg)", "Bags (50kg)", "IS 1661 / IS 2402"],
-            ["Plastering Sand", "Clean plaster sand (Zone III/IV)", f"{tot_p_sand_t:.2f}", "Tonnes", "IS 383:2016"],
-            ["Plastering Water", "Water:Cement ratio = 0.50", f"{tot_p_water_l:,.0f}", "Litres", "IS 456 Cl 5.4"],
-            ["Surface Primer", "Water-thinnable primer @ 8 m²/L (1 coat)", f"{tot_primer_l:.1f}", "Litres", "NBC 2016 SP7"],
-            ["Polymer Wall Putty", "2 coats (1–2 mm) @ 1.5 kg/m²", f"{tot_putty_kg:,.1f}", "kg", "NBC 2016 SP7"],
-            ["Interior Acrylic Emulsion", "2 coats (30–40 microns) @ 12 m²/L", f"{tot_em_int_l:.1f}", "Litres", "NBC 2016 SP7"],
-            ["Exterior Weather Emulsion", "2 coats (40–60 microns) @ 10 m²/L", f"{tot_em_ext_l:.1f}", "Litres", "NBC 2016 SP7"],
-            ["GRAND TOTAL CEMENT (Mortar + Plaster)", "All masonry + plastering works combined", f"{grand_cem_bags:,} bags ({grand_cem_kg:,.0f} kg)", "Bags", "IS 269:2015"],
-            ["GRAND TOTAL SAND (Mortar + Plaster)", "All masonry + plastering sand combined", f"{grand_sand_t:.2f}", "Tonnes", "IS 383:2016"],
-            ["GRAND TOTAL WATER (Mortar + Plaster)", "All masonry + plastering water combined", f"{grand_water_l:,.0f}", "Litres", "IS 456 Cl 5.4"],
+            ["Wall Plaster Area", "Int (12mm 1:6) + Ext (15mm 1:4)", f"{wall_p_area:.1f}", "m\u00b2", "IS 1200 Pt 12"],
+            ["Ceiling Soffit Plaster Area", "Soffit of slabs (6mm 1:3 mix)", f"{ceil_area:.1f}", "m\u00b2", "IS 1661:1972"],
+            ["Total Plaster Surface Area", "Combined wall + ceiling surface", f"{tot_p_area:.1f}", "m\u00b2", "IS 1200 Pt 12"],
+            ["Plastering Cement", "Combined wall & ceiling plaster", f"{tot_p_cem_bags:,} ({tot_p_cem:,.0f} kg)", "Bags 50kg", "IS 1661/IS 2402"],
+            ["Plastering Sand", "Clean plaster sand (Zone III/IV)", f"{tot_p_sand:.2f}", "Tonnes", "IS 383:2016"],
+            ["Plastering Water", "W:C = 0.50", f"{tot_p_water:,.0f}", "Litres", "IS 456 Cl 5.4"],
+            ["Surface Primer", "1 coat @ 8 m\u00b2/L", f"{tot_primer:.1f}", "Litres", "NBC 2016 SP7"],
+            ["Polymer Wall Putty", "2 coats @ 1.5 kg/m\u00b2", f"{tot_putty:,.1f}", "kg", "NBC 2016 SP7"],
+            ["Interior Acrylic Emulsion", "2 coats @ 12 m\u00b2/L", f"{tot_em_int:.1f}", "Litres", "NBC 2016 SP7"],
+            ["Exterior Weather Emulsion", "2 coats @ 10 m\u00b2/L", f"{tot_em_ext:.1f}", "Litres", "NBC 2016 SP7"],
+            ["GRAND TOTAL CEMENT (Mortar+Plaster)", "All masonry + plastering combined", f"{gc_bags:,} bags ({gc_kg:,.0f} kg)", "Bags", "IS 269:2015"],
+            ["GRAND TOTAL SAND (Mortar+Plaster)", "All masonry + plastering sand", f"{gs_t:.2f}", "Tonnes", "IS 383:2016"],
+            ["GRAND TOTAL WATER (Mortar+Plaster)", "All masonry + plastering water", f"{gw_l:,.0f}", "Litres", "IS 456 Cl 5.4"],
         ]
-
-        t = Table(summary_rows, repeatRows=1, colWidths=[135, 140, 95, 55, 70])
+        t = Table(rows, repeatRows=1, colWidths=[135, 140, 95, 55, 70])
         t.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.darkslategray),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
@@ -469,52 +451,60 @@ class ReportGenerator:
             ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
             ('FONTSIZE', (0, 0), (-1, -1), 6.5),
             ('BACKGROUND', (0, -3), (-1, -1), colors.lightyellow),
-            ('FONTWEIGHT', (0, -3), (-1, -1), 'BOLD'),
+            ('FONTNAME', (0, -3), (-1, -1), 'Helvetica-Bold'),
         ]))
         return t
 
     @staticmethod
-    def _create_masonry_cost_table(wb: Any, num_stories: int = 1, grid_mgr: Optional[GridManager] = None) -> Table:
-        """Create masonry, plaster and finishes trade cost estimate table."""
+    def _create_masonry_cost_table(wb, num_stories=1, grid_mgr=None):
+        """Trade-wise cost estimate — CPWD DSR 2023 rates."""
+        from reportlab.platypus import Table, TableStyle
+        from reportlab.lib import colors
         if not wb or not getattr(wb, 'wall_sections', None):
-            t = Table([["Trade", "Quantity", "Rate", "Subtotal"], ["N/A", "-", "-", "-"]], colWidths=[155, 110, 100, 130])
+            t = Table([["Trade", "Quantity", "Rate", "Subtotal"], ["N/A", "-", "-", "-"]],
+                      colWidths=[155, 110, 100, 130])
             return t
 
-        tot_bricks = sum(s.num_bricks for s in wb.wall_sections) * num_stories
-        tot_m_cem_kg = sum(s.mortar_cement_kg for s in wb.wall_sections) * num_stories
-        tot_m_cem_bags = int(math.ceil(tot_m_cem_kg / 50.0))
-        tot_m_sand_t = sum(s.mortar_sand_tonnes for s in wb.wall_sections) * num_stories
+        ns = int(getattr(wb, 'num_stories', num_stories) or num_stories)
+        tot_bricks      = wb.total_bricks
+        tot_m_cem_bags  = wb.total_mortar_cement_bags
+        tot_m_sand_t    = wb.total_mortar_sand_tonnes
 
-        wall_p_area = sum(s.plaster_area_m2 for s in wb.wall_sections) * num_stories
+        wall_p_area = 0.0
+        for sec in wb.wall_sections:
+            one = sec.length_m * sec.clear_height_m
+            wall_p_area += (one * 2.0) * ns  # both faces always
+
         ceil_area = 0.0
-        if grid_mgr and hasattr(grid_mgr, 'width_m') and hasattr(grid_mgr, 'length_m'):
-            ceil_area = float(getattr(grid_mgr, 'width_m', 0.0) or 0.0) * float(getattr(grid_mgr, 'length_m', 0.0) or 0.0) * num_stories
+        if grid_mgr:
+            wm = float(getattr(grid_mgr, 'width_m', 0.0) or 0.0)
+            lm = float(getattr(grid_mgr, 'length_m', 0.0) or 0.0)
+            ceil_area = wm * lm * ns
         tot_p_area = wall_p_area + ceil_area
 
-        rate_brick = 9.0
-        rate_cem = 380.0
-        rate_sand = 1500.0
-        rate_plast = 280.0
-        rate_paint = 120.0
+        R_BRICK = 9.0; R_CEM = 380.0; R_SAND = 1500.0; R_PLAST = 280.0; R_PAINT = 120.0
+        c_bricks  = tot_bricks * R_BRICK
+        c_cem     = tot_m_cem_bags * R_CEM
+        c_sand    = tot_m_sand_t * R_SAND
+        c_plaster = tot_p_area * R_PLAST
+        c_paint   = tot_p_area * R_PAINT
+        total     = c_bricks + c_cem + c_sand + c_plaster + c_paint
 
-        c_bricks = tot_bricks * rate_brick
-        c_m_cem = tot_m_cem_bags * rate_cem
-        c_m_sand = tot_m_sand_t * rate_sand
-        c_plaster = tot_p_area * rate_plast
-        c_paint = tot_p_area * rate_paint
-        tot_mas_cost = c_bricks + c_m_cem + c_m_sand + c_plaster + c_paint
-
-        cost_rows = [
+        rows = [
             ["Trade / Material Component", "Quantity", "Rate (INR)", "Subtotal (INR)"],
-            ["Clay Modular Bricks (IS 1077)", f"{tot_bricks:,} Nos", f"₹{rate_brick:.0f} / brick", f"₹{c_bricks:,.2f}"],
-            ["Brickwork Mortar Cement", f"{tot_m_cem_bags:,} Bags", f"₹{rate_cem:.0f} / bag", f"₹{c_m_cem:,.2f}"],
-            ["Brickwork Mortar Sand", f"{tot_m_sand_t:.2f} Tonnes", f"₹{rate_sand:,.0f} / Tonne", f"₹{c_m_sand:,.2f}"],
-            ["Plastering Work (12/15/6mm)", f"{tot_p_area:.1f} m²", f"₹{rate_plast:.0f} / m²", f"₹{c_plaster:,.2f}"],
-            ["Surface Finishes (Primer + Putty + Paint)", f"{tot_p_area:.1f} m²", f"₹{rate_paint:.0f} / m²", f"₹{c_paint:,.2f}"],
-            ["TOTAL MASONRY, PLASTER & FINISHES", "", "", f"₹{tot_mas_cost:,.2f}"]
+            ["Clay Modular Bricks (IS 1077)", f"{tot_bricks:,} Nos",
+             f"\u20b9{R_BRICK:.0f} / brick", f"\u20b9{c_bricks:,.2f}"],
+            ["Brickwork Mortar Cement", f"{tot_m_cem_bags:,} Bags",
+             f"\u20b9{R_CEM:.0f} / bag", f"\u20b9{c_cem:,.2f}"],
+            ["Brickwork Mortar Sand", f"{tot_m_sand_t:.2f} Tonnes",
+             f"\u20b9{R_SAND:,.0f} / Tonne", f"\u20b9{c_sand:,.2f}"],
+            ["Plastering Work (12/15/6mm)", f"{tot_p_area:.1f} m\u00b2",
+             f"\u20b9{R_PLAST:.0f} / m\u00b2", f"\u20b9{c_plaster:,.2f}"],
+            ["Surface Finishes (Primer+Putty+Paint)", f"{tot_p_area:.1f} m\u00b2",
+             f"\u20b9{R_PAINT:.0f} / m\u00b2", f"\u20b9{c_paint:,.2f}"],
+            ["TOTAL MASONRY, PLASTER & FINISHES", "", "", f"\u20b9{total:,.2f}"],
         ]
-
-        t = Table(cost_rows, colWidths=[155, 110, 100, 130])
+        t = Table(rows, colWidths=[155, 110, 100, 130])
         t.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (-1, 0), colors.saddlebrown),
             ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
@@ -523,7 +513,7 @@ class ReportGenerator:
             ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
             ('FONTSIZE', (0, 0), (-1, -1), 7.5),
             ('BACKGROUND', (0, -1), (-1, -1), colors.lightyellow),
-            ('FONTWEIGHT', (0, -1), (-1, -1), 'BOLD'),
+            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
         ]))
         return t
 
@@ -547,6 +537,7 @@ class ReportGenerator:
             floor_height_m=story_h,
             slab_thickness_mm=125.0,
             beam_depth_mm=400.0,
+            columns=getattr(grid_mgr, 'columns', []),
         )
 
         doc = SimpleDocTemplate(filename, pagesize=A4, leftMargin=36, rightMargin=36, topMargin=36, bottomMargin=36)
@@ -1262,6 +1253,7 @@ class ReportGenerator:
             floor_height_m=story_h,
             slab_thickness_mm=125.0,
             beam_depth_mm=400.0,
+            columns=getattr(grid_mgr, 'columns', []),
         )
 
         tot_b = getattr(bom, 'total_bricks', getattr(bom, 'brick_count', 0))
@@ -1374,6 +1366,7 @@ class ReportGenerator:
             floor_height_m=story_h,
             slab_thickness_mm=125.0,
             beam_depth_mm=400.0,
+            columns=getattr(grid_mgr, 'columns', []),
         )
         
         doc = SimpleDocTemplate(filename, pagesize=A4, leftMargin=36, rightMargin=36, topMargin=36, bottomMargin=36)
@@ -1581,6 +1574,7 @@ class ReportGenerator:
             floor_height_m=story_h,
             slab_thickness_mm=125.0,
             beam_depth_mm=400.0,
+            columns=getattr(grid_mgr, 'columns', []),
         )
         
         doc = SimpleDocTemplate(filename, pagesize=A4, leftMargin=36, rightMargin=36, topMargin=36, bottomMargin=36)
@@ -1698,6 +1692,7 @@ class ReportGenerator:
             floor_height_m=story_h,
             slab_thickness_mm=125.0,
             beam_depth_mm=400.0,
+            columns=getattr(grid_mgr, 'columns', []),
         )
         
         doc = SimpleDocTemplate(filename, pagesize=A4, leftMargin=36, rightMargin=36, topMargin=36, bottomMargin=36)

@@ -309,6 +309,7 @@ class WallCalculator:
         floor_height_m: float = 3.5,
         slab_thickness_mm: float = 125.0,
         beam_depth_mm: float = 400.0,
+        columns: list = None,
     ) -> WallBOM:
         """Calculate wall quantities for the entire building.
 
@@ -318,6 +319,7 @@ class WallCalculator:
             floor_height_m: Story height.
             slab_thickness_mm: Slab thickness.
             beam_depth_mm: Beam depth.
+            columns: Optional list of Column objects for nearest column span detection.
 
         Returns:
             WallBOM with per-section and aggregated quantities.
@@ -338,10 +340,43 @@ class WallCalculator:
             col_start_id = getattr(w, 'col_start_id', "")
             col_end_id = getattr(w, 'col_end_id', "")
 
+            # If column IDs are missing, auto-detect nearest columns from coordinates
+            if (not col_start_id or not col_end_id) and columns:
+                sx = getattr(w, 'start_x', None)
+                sy = getattr(w, 'start_y', None)
+                ex = getattr(w, 'end_x', None)
+                ey = getattr(w, 'end_y', None)
+                if sx is not None and sy is not None and ex is not None and ey is not None:
+                    best_s, best_s_d = None, 2.0
+                    best_e, best_e_d = None, 2.0
+                    for c in columns:
+                        if getattr(c, 'level', 0) != 0:
+                            continue
+                        cx = getattr(c, 'x', None)
+                        cy = getattr(c, 'y', None)
+                        if cx is not None and cy is not None:
+                            ds = math.hypot(cx - sx, cy - sy)
+                            if ds < best_s_d:
+                                best_s_d = ds
+                                best_s = c.id
+                            de = math.hypot(cx - ex, cy - ey)
+                            if de < best_e_d:
+                                best_e_d = de
+                                best_e = c.id
+                    if not col_start_id and best_s:
+                        col_start_id = best_s
+                    if not col_end_id and best_e:
+                        col_end_id = best_e
+
+            w_h = getattr(w, 'height_m', None)
+            eff_h = clear_height
+            if w_h and w_h > 0.5:
+                eff_h = min(w_h, clear_height) if w_h > clear_height else w_h
+
             sec = self.calculate_wall_section(
                 wall_id=w.id,
                 length_m=length,
-                clear_height_m=clear_height,
+                clear_height_m=eff_h,
                 core_thickness_m=core_t,
                 is_exterior=is_ext,
                 col_start=col_start_id,

@@ -46,6 +46,9 @@ if not gm or not all_beams:
     st.error("Missing critical engineering data. Please re-run the analysis.")
     st.stop()
 
+# Ensure walls are present on grid manager for all schedules and takeoff reports
+ReportGenerator._ensure_walls(gm)
+
 st.markdown("### 📦 Export Package")
 
 # Note: GridManager is a strict Pydantic model — don't set arbitrary attributes on it.
@@ -224,8 +227,8 @@ with col5:
             reporter.generate_schedule_report(tmp.name, gm, footings=footings, project_name=project_name)
         with open(tmp.name, "rb") as f:
             st.download_button("📋 Schedules Report", f.read(), "Design_and_Finishes_Schedules.pdf", "application/pdf", key="dl_schedules_report")
-    except Exception:
-        pass
+    except Exception as e:
+        st.error(f"Error generating Schedules Report: {e}")
 
 with col6:
     try:
@@ -233,8 +236,8 @@ with col6:
             reporter.generate_masonry_report(tmp.name, gm, project_name=project_name)
         with open(tmp.name, "rb") as f:
             st.download_button("🧱 Masonry BOQ", f.read(), "Masonry_Plaster_Paint_Takeoff.pdf", "application/pdf", key="dl_masonry_boq")
-    except Exception:
-        pass
+    except Exception as e:
+        st.error(f"Error generating Masonry BOQ: {e}")
 
 
 st.markdown("---")
