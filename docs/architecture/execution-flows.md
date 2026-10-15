@@ -1,6 +1,6 @@
 # Execution Flows
 
-**As of:** 2026-10-15. References are `file::symbol`.
+**As of:** 2026-10-16. References are `file::symbol`.
 
 ## 1. Streamlit dashboard (`app.py`)
 
@@ -11,7 +11,7 @@ sequenceDiagram
   participant G as _acquire_geometry
   participant P as design_pipeline.run_design
   participant S as st.session_state
-  U->>A: accept disclaimer, press Run Analysis
+  U->>A: enter SBC, confirm site parameters, accept disclaimer, press Run Analysis
   A->>G: input mode (Manual / DXF / IFC)
   G-->>A: GridManager + plan beams (+ loader warnings)
   A->>P: DesignInputs(from sidebar)
@@ -23,6 +23,10 @@ sequenceDiagram
   A->>P: re-run with stored beams
 ```
 
+- **Run Analysis** is disabled until the SBC is entered (no default), the site-parameter confirmation
+  (`site_params_checkbox`) and the disclaimer are ticked (2026-10-16, N18).
+- The status banner reads "PASS for the implemented checks only — NOT VERIFIED" for PASS and is followed by an
+  expander listing `DesignResults.checks_not_performed` (N17).
 - The design runs only when **Run Analysis** is pressed, when no results exist,
   or after a column-editor change (`needs_redesign`). Sidebar changes without
   pressing the button keep the cached results (by design).
@@ -44,11 +48,15 @@ sequenceDiagram
    3. wind storey forces (`wind_load.calculate_wind_load`) if a wind zone is given;
    4. `analysis_integration.update_structural_analysis` → envelopes on beams, combination forces on columns;
    5. `detail_beams` (depth grows while FAIL / ρ > 2.5 %), `detail_columns` (all combinations);
-   6. failing column stacks grow to the next preferred size; stop when nothing changed.
+   6. failing column stacks grow to the next preferred size; if any EQ storey drift exceeds 0.004 h (from the
+      analysis just run) **every** column stack grows one preferred size (D-16); stop when nothing changed.
    If not converged, a final consistent analysis + design pass is run and a message is added.
 6. Slabs (`detail_slabs`), staircase (optional), footings (service load + plinth walls; factored = worst level-0 combination + 1.5 × plinth; base moment for an eccentricity warning), footing overlap warnings.
 7. Per-level beam copies (`B_x_L{i}`), joint/SCWB/ductility (`seismic.evaluate_joint_checks`), BBS, BOM, masonry, audit, stability, safety warnings.
-8. Status aggregation → `DesignResults.status`, `failures`, `messages`.
+8. Status aggregation → `DesignResults.status`, `failures`, `messages`. Added 2026-10-16: storey-drift rows
+   (`drift_checks` → `DesignResults.drift_results`; EQ over limit FAIL, wind top sway over H/500 WARN, missing EQ
+   drift WARN), one-direction columns WARN (N19), "Wind not considered" WARN when `wind_zone is None` (N18).
+   Footing base moments are un-factored by each combination's own largest factor (N20).
 
 ## 3. CLI (`main.py::main`)
 
@@ -92,13 +100,30 @@ design result (cached in session state), shows the selected sheet as a pan/zoom 
 the selected sheet as DXF and a ZIP (PDF + DXF + SVG per sheet). Nothing is written to disk. Marks come from
 `compute_marks` and are also shown in the Schedules page tables.
 
+## 6b. 3D viewer (Drawings page, "3D View" tab)
+
+`viewer_model.build_scene(res.gm, res.beams, res.footings)` → JSON boxes (columns per segment, beams and slabs per
+floor, walls per storey, footings) with mark, size, bars, status → `viewer_html(scene)` inlines
+`components/viewer3d/dist/viewer.js` and the scene → `components.html`. Cached per design result. The older GLB
+view (`geometry_exporter`) is behind a checkbox. Nothing is written to disk.
+
+## 6c. Site Tools (`pages/5_🔧_Site_Tools.py`)
+
+BBS tab: `project_bbs` tables and `site_calculators.optimise_cutting` over every BBS entry. Calculators: approved mix
+stored in `st.session_state['approved_mix']` (used by the dashboard, pour planner and PDF report section 20), cube
+register, pour planner, formwork from the model. BIM & Handover: `documentation.calculation_summary(res)`, COBie
+from the design, QR tags (`site_monitoring.member_info` → `qr_text` → `qr_png`), inspection checklist CSV and
+defect log (`st.session_state['defect_log']`), uploaded accelerometer / strain CSVs, as-built survey CSV.
+
 ## 7. Failure / degraded paths inside analysis
 
 | Situation | Behaviour | Where reported |
 |---|---|---|
 | Frame unstable / ill-conditioned (cond > 1e12) | Frame skipped; its beams get simply supported factored moments on both faces (`FALLBACK_<status>`) | `AnalysisSummary.failed_frames` → status FAIL; beam WARN |
 | Beam not on a grid line | Simply supported fallback (`FALLBACK_NOT_IN_FRAME`) | message, beam WARN |
-| Column not on a frame line | Gravity axial + minimum eccentricity only | message |
+| Column not on a frame line | Gravity axial + minimum eccentricity only | message, column WARN |
+| Column on a frame line in one direction only | No frame moments about the other axis | `AnalysisSummary.columns_one_plane` → failures WARN |
+| EQ storey drift > 0.004 h | Column stacks grow; FAIL if still exceeded | `drift_results`, failures FAIL |
 | Section cannot pass at max size / 4 % steel | Member FAIL with warning | failures list |
 | Non-convergence | Last results shown with message | status at least WARN |
 | ESA not permitted (irregular, or height limit) | `Seismic method` FAIL | failures list |

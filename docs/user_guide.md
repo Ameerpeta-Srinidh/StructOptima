@@ -1,4 +1,4 @@
-> **Status (2026-10-15): legacy document**, written before the 2026-10 remediation (design status banner, structural system / soil / importance inputs, PRELIMINARY reports). See [architecture/execution-flows.md](architecture/execution-flows.md) and [engineering/limitations.md](engineering/limitations.md).
+> **Superseded 2026-10-16 by [user-guide.md](user-guide.md).** **Status (2026-10-15): legacy document**, written before the 2026-10 remediation (design status banner, structural system / soil / importance inputs, PRELIMINARY reports). See [architecture/execution-flows.md](architecture/execution-flows.md) and [engineering/limitations.md](engineering/limitations.md).
 
 # User Guide
 

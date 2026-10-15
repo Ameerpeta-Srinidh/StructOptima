@@ -10,9 +10,12 @@ Production = reachable from `app.py`/`pages/` or `main.py` through imports **and
 | `app.py` | Yes | Streamlit main page | Rewritten 2026-10 to call `run_design` |
 | `pages/1_📊_Analysis.py` | Yes | Streamlit page | Seismic/wind/stability/combinations/optimiser/failure screen |
 | `pages/2_📋_Schedules.py` | Yes | Streamlit page | Column / beam / slab schedules, math logs |
-| `pages/3_📐_Drawings.py` | Yes | Streamlit page | 3D/2D views, DXF export. **Writes DXF files to the current working directory on every render** (see [../development/troubleshooting.md](../development/troubleshooting.md)) |
+| `pages/3_📐_Drawings.py` | Yes | Streamlit page | A3 drawing set (PDF/DXF/SVG/ZIP), IFC4 download, 3D viewer / walk-through, 2D plan, interactive CAD. DXF exports go to a temporary directory (N10, fixed 2026-10-15) |
 | `pages/4_📄_Reports.py` | Yes | Streamlit page | PDF / Excel / BBS / ZIP downloads |
-| `pages/5_🔧_Site_Tools.py` | Yes | Streamlit page | BBS utilities, inspection, SHM, COBie |
+| `pages/5_🔧_Site_Tools.py` | Yes | Streamlit page | BBS + cutting plan, approved-mix calculators, cube register, checklists, calculation summary, COBie, QR tags, inspection / defect log, measured vibration & strain, as-built survey (rewritten 2026-10-16; nothing simulated) |
+| `components/viewer3d/` | Yes | JS source + committed bundle | `src/main.js` (three.js viewer), `dist/viewer.js` (built by `npm run build`, committed), `package.json` / `package-lock.json`; `node_modules/` ignored |
+| `CHANGELOG.md` | Yes | Docs | Every 2026-10 change, why, tests run, open items |
+| `docs/user-guide.md` | Yes | Docs | Current user guide (supersedes `docs/user_guide.md`) |
 | `main.py` | Yes | CLI | `python main.py --help` |
 
 ## Source package `src/` (all tracked)

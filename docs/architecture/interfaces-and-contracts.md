@@ -23,7 +23,7 @@ envelopes). No files are written.
 
 `DesignInputs` (defaults): `num_stories=2`, `story_height_m=3.5`,
 `building_type_name="Residential"`, `wall_load_kn_m=12` (only without walls),
-`sbc_kn_m2=200`, `conc_grade="M25"`, `fy=415`, `seismic_zone="III"`,
+`sbc_kn_m2=200` (library default only — the dashboard requires the user to enter it), `conc_grade="M25"`, `fy=415`, `seismic_zone="III"`,
 `soil_type="II"`, `structural_system="OMRF"`, `importance_factor=None` (occupancy
 default), `wind_zone=None` (no wind), `terrain_category=None` (category 2),
 `wind_opening_percentage=10`, `use_cracked_sections=True`, `fixed_base=True`,
@@ -32,12 +32,23 @@ default), `wind_zone=None` (no wind), `terrain_category=None` (category 2),
 
 `DesignResults.status`: worst of the `failures` statuses; at least `WARN` if not converged.
 
+Added 2026-10-16:
+- `DesignResults.status_label` — display text; PASS is shown as "PASS (implemented checks only) - NOT VERIFIED".
+- `DesignResults.verification` = `"NOT_VERIFIED"`; `DesignResults.checks_not_performed` = list of checks the tool
+  does not do (`design_pipeline.CHECKS_NOT_PERFORMED`). Every screen / report showing the status must show both.
+- `DesignResults.drift_results` — list of dicts `Check, Case, Direction, Storey, Column, Drift (mm), Height (mm),
+  Ratio, Limit, Status` (`PASS` / `FAIL` / `WARN` / `INFO`). Built by `design_pipeline.drift_checks(storey_drift,
+  top_displacement, total_height_m)`; limits `EQ_DRIFT_LIMIT = 0.004`, `WIND_TOP_SWAY_LIMIT = 1/500` (UNVERIFIED).
+
 ## Analysis
 
 `update_structural_analysis(gm, beams, fck, use_cracked_sections, fixed_base, lateral) -> AnalysisSummary`
 - Reads `gm` service intensities (falls back to residential defaults with a message).
 - `lateral`: `LateralLoads(eq_x, eq_y, wl_x, wl_y)` whole-building storey forces at levels 1..N (kN).
 - Writes beam envelopes and column `design_forces`; resets previous values first.
+- `AnalysisSummary` additions (2026-10-16): `storey_drift[case][level] = (drift m, storey height m, column id)` for
+  EQX/EQY/WLX/WLY (largest ratio over all columns and frames), `top_displacement[case] = (m, column id)`,
+  `columns_one_plane[column id] = missing plane ("XZ"/"YZ")`.
 
 `FrameSolver2D` contract: gravity UDL positive = global −Y; `solve_cases` returns
 `{}` and sets `status` to `UNSTABLE` / `SINGULAR` / `EMPTY` when the model cannot

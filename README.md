@@ -180,6 +180,9 @@ engineering correctness. Evidence per calculation:
 
 Start at **[docs/README.md](docs/README.md)** (index, reading order, coverage matrix).
 
+- How to use the app on site: **[docs/user-guide.md](docs/user-guide.md)**
+- Every change and why: **[CHANGELOG.md](CHANGELOG.md)**
+
 | Area | Documents |
 |---|---|
 | Architecture | [system overview](docs/architecture/system-overview.md), [execution flows](docs/architecture/execution-flows.md), [module catalogue](docs/architecture/module-catalogue.md), [interfaces](docs/architecture/interfaces-and-contracts.md) |

@@ -46,7 +46,9 @@ analysis envelope (factored): `mu_sagging_knm`, `mu_hogging_knm`, `vu_kn`,
 | `Footing` | `foundation_eng.py` | size, thickness, `status`, flags (`punching_ok`, `bending_ok`, `one_way_shear_ok`, `bearing_ok`), loads, pressure, `ast_per_m_mm2`, `rebar_desc`, `steel_weight_kg`, `warnings` |
 | `SeismicAnalysisResult` (dataclass) | `seismic.py` | parameters (Z, I, R, Ta, Ah), `base_shear_kn`, storey weights/heights/forces, regularity checks, `analysis_method_check`, `scwb_details`, `joint_details`, `ductile_checks`, `ductile_verification` |
 | `WindLoadResult` (dataclass) | `wind_load.py` | pressures per level, `storey_forces_x/y_kn`, base shears, overturning moments, warnings |
-| `AnalysisSummary` (dataclass) | `analysis_integration.py` | frames solved / total, failed frames, combinations, messages, members outside frames |
+| `AnalysisSummary` (dataclass) | `analysis_integration.py` | frames solved / total, failed frames, combinations, messages, members outside frames, storey drift / top displacement per lateral case, one-direction columns |
+| `DefectRecord` (dataclass) | `site_inspection.py` | member, observed defect, location, width / length, inspector, date, notes, optional lat/lon, review status |
+| Viewer scene (dict) | `viewer_model.build_scene` | `storeys` (name, z0, z1), `bbox`, `items` (kind, id, storey, centre `c`, size `s` in m, `yaw`, status, props) |
 | `DesignInputs` / `DesignResults` (dataclasses) | `design_pipeline.py` | See [interfaces-and-contracts.md](interfaces-and-contracts.md) |
 | `MaterialCost` | `quantifier.py` | Volumes, steel by diameter (incl. 4 % wastage), costs, carbon, masonry quantities |
 | `AuditResult` | `audit.py` | `member_id`, `check_name`, `design_value`, `limit_value`, `status`, `notes` |
@@ -59,5 +61,7 @@ analysis envelope (factored): `mu_sagging_knm`, `mu_hogging_knm`, `vu_kn`,
 `num_stories`, `story_height`, …) plus `design_results`, `design_status`,
 `design_failures`, `design_messages`, `analysis_summary`, `fy`, `soil_type`,
 `structural_system`, `cad_warnings`, `needs_redesign`, `geometry_beams`.
+Added 2026-10-16: `approved_mix` (user's batch weights per m³), `defect_log` (list of `DefectRecord`),
+`_viewer_html` / `_viewer_key` (3D viewer cache), `_drawing_set` / `_ifc_bytes` (Drawings page caches).
 Note: `live_load` now holds the **floor live load** (kN/m²); before 2026-10 it
 held total floor load including slab self-weight.
