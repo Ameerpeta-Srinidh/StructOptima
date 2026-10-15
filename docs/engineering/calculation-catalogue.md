@@ -33,7 +33,7 @@ Columns per entry: **Where** (file::symbol) · **Production?** · **Formula** ·
 
 ### CAL-LOD-01 Occupancy intensities
 - **Where:** `building_types.py` (`RESIDENTIAL` …), `design_pipeline.run_design`. Production.
-- **Formula:** floor DL = 25·t_slab + finish + partition + services; floor LL = `live_load_floor_kn_m2`; roof DL = 25·t + finish + services; roof LL = `live_load_roof_kn_m2`; stair LL = `live_load_corridor_kn_m2`.
+- **Formula:** floor DL = 25·t_slab + finish + partition + services; floor LL = `live_load_floor_kn_m2`; roof DL = 25·t + finish + services; roof LL = `live_load_roof_kn_m2`; stair LL = `live_load_corridor_kn_m2`. t_slab here is the occupancy slab; panels designed thicker (CAL-SLB-01) add 25·(t_designed − t_slab) per panel via `GridManager.panel_extra_dead_kn_m2` (N13 fix, 2026-10-16).
 - **Values (Residential):** LL 2.0, roof 1.5, corridor 3.0, finish 1.0, partitions 1.5, services 0.5 kN/m², t = 125 mm.
 - **Std:** IS 875 (Part 1, 2) cited — values **UNVERIFIED**.
 
@@ -44,19 +44,19 @@ Columns per entry: **Where** (file::symbol) · **Production?** · **Formula** ·
 
 ### CAL-LOD-03 Column load takedown (service)
 - **Where:** `GridManager.calculate_loads`. Production.
-- **Formula per column segment (top-down, cumulative):** DL = A_trib·q_DL(roof/floor) + cantilever slab share + wall share (+ roof parapet = 0.33 × storey wall) + framing beam webs (½ each beam: b·(D−t)·25·L) + column self-weight b·D·h·25 + stair DL; LL = A_trib·q_LL + cantilever + stair LL. `load_kn = DL + LL`. Ground-storey walls → `plinth_load_kn` (to footing). Without walls: `wall_load_kn_m` × half spans.
+- **Formula per column segment (top-down, cumulative):** DL = A_trib·q_DL(roof/floor) + Σ(quarter-panel area × panel extra dead load) + cantilever slab share + wall share (+ roof parapet = 0.33 × storey wall) + framing beam webs (½ each beam: b·(D−t)·25·L) + column self-weight b·D·h·25 + stair DL; LL = A_trib·q_LL + cantilever + stair LL. `load_kn = DL + LL`. Ground-storey walls → `plinth_load_kn` (to footing). Without walls: `wall_load_kn_m` × half spans.
 - **Assumptions:** walls lumped half to the nearest column at each end; same wall layout every storey; column sizes from the previous iteration.
 - **Tests:** `test_audit_findings.py::test_R19_takedown_includes_beam_self_weight_and_roof_loads`. **Status:** UNVERIFIED (logic tested, magnitudes not benchmarked against an independent takedown).
 
 ### CAL-LOD-04 Beam gravity loads from slab panels
 - **Where:** `analysis_integration.py::beam_slab_coefficients`, `beam_case_loads`. Production.
-- **Formula:** beam UDL = k·q + wall + b·(D−t)·25. Two-way panel (ly/lx ≤ 2): k = lx/3 (short-edge beam), k = (lx/6)(3 − (lx/ly)²) (long-edge beam); one-way: k = lx/2 on long edges, 0 on short edges; cantilever beams: k = half adjacent grid spacing each side. Contributions of panels either side are summed; a beam spanning several sides takes the maximum.
+- **Formula:** beam UDL = k·q + Σ(k·panel extra dead load) + wall + b·(D−t)·25. Two-way panel (ly/lx ≤ 2): k = lx/3 (short-edge beam), k = (lx/6)(3 − (lx/ly)²) (long-edge beam); one-way: k = lx/2 on long edges, 0 on short edges; cantilever beams: k = half adjacent grid spacing each side. Contributions of panels either side are summed; a beam spanning several sides takes the maximum.
 - **Assumptions:** moment-equivalent UDLs (over-estimate end shear — conservative); walls assigned to the collinear beam or nearest parallel beam within 3 m.
 - **Tests:** `test_R2_beam_moments_are_factored_combinations` (statics of a single bay), `test_R3_...`. **Status:** VERIFIED_FOR_CASES (single square bay; manual hand check 2026-10-15 of an 18×12 m edge beam: 21.21 kN/m reproduced).
 
 ### CAL-LOD-05 Seismic weight
 - **Where:** `design_pipeline.py::storey_seismic_weights`. Production.
-- **Formula (level j):** W_j = A_slab·q_DL + Σ beam webs + ½ walls below + ½ walls above (roof: 0.33 × walls) + ½ columns below + ½ columns above + A_slab·q_LL·f (f = 0.25 if q_LL ≤ 3, else 0.5; f = 0 at roof).
+- **Formula (level j):** W_j = A_slab·q_DL + Σ(panel area × panel extra dead load) + Σ beam webs + ½ walls below + ½ walls above (roof: 0.33 × walls) + ½ columns below + ½ columns above + A_slab·q_LL·f (f = 0.25 if q_LL ≤ 3, else 0.5; f = 0 at roof).
 - **Std:** IS 1893 (Part 1):2016 Table 10 cited for f — **UNVERIFIED**.
 - **Tests:** `test_R7_seismic_weight_includes_masonry`. **Status:** UNVERIFIED.
 
@@ -146,7 +146,7 @@ Columns per entry: **Where** (file::symbol) · **Production?** · **Formula** ·
 
 ### CAL-SLB-01/02 Slabs
 - **Where:** `GridManager.detail_slabs`, `RebarDetailer.detail_slab`. Production.
-- **Thickness:** t = max(⌈(lx/26 + 30)/5⌉·5, 125, occupancy slab thickness).
+- **Thickness:** t = max(⌈(lx/26 + 30)/5⌉·5, 125, occupancy slab thickness) — single rule `GridManager.panel_slab_thickness_mm`, also used for dead loads (N13).
 - **Moments:** two-way: Table 26 case from (discontinuous short edges, discontinuous long edges), coefficients interpolated on ly/lx ∈ [1, 2]; Mx = αx·w·lx², My = αy·w·lx²; one-way (ly/lx > 2): wlx²/8 for span and support. w = 1.5(25t + SDL + LL).
 - **Steel:** Ast from CAL-SEC-02, ≥ 0.12 % bD, bars 8/10/12 with spacing ≥ 100 mm and ≤ min(3d, 300) (distribution ≤ min(5d, 450)); FAIL if moment > Mu,lim or spacing impossible; WARN if lx/d > basic ratio.
 - **Tests:** `test_R20_*`. **Status:** UNVERIFIED (Table 26 values transcribed, D-05); corner torsion steel not detailed.

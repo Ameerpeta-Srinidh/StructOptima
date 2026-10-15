@@ -108,6 +108,9 @@ def storey_seismic_weights(gm: GridManager, beams, ll_factor_fn) -> Tuple[List[f
     panels = gm.slab_panels()
     area = sum((p["x1"] - p["x0"]) * (p["y1"] - p["y0"]) for p in panels) or gm.width_m * gm.length_m
     t = gm.slab_thickness_mm / 1000.0
+    # N13: extra dead load of panels designed thicker than the occupancy slab
+    pex = gm.panel_extra_dead_kn_m2()
+    extra_w = sum((p["x1"] - p["x0"]) * (p["y1"] - p["y0"]) * pex.get((p["i"], p["j"]), 0.0) for p in panels)
     beam_w = sum(b.properties.width_mm / 1000.0 * max(b.properties.depth_mm / 1000.0 - t, 0.0) * 25.0 *
                  math.hypot(b.end_point.x - b.start_point.x, b.end_point.y - b.start_point.y)
                  for b in beams if b.end_point is not None)
@@ -117,7 +120,7 @@ def storey_seismic_weights(gm: GridManager, beams, ll_factor_fn) -> Tuple[List[f
     weights, heights = [], []
     for j in range(1, N + 1):
         roof = j == N
-        w = area * (gm.roof_dead_kn_m2 if roof else gm.dead_load_kn_m2) + beam_w
+        w = area * (gm.roof_dead_kn_m2 if roof else gm.dead_load_kn_m2) + extra_w + beam_w
         w += 0.5 * wall_storey + (0.33 * wall_storey if roof else 0.5 * wall_storey)
         w += 0.5 * col_storey.get(j - 1, 0.0) + (0.0 if roof else 0.5 * col_storey.get(j, 0.0))
         if not roof:

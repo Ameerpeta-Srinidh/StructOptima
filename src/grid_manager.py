@@ -477,6 +477,7 @@ class GridManager(BaseModel):
 
         wall_load_map = self._wall_load_map()
         beam_sw_map = self._beam_self_weight_map(beams)
+        panel_extra = self.panel_extra_dead_kn_m2()   # N13: designed slab thickness
         sorted_x = sorted(self.x_grid_lines)
         sorted_y = sorted(self.y_grid_lines)
         t = self.slab_thickness_mm / 1000.0
@@ -503,6 +504,13 @@ class GridManager(BaseModel):
                 above = (sorted_y[y_idx + 1] - sorted_y[y_idx]) / 2.0 if y_idx is not None and y_idx < len(sorted_y) - 1 else 0.0
                 bl_x, bl_y = left + right, below + above
                 beam_len = bl_x + bl_y
+
+                # N13: extra dead load of panels designed thicker than the occupancy slab,
+                # from the quarter of each adjacent panel inside the tributary area
+                if panel_extra and x_idx is not None and y_idx is not None:
+                    for (ii, hx) in ((x_idx - 1, left), (x_idx, right)):
+                        for (jj, hy) in ((y_idx - 1, below), (y_idx, above)):
+                            dl += panel_extra.get((ii, jj), 0.0) * hx * hy
 
                 if self.cantilever_dirs and sorted_x and sorted_y:
                     is_left, is_right = abs(col.x - sorted_x[0]) < 0.1, abs(col.x - sorted_x[-1]) < 0.1
@@ -920,6 +928,21 @@ class GridManager(BaseModel):
             })
         return panels
 
+    def panel_slab_thickness_mm(self, panel: dict) -> float:
+        """Designed slab thickness for a panel (single rule, finding N13):
+        t = max(ceil((lx/26 + 30) / 5) x 5, 125, occupancy slab thickness) mm.
+        lx/26 is the basic span/effective-depth ratio, +30 mm for cover and
+        half a bar (project rule, unchanged)."""
+        d_min = panel["lx"] * 1000.0 / 26.0
+        return max(math.ceil((d_min + 30.0) / 5.0) * 5.0, 125.0, self.slab_thickness_mm)
+
+    def panel_extra_dead_kn_m2(self) -> dict:
+        """{(i, j): extra dead load kN/m2} = 25 x (designed - occupancy thickness).
+        The recorded dead-load intensities include the occupancy slab
+        (``slab_thickness_mm``); this adds the difference for thicker panels."""
+        return {(p["i"], p["j"]): 25.0 * (self.panel_slab_thickness_mm(p) - self.slab_thickness_mm) / 1000.0
+                for p in self.slab_panels()}
+
     def footprint_area_m2(self) -> float:
         """Plan area of all framed bays including voids (used for regularity screening)."""
         return sum((p["x1"] - p["x0"]) * (p["y1"] - p["y0"]) for p in self.slab_panels(include_voids=True))
@@ -1008,8 +1031,7 @@ class GridManager(BaseModel):
         count = 0
         for p in self.slab_panels():
             count += 1
-            d_min = p["lx"] * 1000.0 / 26.0
-            thk = max(math.ceil((d_min + 30.0) / 5.0) * 5.0, 125.0, self.slab_thickness_mm)
+            thk = self.panel_slab_thickness_mm(p)
             wu = 1.5 * (25.0 * thk / 1000.0 + sdl + ll)
             res = RebarDetailer.detail_slab(p["x1"] - p["x0"], p["y1"] - p["y0"], slab_thk_mm=thk, fck=fck, fy=fy,
                                            factored_load_kn_m2=wu, disc_short_edges=p["disc_short"],

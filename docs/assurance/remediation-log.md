@@ -31,6 +31,7 @@ Test evidence: [../verification/verification-results.md](../verification/verific
 | RM-23 | — | New single orchestration `run_design` used by app and CLI; CLI arguments for occupancy, zone, soil, system, wind, SBC, grade, fy | `design_pipeline.py` (new), `app.py`, `main.py` | `test_pipeline_e2e.py` |
 | RM-24 | — | Stale beam-depth tests aligned with the documented L/12 / L/10 rule | `tests/test_beam_placer.py` | — |
 | RM-25 | — | Performance: vectorised, memoised interaction curves | `section_design.py` | timing in verification results |
+| RM-26 | N13 (2026-10-16) | Single slab-thickness rule `GridManager.panel_slab_thickness_mm`; `panel_extra_dead_kn_m2` adds 25 × (t_designed − t_occupancy) per panel to the column takedown (quarter-panel areas), beam loads (k-weighted on the governing side) and storey seismic weights; slab design uses the same rule | `grid_manager.py`, `analysis_integration.py`, `design_pipeline.py` | `test_N13_dead_load_uses_designed_slab_thickness`; `test_R2_*` and `test_R15_*` expectations updated (R2 hand value now includes the extra; R15 allows capacity capped at xu,max) |
 
 ## Behaviour changes users will notice
 

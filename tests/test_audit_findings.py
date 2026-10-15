@@ -68,7 +68,8 @@ def test_R2_beam_moments_are_factored_combinations():
     b = beams[0]
     k = 4.0 / 3.0                                  # square panel: lx/3
     sw = 0.23 * (b.properties.depth_mm / 1000 - 0.125) * 25
-    w_dl = k * 5.0 + sw
+    extra = 25 * (0.185 - 0.125)                   # N13: 4 m panel designed 185 mm vs 125 mm occupancy slab
+    w_dl = k * (5.0 + extra) + sw
     w_ll = k * 3.0
     total_service = (w_dl + w_ll) * 4.0 ** 2 / 8.0
     # statics: (hog + sag) under the factored load must equal 1.5 x service wL^2/8 (1.5(DL+LL) governs)
@@ -291,7 +292,10 @@ def test_R15_scwb_uses_designed_beams(design_g1):
         r.ast_top_prov_mm2 *= 2
         r.ast_bottom_prov_mm2 *= 2
     after = evaluate_joint_checks(gm, design_g1.beams, 25, 415, sr)
-    assert all(d["Ratio"] < before[d["Joint"]] for d in after.scwb_details)
+    # beam capacity is capped at xu,max, so heavily reinforced beams may not gain capacity:
+    # no ratio may increase and at least one must decrease
+    assert all(d["Ratio"] <= before[d["Joint"]] for d in after.scwb_details)
+    assert any(d["Ratio"] < before[d["Joint"]] for d in after.scwb_details)
     for r in gm.beam_schedule.values():
         r.ast_top_prov_mm2 /= 2
         r.ast_bottom_prov_mm2 /= 2
@@ -440,3 +444,33 @@ def test_panels_exclude_l_shape_notch_and_keep_enclosed_bays():
     gm2.columns = [Column(id=f"C{i}", x=x, y=y) for i, (x, y) in enumerate([(0, 0), (8, 0), (0, 8), (8, 8)])]
     gm2.boundary_segments = [((0, 0), (8, 0)), ((8, 0), (8, 8)), ((8, 8), (0, 8)), ((0, 8), (0, 0))]
     assert gm2.footprint_area_m2() == pytest.approx(64.0)
+
+
+# ---------------------------------------------------------------- N13 -----
+def test_N13_dead_load_uses_designed_slab_thickness():
+    """Walkthrough building (8 x 8 m, 4 m panels): slabs are designed 185 mm
+    (lx/26 + 30), the occupancy slab is 125 mm. Hand reference: the extra
+    25 x (0.185 - 0.125) = 1.5 kN/m2 must reach beams, columns and seismic weight."""
+    gm, beams = _grid(stories=2, w=8, l=8)
+    res = run_design(gm, beams, DesignInputs(num_stories=2, seismic_zone="III"))
+    gm = res.gm
+    extra = 25 * (0.185 - 0.125)
+    assert all(s.thickness_mm == 185 for s in gm.slab_schedule.values())
+    # interior beam B_H_3: k = 2 x 4/3 (two square panels)
+    b = next(x for x in res.beams if x.id == "B_H_3")
+    web = b.properties.width_mm / 1000 * (b.properties.depth_mm / 1000 - 0.125) * 25
+    k = 8 / 3
+    assert b.service_udl_kn_m == pytest.approx(k * (6.125 + extra) + web + k * 2.0, rel=1e-6)
+    # interior column C5 at the base: 16 m2 x extra on each of 2 floors more than the 125 mm takedown
+    c5 = next(c for c in gm.columns if c.id == "C5_L0")
+    beam_webs = 4 * 0.5 * 4 * web
+    col_sw = 0.3 * 0.45 * 3.5 * 25
+    hand_dl = 16 * (4.625 + extra) + beam_webs + col_sw + 16 * (6.125 + extra) + beam_webs + col_sw
+    assert c5.load_dl_kn == pytest.approx(hand_dl, rel=1e-6)
+    # seismic weight: hand storey weights incl. the extra slab weight (64 m2 per level)
+    webs = sum(x.properties.width_mm / 1000 * (x.properties.depth_mm / 1000 - 0.125) * 25 * 4 for x in res.beams)
+    walls = sum(w.length_m * w.line_load_kn_m for w in gm.walls)
+    cols = 9 * col_sw
+    w1 = 64 * (6.125 + extra) + webs + walls + cols + 64 * 2.0 * 0.25
+    w2 = 64 * (4.625 + extra) + webs + 0.5 * walls + 0.33 * walls + 0.5 * cols
+    assert res.seismic_result.storey_weights_kn == pytest.approx([w1, w2], rel=1e-6)

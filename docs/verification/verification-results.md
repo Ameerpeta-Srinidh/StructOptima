@@ -12,6 +12,7 @@ evidence of engineering correctness beyond the stated reference cases.
 |---|---|---|
 | Baseline before changes | `pytest tests -p no:cacheprovider --ignore=tests/test_fea_repro.py` | 413 passed, **2 failed** (`test_beam_placer.py` depth tests expecting L/15 while code uses L/12, L/10 since commit "FIX 8"), 3 skipped |
 | After remediation (final) | `pytest tests -p no:cacheprovider` | **493 passed, 3 skipped, 0 failed** (≈ 22–33 s) |
+| After N13 fix (2026-10-16) | same | **494 passed, 3 skipped, 0 failed** (≈ 63 s; heavier, corrected loads make column design try more bar arrangements) |
 
 Skipped: `test_beam_placer.py::test_with_auto_framer` (local `complex_villa.dxf` yields no columns), two `test_column_editor.py` tests (no removable column in the layout).
 
@@ -56,7 +57,10 @@ takedown (C1, C5), beam loads, storey weights, Ta, Ah, Vb, storey forces, wind f
 independently rebuilt 2D frame (B_H_3 envelope −61.61 / +24.32 kNm; C5 base moment 43.44 kNm),
 beam flexure and shear, column interaction (0.588), slab S1, footing F-C5 and concrete
 quantities all reproduce the program values. The walkthrough found finding **N13** (slab
-thickness used in loads ≠ designed slab thickness).
+thickness used in loads ≠ designed slab thickness). After the N13 fix (2026-10-16) the walkthrough
+was regenerated and every value re-derived by hand again (e.g. C5 base DL 264.32 kN, B_H_3 26.96 kN/m,
+W 1643.89 kN, Vb 109.59 kN, B_H_3 Mu− 73.33 kNm, C5 interaction 0.649, F-C5 350 mm governed by
+one-way shear).
 
 ## 5. End-to-end runs
 

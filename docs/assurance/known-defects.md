@@ -23,4 +23,4 @@ history see [risk-register.md](risk-register.md).
 | KD-14 | `member_design.py` (test-only) column capacity ignores axial load (CAL-LEG-01) | L | CONFIRMED_DEFECT | Do not use outside tests |
 | KD-15 | CI has not been observed running the 2026-10 changes | M | NOT_ASSESSED | Push to a branch and check CI |
 | KD-16 | Torsional-irregularity indicator on the Analysis page uses a CoM–CoR offset > 5 % heuristic, not the IS 1893 displacement-based definition | M | UNVERIFIED | Engineer review |
-| KD-17 | Slab dead load in beam/column/seismic loads uses the occupancy slab thickness (125 mm) while slabs are designed thicker by the span/26 + 30 rule (finding N13) | H | CONFIRMED_DEFECT | Fix proposed: derive the slab thickness before load intensities and use it in the dead load — needs owner approval |
+| KD-17 | (Closed in code 2026-10-16) Slab dead load used the occupancy slab thickness while slabs were designed thicker (N13) | — | UNVERIFIED (fix implemented, see RM-26) | Engineer review of the per-panel load rule |

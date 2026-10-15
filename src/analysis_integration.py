@@ -120,7 +120,7 @@ def _beam_pts(b: StructuralMember):
     return (b.start_point.x, b.start_point.y), (b.end_point.x, b.end_point.y)
 
 
-def beam_slab_coefficients(gm: GridManager, beams: List[StructuralMember]) -> Dict[str, float]:
+def beam_slab_coefficients(gm: GridManager, beams: List[StructuralMember], return_extra: bool = False):
     """Equivalent-UDL width k (m) per beam such that beam UDL = k x area load.
 
     Two-way panel (ly/lx <= 2): short-edge beams lx/3 (triangle), long-edge
@@ -128,9 +128,16 @@ def beam_slab_coefficients(gm: GridManager, beams: List[StructuralMember]) -> Di
     over-estimate end shear (conservative).  One-way panel: long-edge beams
     lx/2, short-edge beams 0.  Cantilever beams: half the adjacent grid
     spacing on each side x cantilever slab.
+
+    With ``return_extra=True`` also returns {beam id: sum(k x extra dead
+    load)} for panels designed thicker than the occupancy slab (finding N13),
+    taken on the same governing side as k.
     """
     sides_k: Dict[str, Dict[tuple, float]] = {b.id: {} for b in beams}
+    sides_ke: Dict[str, Dict[tuple, float]] = {b.id: {} for b in beams}
+    panel_extra = gm.panel_extra_dead_kn_m2()
     for p in gm.slab_panels():
+        extra = panel_extra.get((p["i"], p["j"]), 0.0)
         x0, x1, y0, y1 = p["x0"], p["x1"], p["y0"], p["y1"]
         sx, sy = x1 - x0, y1 - y0
         lx, ly = min(sx, sy), max(sx, sy)
@@ -155,7 +162,15 @@ def beam_slab_coefficients(gm: GridManager, beams: List[StructuralMember]) -> Di
                 blen = math.hypot(p2[0] - p1[0], p2[1] - p1[1])
                 if ov > 0 and ov >= 0.5 * min(side_len, blen):
                     sides_k[bm.id][key] = sides_k[bm.id].get(key, 0.0) + k
+                    sides_ke[bm.id][key] = sides_ke[bm.id].get(key, 0.0) + k * extra
     out = {bid: (max(d.values()) if d else 0.0) for bid, d in sides_k.items()}
+    out_extra = {}
+    for bid, d in sides_k.items():
+        if d:
+            key = max(d, key=d.get)
+            out_extra[bid] = sides_ke[bid].get(key, 0.0)
+        else:
+            out_extra[bid] = 0.0
 
     # cantilever beams (one end beyond the grid extents)
     xs, ys = sorted(gm.x_grid_lines), sorted(gm.y_grid_lines)
@@ -176,7 +191,8 @@ def beam_slab_coefficients(gm: GridManager, beams: List[StructuralMember]) -> Di
             lo = (grid[idx] - grid[idx - 1]) / 2.0 if idx > 0 else 0.0
             hi = (grid[idx + 1] - grid[idx]) / 2.0 if idx < len(grid) - 1 else 0.0
             out[bm.id] = lo + hi
-    return out
+            out_extra[bm.id] = 0.0
+    return (out, out_extra) if return_extra else out
 
 
 def beam_wall_loads(gm: GridManager, beams: List[StructuralMember], messages: List[str]) -> Dict[str, float]:
@@ -271,14 +287,14 @@ def update_structural_analysis(gm: GridManager, beams: List[StructuralMember], f
 
     valid_beams = [b for b in beams if b.end_point is not None
                    and math.hypot(b.end_point.x - b.start_point.x, b.end_point.y - b.start_point.y) > 1e-3]
-    k_slab = beam_slab_coefficients(gm, valid_beams)
+    k_slab, k_extra = beam_slab_coefficients(gm, valid_beams, return_extra=True)
     wall_line = beam_wall_loads(gm, valid_beams, summary.messages)
 
     def beam_case_loads(bm: StructuralMember, level: int) -> Tuple[float, float]:
         roof = level == N
         sw = bm.properties.width_mm / 1000.0 * max(bm.properties.depth_mm / 1000.0 - t_slab, 0.0) * 25.0
         wall = wall_line.get(bm.id, 0.0) * (0.33 if roof else 1.0)
-        dl = k_slab.get(bm.id, 0.0) * (q["rd"] if roof else q["fd"]) + wall + sw
+        dl = k_slab.get(bm.id, 0.0) * (q["rd"] if roof else q["fd"]) + k_extra.get(bm.id, 0.0) + wall + sw
         ll = k_slab.get(bm.id, 0.0) * (q["rl"] if roof else q["fl"])
         return dl, ll
 
