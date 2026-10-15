@@ -18,8 +18,8 @@ history see [risk-register.md](risk-register.md).
 | KD-09 | Optimiser results are indicative; re-analysis with optimised sizes not automated | M | UNVERIFIED | Do not apply optimiser sizes without a full re-run |
 | KD-10 | Quantities double-count beam/slab/column concrete overlaps; fixed rates | L | Known | Treat as estimates |
 | KD-11 | (Closed 2026-10-16) `ifcopenshell` was not in `requirements.txt` | — | Added (D-15) | — |
-| KD-12 | Legacy root scripts and `src/tests/*` use pre-2026-10 APIs and write files | L | Known | Do not run; candidates for removal (D-07) |
-| KD-13 | Legacy docs (`api_reference.md`, `user_guide.md`, `installation.md`, `engineering_basis.md`, `risk_management.md`) partly describe pre-2026-10 behaviour | L | Known | Banners added; rewrite pending |
+| KD-12 | (Closed 2026-10-16) Legacy root scripts and `src/tests/*` used pre-2026-10 APIs and wrote files — moved out of the repository | — | Closed | — (was: candidates for removal (D-07) |
+| KD-13 | Legacy docs (now in `docs/legacy/`: `api_reference.md`, `user_guide.md`, `installation.md`, `engineering_basis.md`, `risk_management.md`) partly describe pre-2026-10 behaviour | L | Known | Banners added; rewrite pending |
 | KD-14 | `member_design.py` (test-only) column capacity ignores axial load (CAL-LEG-01) | L | CONFIRMED_DEFECT | Do not use outside tests |
 | KD-15 | CI has not been observed running the 2026-10 changes | M | NOT_ASSESSED | Push to a branch and check CI |
 | KD-16 | Torsional-irregularity indicator on the Analysis page uses a CoM–CoR offset > 5 % heuristic, not the IS 1893 displacement-based definition | M | UNVERIFIED | Engineer review |

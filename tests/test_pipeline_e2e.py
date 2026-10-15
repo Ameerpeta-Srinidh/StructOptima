@@ -102,7 +102,7 @@ def test_reports_and_exports_are_generated(res, tmp_path):
 
 
 @pytest.mark.parametrize("path", sorted(glob.glob(os.path.join(ROOT, "samples", "sample_design.dxf")) +
-                                        glob.glob(os.path.join(ROOT, "real_world_dxfs", "*.dxf"))[:3]))
+                                        glob.glob(os.path.join(ROOT, "samples", "real_world", "*.dxf"))[:3]))
 def test_cad_files_through_pipeline(path):
     from src.cad_loader import CADLoader
     ld = CADLoader(path)

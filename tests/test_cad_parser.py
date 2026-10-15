@@ -351,15 +351,15 @@ class TestRealDXFIntegration:
     """Test against actual DXF files in the repository."""
 
     @pytest.fixture(params=[
-        "complex_villa.dxf",
-        "complex_house.dxf",
-        "real_house_plan.dxf",
-        "test_dxfs/case_01_small_rect.dxf",
-        "test_dxfs/case_04_l_shape.dxf",
-        "test_dxfs/case_10_open_hall.dxf",
+        "samples/plans/complex_villa.dxf",
+        "samples/plans/complex_house.dxf",
+        "samples/plans/real_house_plan.dxf",
+        "samples/test_cases/case_01_small_rect.dxf",
+        "samples/test_cases/case_04_l_shape.dxf",
+        "samples/test_cases/case_10_open_hall.dxf",
     ])
     def real_dxf_path(self, request):
-        path = request.param
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), request.param)
         if os.path.exists(path):
             return path
         pytest.skip(f"DXF file not found: {path}")

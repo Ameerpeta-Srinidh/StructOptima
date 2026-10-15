@@ -48,5 +48,5 @@ listed so they can be checked line by line.
 | NBC 2016 | Fire rating by height | as cited | `stability._get_required_fire_rating` | UNVERIFIED |
 
 The legacy statement "All formulas have been verified against IS 456 …" in
-[../engineering_basis.md](../engineering_basis.md) is a **historical claim without
+[../legacy/engineering_basis.md](../legacy/engineering_basis.md) is a **historical claim without
 recorded evidence**; it is superseded by this register.

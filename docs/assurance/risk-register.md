@@ -37,7 +37,7 @@ C critical · H high · M medium · L low. Confidence refers to the original fin
 | R24 | Fire check covers inconsistent with design; slenderness returned dict on bad input | M | High | `stability.py` | Wrong fire check; crash | `test_R24_*` | UNVERIFIED | — | RM-18 |
 | R25 | Unsupported compliance / verification claims | M | High | `report_gen`, docs | Misleading users | text review; PDF banner | UNVERIFIED | D-09 | RM-19 |
 | R26 | Column grouping could reduce size by ≤ 15 mm | L | High | `optimize_column_sizes` | Minor under-size | `test_R26_*` | UNVERIFIED | — | RM-15 |
-| R27 | Repository clutter (generated files, scripts, archived code); `ifcopenshell` not in requirements | L | High | repo root | Confusion | — | BLOCKED | D-07 | — |
+| R27 | Repository clutter (generated files, scripts, archived code); `ifcopenshell` not in requirements | L | High | repo root | Confusion | full test suite after the move; link check of all Markdown | UNVERIFIED (clean-up done 2026-10-16) | D-07 | RM-33 |
 | N1 | `app.py` read non-existent `live_load_kn_m2` → LL 2.0 for every occupancy in seismic weight | H | High | `app.py` (old) | Seismic weight wrong for heavier occupancies | pipeline uses `live_load_floor_kn_m2`; `test_R7_*` | UNVERIFIED | — | RM-05 |
 | N2 | Importance factor looked up by first word of occupancy | M | High | `seismic.py` | I = 1.0 for institutional/assembly | `test_R7_importance_*` | UNVERIFIED | D-03 | RM-05 |
 | N3 | Schedules page computed its own pass/fail from service load | H | High | `pages/2_📋_Schedules.py` | Second false-status source | UI tests (render only) | UNVERIFIED | — | RM-04 |

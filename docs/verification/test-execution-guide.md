@@ -50,9 +50,10 @@ python -m pytest tests --cov=src --cov-report=term-missing                    # 
 
 ## Scripts that are NOT safe to run casually
 
-`src/tests/*.py`, `stress_test_core.py`, `ui_test_runner.py`, `demo_*.py`,
-`debug_pipeline.py`, `generate_*.py`: write PDFs/DXFs into the repository,
-some batch-process many files, and several use pre-2026-10 APIs.
+The legacy scripts (`src/tests/*.py`, `stress_test_core.py`, `ui_test_runner.py`, `demo_*.py`,
+`debug_pipeline.py`, `generate_*.py`) were moved out of the repository on 2026-10-16 (local copies in
+`_local/`). They wrote PDFs/DXFs into the folder they ran in and used pre-2026-10 APIs; do not restore them
+into the repository.
 
 ## DXF sweep (manual, read-only)
 

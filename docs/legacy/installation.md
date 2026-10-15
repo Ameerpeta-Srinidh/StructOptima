@@ -1,4 +1,4 @@
-> **Status (2026-10-15): legacy document.** Current setup instructions: [development/setup.md](development/setup.md).
+> **Status (2026-10-15): legacy document.** Current setup instructions: [development/setup.md](../development/setup.md).
 
 # Installation Guide
 

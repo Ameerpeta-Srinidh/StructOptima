@@ -9,9 +9,61 @@ Each entry states what changed, why, the evidence (tests actually run) and what 
 
 ---
 
+## 2026-10-16 — Repository clean-up and owner decisions
+
+Commit: `chore: organise the repository; record owner decisions`. Approved by the owner (D-07): "clean the whole
+civil folder, it is very messy, organize everything".
+
+### New layout
+```
+app.py, main.py, pages/, src/, components/viewer3d/, tests/
+samples/      sample_design.dxf, sample_arch_only.dxf, plans/, real_world/, test_cases/   (see samples/README.md)
+docs/         current documentation; docs/legacy/ = historical write-ups
+CHANGELOG.md, CLAUDE.md, README.md, CONTRIBUTING.md, CODE_OF_CONDUCT.md, LICENSE, deployment files
+_local/       git-ignored: personal scripts and old outputs moved out of the root (see _local/README.md)
+```
+
+### Changes
+- **Moved within the repository:**
+  - `test_dxfs/` → `samples/test_cases/`;
+  - `real_world_dxfs/` → `samples/real_world/`;
+  - historical write-ups (`Extended_Structural_Calculation_Reference*`, `StructOptima_*.pdf/.docx`,
+    `Structural_DXF_Translation.pdf`, `structural_calculations_manual.md`, `blueprint_text.txt`) → `docs/legacy/`;
+  - the old guides (`api_reference.md`, `engineering_basis.md`, `installation.md`, `risk_management.md`,
+    `user_guide.md`) → `docs/legacy/`.
+- **Committed:** `samples/plans/` holds the plan DXFs the tests use (`complex_villa.dxf`, `complex_house.dxf`,
+  `real_house_plan.dxf`, …). They were git-ignored before, so CI skipped those tests. Test paths are now relative to
+  the repository instead of the working directory.
+- **Removed from the repository** (still in git history; local copies in `_local/retired_from_repo/`):
+  - old generated outputs (DXF, PDF, ZIP, JPG, a log);
+  - `sample_report.pdf`, a report produced by an earlier, uncorrected version. Its download button was removed from
+    the dashboard;
+  - legacy scripts (`demo_*.py`, `debug_pipeline.py`, `stress_test_core.py`, `ui_test_runner.py`, `tmp_*.py`,
+    `fix*.py`, `generate_sample_report.py`);
+  - the folders `scratch/`, `_monetization_archive/` and `src/tests/`.
+- **Moved out of the root, untracked material:** personal scripts, old reports, HTML dumps and logs went to
+  `_local/`. Nothing was deleted except Python caches.
+- **`.gitignore`** rewritten and grouped; `_local/` is ignored.
+- **Link check:** every relative Markdown link in the repository resolves.
+
+### Owner decisions recorded
+- D-16: **automatic column enlargement for drift is approved**. The drift limit values (0.004 h, H/500) are still
+  awaiting confirmation against the printed standards.
+- D-07: clean-up approved and done.
+- Commit messages carry no AI co-author lines. This was applied to the whole history at the owner's request, and
+  `main` was force-pushed.
+
+### Tests run
+- `PYTHONDONTWRITEBYTECODE=1 python -m pytest tests -p no:cacheprovider -q -rs` → **520 passed, 3 skipped, 0 failed**.
+- The skips are layout-dependent:
+  - `test_with_auto_framer`: no columns found in that DXF;
+  - two column-editor cases: no removable column.
+
+---
+
 ## 2026-10-16 — Nothing simulated, storey drift, explicit site inputs, 3D viewer and walk-through
 
-Commit: `fix: remove simulated outputs, add storey drift, explicit site inputs; add 3D viewer` (`cd09ed0`).
+Commit: `fix: remove simulated outputs, add storey drift, explicit site inputs; add 3D viewer`.
 Trigger: the owner's engineering mandate and the instruction "everything should be working, nothing should be
 simulated, continue the 3D work — the site will be used by real developers at construction sites".
 
@@ -119,7 +171,7 @@ Removed files: `src/shm_viz.py`, `src/digital_twin.py`, `demo_bim_site_shm.py`, 
 
 ## 2026-10-16 — IFC export (visuals phase 2)
 
-Commit `a6729f9`.
+Commit: `feat(ifc): IFC4 export of the designed structure with design property sets`.
 - `src/ifc_exporter.py` writes an IFC4 model of the designed structure: storeys, columns, beams, slabs, walls and
   footings.
 - Every member carries a `Pset_StructOptima` property set: mark, size, bars, status, governing combination.
@@ -129,7 +181,7 @@ Commit `a6729f9`.
 
 ## 2026-10-16 — A3 site drawing set (visuals phase 1)
 
-Commit `4f85fac`.
+Commit: `feat(drawings): A3 site drawing set with marks, schedules and sections`.
 - New `src/drawings/` package. One primitive model is rendered to SVG, DXF and PDF (ReportLab, D-14).
 - Sheets:
   - S-01 column layout + schedule;
@@ -145,7 +197,7 @@ Commit `4f85fac`.
 
 ## 2026-10-16 — N13: dead load from the designed slab thickness
 
-Commit `a42aef9`.
+Commit: `fix(N13): dead load uses each panel's designed slab thickness`.
 - Problem: slabs were designed thicker (span/26 + 30 mm) than the occupancy slab used for dead load.
 - Fix: each panel's extra weight is now added to beam, column, footing and seismic loads. This is the per-panel
   approach approved by the owner (D-12).
@@ -154,14 +206,14 @@ Commit `a42aef9`.
 
 ## 2026-10-15 — Manual calculation walkthrough
 
-Commit `986c090`.
+Commit: `docs: add manual calculation walkthrough; record finding N13`.
 - `docs/verification/manual-calculation-walkthrough.md` traces a whole building by hand, from loads to footings,
   mapping each output to its formula.
 - That walkthrough found N13.
 
 ## 2026-10-15 — Audit remediation R1–R26, N1–N12
 
-Commit `28fac71`.
+Commit: `fix: remediate audit findings R1-R26 and N1-N12; add design pipeline, benchmarks and docs`.
 - One design pipeline (`src/design_pipeline.py::run_design`) with a single status and failures list.
 - Columns designed for P-M biaxial bending with e_min and slenderness.
 - Factored beam envelopes from 2D frames under DL/LL/EQ/WL with IS 456 / IS 1893 combinations.

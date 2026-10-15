@@ -1,6 +1,6 @@
 # Repository Inventory
 
-**As of:** 2026-10-15. "Tracked" = in git; "Ignored" = present locally but matched by `.gitignore`.
+**As of:** 2026-10-16 (after the repository clean-up). "Tracked" = in git; "Ignored" = present locally but matched by `.gitignore`.
 Production = reachable from `app.py`/`pages/` or `main.py` through imports **and** calls.
 
 ## Entry points
@@ -15,7 +15,7 @@ Production = reachable from `app.py`/`pages/` or `main.py` through imports **and
 | `pages/5_🔧_Site_Tools.py` | Yes | Streamlit page | BBS + cutting plan, approved-mix calculators, cube register, checklists, calculation summary, COBie, QR tags, inspection / defect log, measured vibration & strain, as-built survey (rewritten 2026-10-16; nothing simulated) |
 | `components/viewer3d/` | Yes | JS source + committed bundle | `src/main.js` (three.js viewer), `dist/viewer.js` (built by `npm run build`, committed), `package.json` / `package-lock.json`; `node_modules/` ignored |
 | `CHANGELOG.md` | Yes | Docs | Every 2026-10 change, why, tests run, open items |
-| `docs/user-guide.md` | Yes | Docs | Current user guide (supersedes `docs/user_guide.md`) |
+| `docs/user-guide.md` | Yes | Docs | Current user guide (supersedes `docs/legacy/user_guide.md`) |
 | `main.py` | Yes | CLI | `python main.py --help` |
 
 ## Source package `src/` (all tracked)
@@ -32,8 +32,8 @@ Status: **P** production, **T** tests/demos only, **U** unused (no importer), **
 | Checks | `audit` P, `stability` P, `safety_warnings` P, `optimizer` P (Analysis page), `risk_management` C, `structural_checks` T, `validators` T, `layout_optimizer` T, `layout_scorer` T |
 | Quantities / outputs | `quantifier` P, `wall_calculator` P, `bbs_module` P, `bbs_report` P, `bbs_utils` P, `quantity_takeoff` T, `report_gen` P, `exporters` P, `dxf_exporter` P, `geometry_exporter` P, `visualizer` P, `svg_viewer` P |
 | UI / infra | `ui_components` P, `logging_config` P, `monitoring` P, `auth` U |
-| Site / misc | `site_calculators` P, `site_guide` P, `site_inspection` P, `shm_module` P, `shm_viz` P, `digital_twin` P, `bim_interop` P, `documentation` P |
-| `src/tests/` | `comprehensive_validation.py`, `test_column_placement.py`, `test_full_pipeline.py`, `md_to_html.py`, `md_to_pdf.py` — scripts, **not collected by pytest** (`testpaths = tests`); several write files |
+| Site / misc | `site_calculators` P, `site_guide` P, `site_inspection` P, `site_monitoring` P, `shm_module` T, `bim_interop` P, `documentation` P |
+| Drawings / BIM / 3D | `drawings/` package P, `ifc_exporter` P, `viewer_model` P |
 
 ## Tests `tests/` (tracked unless noted)
 
@@ -52,26 +52,38 @@ rewritten: `test_fea_repro.py`; updated: `test_beam_placer.py`.
 | `Dockerfile`, `docker-compose.yml`, `Procfile`, `.dockerignore` | Container / PaaS deployment of the Streamlit app (not assessed) |
 | `.streamlit/config.toml`, `.streamlit/secrets.toml.example` | Streamlit configuration |
 
-## Scripts at repository root (excluded from documentation scope beyond this table)
+## Repository layout (after the 2026-10-16 clean-up)
 
-| File(s) | Tracked | Reason for exclusion |
-|---|---|---|
-| `demo_*.py` (5) | Yes | Demonstrations of individual modules; not part of production; some write files |
-| `debug_pipeline.py`, `stress_test_core.py`, `ui_test_runner.py`, `generate_sample_report.py`, `tmp_*.py`, `fix.py`, `fix_deprecation.py` | Yes | Historical developer scripts; written against pre-2026-10 APIs; may write files; not maintained |
-| `scratch/` | Yes | Scratch PDFs and one script |
-| `_monetization_archive/` | Yes | Archived payment/terms pages, not imported |
-| `generate_*.py`, `analyze_*.py`, `run_batch_analysis.py`, `verify_15_cases.py`, `visualize_autoframes.py`, `test_*.py` at root | Ignored | Local developer scripts (not in git) |
+```
+app.py, main.py            Streamlit dashboard and CLI
+pages/                     Streamlit pages
+src/                       Engineering, ingest, output and UI modules
+components/viewer3d/       3D viewer source + committed bundle
+tests/                     pytest suite
+samples/                   Input DXFs: sample_design.dxf, sample_arch_only.dxf, plans/, real_world/, test_cases/
+docs/                      Documentation; docs/legacy/ = historical write-ups (not current)
+CHANGELOG.md, CLAUDE.md, README.md, CONTRIBUTING.md, CODE_OF_CONDUCT.md, LICENSE
+requirements.txt, pytest.ini, Dockerfile, docker-compose.yml, Procfile, .streamlit/, .github/
+_local/                    (git-ignored) personal scripts and old outputs moved out of the root
+```
 
-## Data and artefacts
+## Data
 
 | Path | Tracked | Notes |
 |---|---|---|
-| `samples/*.dxf`, `real_world_dxfs/*.dxf`, `test_dxfs/**` | Yes | Input DXFs used by tests and the 2026-10 sweep. Many declare `$INSUNITS = 6` (metres) while drawn in millimetres — handled by the plausibility fallback (finding N8) |
-| `Beam_Schedule.dxf`, `Foundation_Plan_*.dxf`, `*.pdf`, `*.docx`, `*.zip`, `*.jpg` at root | Yes | Generated outputs / reference documents committed historically. `Beam_Schedule.dxf` and `Foundation_Plan_Professional.dxf` are overwritten by the Drawings page when run from the repository root |
-| `Extended_Structural_Calculation_Reference*.md/.pdf`, `structural_calculations_manual.md`, `blueprint_text.txt`, `StructOptima_*.pdf/.docx` | Yes | Historical reference write-ups; not reviewed against the current code |
-| `structural_design.log.1` | Yes | Rotated log committed by accident (R27) |
-| Root `*.pdf`, `Floor_*_Plan.dxf`, `Structural_Plan.dxf`, logs, `*.html` | Ignored | Generated outputs |
+| `samples/` | Yes | Input DXFs used by tests and manual trials; see `samples/README.md`. Many declare `$INSUNITS = 6` (metres) while drawn in millimetres — handled by the plausibility fallback (finding N8). `samples/plans/` added 2026-10-16 (the tests already used these files but they were git-ignored, so CI skipped those tests) |
+| `docs/legacy/` | Yes | Historical write-ups and pre-2026-10 guides (`Extended_Structural_Calculation_Reference*`, `structural_calculations_manual.md`, `StructOptima_*.pdf/.docx`, `Structural_DXF_Translation.pdf`, `blueprint_text.txt`, `api_reference.md`, `engineering_basis.md`, `installation.md`, `risk_management.md`, `user_guide.md`). Not reviewed against the current code |
 
-## Clutter (R27)
+## Clean-up of 2026-10-16 (R27, D-07 — approved by the owner)
 
-Not removed (deletion requires an owner decision — see [../assurance/decision-log.md](../assurance/decision-log.md), D-07).
+Removed from the repository (still in git history; copies kept locally under the git-ignored `_local/`):
+- generated outputs at the root: `Beam_Schedule.dxf`, `Foundation_Plan_*.dxf/.jpg`, `Structural_Design_Report (1)/(2).pdf`,
+  `Untitled_Project_Export_Package.zip`, `test_report_inspect.pdf`, `complex_villa.jpg`, `structural_design.log.1`,
+  `sample_report.pdf` (a report from an earlier version; its download button was removed from `app.py`);
+- legacy scripts: `debug_pipeline.py`, `demo_*.py`, `fix.py`, `fix_deprecation.py`, `generate_sample_report.py`,
+  `stress_test_core.py`, `tmp_*.py`, `ui_test_runner.py`;
+- folders: `scratch/`, `_monetization_archive/`, `src/tests/`.
+
+Moved: `test_dxfs/` → `samples/test_cases/`, `real_world_dxfs/` → `samples/real_world/`, reference documents →
+`docs/legacy/`. Untracked personal scripts, outputs and logs at the root → `_local/` (nothing deleted except
+Python caches).

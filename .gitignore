@@ -10,90 +10,42 @@ build/
 
 # Virtual environments
 venv/
+.venv/
 env/
 .env/
 
-# IDE
+# IDE / OS
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
-
-# OS
 .DS_Store
 Thumbs.db
 desktop.ini
 
-# Logs
-*.log
-app_launch.txt
-
-# Generated outputs (keep samples, ignore temp)
-temp_*.dxf
-Structural_Report_V2.pdf
-Structural_Design_Report.pdf
-Summary_Report.pdf
-Audit_Report.pdf
-BBS_Report.pdf
-Design_Schedules.pdf
-Floor_*_Report.pdf
-Structural_Plan.dxf
-Floor_*_Plan.dxf
-
-# Test artifacts
+# Tests and logs
 .pytest_cache/
 htmlcov/
 .coverage
+*.log
 
-# Verification outputs
-verification_report.log
-verification_report_real.log
-verification_results.txt
-audit_results.log
-audit_report.txt
-smoke_test.log
-demo_output.txt
-fresh_server.log
+# Local, unversioned material (personal scripts, old outputs) - see _local/README.md
+_local/
 
-# Streamlit
-.streamlit/secrets.toml
-
-# Temp uploads
+# App outputs written by hand-run scripts (the app itself writes only to temp dirs)
 temp_*.dxf
 temp_*.ifc
-
-# Sentry
-.sentryclirc
-
-# Generated HTML outputs
 *.html
 
-# Loose DXF files (keep samples in sample_dxfs/ and test_dxfs/)
-complex_*.dxf
-real_house_plan.dxf
-realistic_indian_house.dxf
-preplaced_columns.dxf
-test_structure.dxf
+# Streamlit / Sentry secrets
+.streamlit/secrets.toml
+.sentryclirc
 
-# One-off scripts
-analyze_*.py
-generate_*.py
-!generate_sample_report.py
-run_batch_*.py
-verify_*.py
-visualize_*.py
-
-# Loose test files (proper tests are in tests/)
-test_beam_placement.py
-test_comprehensive.py
-test_multi_house_beams.py
-test_slab_generation.py
-
-# Gemini / Agent
+# Agent tools
 .gemini/
 .antigravityignore
 
-# 3D viewer build (dist/viewer.js is committed)
+# 3D viewer: dependencies are installed by `npm install`; the built bundle is committed
 components/viewer3d/node_modules/
 !components/viewer3d/dist/

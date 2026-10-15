@@ -36,8 +36,9 @@ PYTHONDONTWRITEBYTECODE=1 python -m pytest tests -p no:cacheprovider -q
 ```
 
 Subsets and side effects: `docs/verification/test-execution-guide.md`.
-Do not run `src/tests/*.py`, `demo_*.py`, `stress_test_core.py`, `ui_test_runner.py`
-or `generate_*.py` casually — they write files into the repository.
+Legacy one-off scripts were moved out of the repository on 2026-10-16 (local copies in the
+git-ignored `_local/`; history in git). Do not add scripts or generated outputs at the root:
+inputs go in `samples/`, documents in `docs/`, personal material in `_local/`.
 IFC tests need the optional `ifcopenshell` (skipped otherwise).
 
 ## Engineering correctness (non-negotiable)

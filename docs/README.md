@@ -79,9 +79,11 @@ verification by a licensed structural engineer.
 - [troubleshooting.md](development/troubleshooting.md)
 - [release-checklist.md](development/release-checklist.md)
 
-**Legacy documents (kept, partly outdated — see banners inside)**
-- [engineering_basis.md](engineering_basis.md), [api_reference.md](api_reference.md),
-  [installation.md](installation.md), [user_guide.md](user_guide.md), [risk_management.md](risk_management.md)
+**Legacy documents (moved to [legacy/](legacy/) on 2026-10-16; partly outdated — see banners inside)**
+- [engineering_basis.md](legacy/engineering_basis.md), [api_reference.md](legacy/api_reference.md),
+  [installation.md](legacy/installation.md), [user_guide.md](legacy/user_guide.md), [risk_management.md](legacy/risk_management.md)
+- Earlier write-ups: `legacy/Extended_Structural_Calculation_Reference*`, `legacy/structural_calculations_manual.md`,
+  `legacy/StructOptima_*.pdf/.docx`, `legacy/Structural_DXF_Translation.pdf`
 
 ## Critical known limitations (short list)
 

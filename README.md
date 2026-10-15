@@ -151,7 +151,9 @@ src/design_pipeline.py   End-to-end design orchestration (single source of desig
 src/                  Engineering, ingest, output and UI modules (see docs/architecture/module-catalogue.md)
 tests/                pytest suite (unit, benchmark, end-to-end, headless UI)
 docs/                 Documentation (start at docs/README.md)
-samples/, real_world_dxfs/, test_dxfs/   Example and test DXF files
+components/viewer3d/  3D viewer (source + committed bundle)
+samples/              Example and test DXF files (see samples/README.md)
+docs/legacy/          Historical documents (not current)
 ```
 
 Full inventory, including legacy scripts and generated artefacts:

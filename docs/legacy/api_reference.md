@@ -1,4 +1,4 @@
-> **Status (2026-10-15): legacy document**, partly outdated (pre-2026-10 APIs). Current interfaces: [architecture/module-catalogue.md](architecture/module-catalogue.md), [architecture/interfaces-and-contracts.md](architecture/interfaces-and-contracts.md).
+> **Status (2026-10-15): legacy document**, partly outdated (pre-2026-10 APIs). Current interfaces: [architecture/module-catalogue.md](../architecture/module-catalogue.md), [architecture/interfaces-and-contracts.md](../architecture/interfaces-and-contracts.md).
 
 # API Reference
 

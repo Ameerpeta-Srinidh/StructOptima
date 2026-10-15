@@ -233,10 +233,12 @@ class TestBeamPlacerIntegration:
             from src.auto_framer import AutoFramer
             import os
             
-            if not os.path.exists('complex_villa.dxf'):
+            path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                "samples", "plans", "complex_villa.dxf")
+            if not os.path.exists(path):
                 pytest.skip("DXF file not found for integration test")
-            
-            parser = CADParser('complex_villa.dxf')
+
+            parser = CADParser(path)
             framer = AutoFramer(parser)
             framer.identify_structural_nodes()
             framer.generate_columns()

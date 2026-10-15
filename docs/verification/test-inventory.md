@@ -39,8 +39,8 @@ Helper: `tests/ifc_fixture.py` (builds a 2-storey IFC frame with `ifcopenshell.a
 
 ## Not collected / not maintained
 
-- `src/tests/*.py` — scripts outside `testpaths`; several write PDFs/DXFs.
-- Root scripts (`stress_test_core.py`, `ui_test_runner.py`, `demo_*.py`, …) — not tests; written against older APIs.
+- Former `src/tests/*.py` and root scripts (`stress_test_core.py`, `ui_test_runner.py`, `demo_*.py`, …) were moved out
+  of the repository on 2026-10-16 (see repository-inventory.md).
 
 ## CI
 
