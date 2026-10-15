@@ -1,3 +1,5 @@
+> **Status (2026-10-15): legacy document.** Current setup instructions: [development/setup.md](development/setup.md).
+
 # Installation Guide
 
 This guide walks you through setting up the Structural Design Platform on your system.

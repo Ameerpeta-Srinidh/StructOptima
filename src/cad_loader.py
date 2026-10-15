@@ -12,6 +12,7 @@ class CADLoader:
         self.parser = CADParser(dxf_path)
         self.parser.load()
         self.placement_warnings = []
+        self.load_warnings: List[str] = []
         self.placement_stats = {}
         self.placer = None          # Stored for Column Editor use
         self.placement_result = None # Stored for Column Editor use
@@ -26,7 +27,9 @@ class CADLoader:
     def load_grid_manager(
         self, 
         auto_frame: bool = False,
-        seismic_zone: str = "III"
+        seismic_zone: str = "III",
+        story_height_m: float = 3.0,
+        num_stories: int = 1,
     ) -> Tuple[GridManager, List[StructuralMember]]:
         """
         Creates a GridManager and Beam list from the CAD file.
@@ -137,10 +140,31 @@ class CADLoader:
         ys = [c['y'] for c in raw_cols]
         
         max_coord = max(max(abs(x) for x in xs), max(abs(y) for y in ys)) if xs and ys else 0
-        self.scale_factor = 1.0
-        if max_coord > 500:
-            self.scale_factor = 0.001
-            logger.debug("Detected large coordinates (max %s), assuming mm. Converting to meters.", max_coord)
+        unit_scale = self.parser.get_unit_scale()
+        units_known = unit_scale is not None
+        extent = max((max(xs) - min(xs)), (max(ys) - min(ys))) if xs and ys else 0.0
+        if units_known and extent > 0 and not (1.0 <= extent * unit_scale <= 1000.0):
+            # Declared unit contradicts the geometry (e.g. ezdxf default $INSUNITS=6 on a
+            # millimetre drawing): fall back to the size heuristic and warn.
+            self.load_warnings.append(
+                f"DXF $INSUNITS gives a building extent of {extent * unit_scale:.1f} m, which is implausible; "
+                f"units were inferred from coordinate size instead. Correct the drawing units.")
+            units_known = False
+            implausible = True
+        else:
+            implausible = False
+        if units_known:
+            self.scale_factor = unit_scale
+        else:
+            # Unitless drawing: legacy heuristic (|coord| > 500 -> mm), flagged (audit finding R17)
+            self.scale_factor = 0.001 if max_coord > 500 else 1.0
+        if not units_known and not implausible:
+            self.load_warnings.append(
+                f"DXF has no $INSUNITS: units guessed as {'millimetres' if self.scale_factor == 0.001 else 'metres'} "
+                f"from coordinate size (max {max_coord:.0f}). Set drawing units in the CAD file to avoid scale errors.")
+        if auto_frame and self.scale_factor != 0.001:
+            self.load_warnings.append("Auto-frame column placement assumes a drawing in millimetres; results for other "
+                                      "units are unreliable.")
         
         unique_x = sorted(list(set([round(x * self.scale_factor, 2) for x in xs])))
         unique_y = sorted(list(set([round(y * self.scale_factor, 2) for y in ys])))
@@ -148,7 +172,7 @@ class CADLoader:
         width_m = unique_x[-1] - unique_x[0] if unique_x else 0
         length_m = unique_y[-1] - unique_y[0] if unique_y else 0
         
-        gm = GridManager(width_m=width_m, length_m=length_m)
+        gm = GridManager(width_m=width_m, length_m=length_m, num_stories=num_stories, story_height_m=story_height_m)
         gm.x_grid_lines = unique_x
         gm.y_grid_lines = unique_y
         
@@ -162,8 +186,12 @@ class CADLoader:
             
             w_mm = rc.get('width', 300)
             d_mm = rc.get('depth', 300)
-            
-            if w_mm < 5.0 and self.scale_factor == 1.0: 
+
+            if not auto_frame and units_known:
+                # explicit column outlines are in drawing units
+                w_mm *= self.scale_factor * 1000.0
+                d_mm *= self.scale_factor * 1000.0
+            elif w_mm < 5.0 and self.scale_factor == 1.0:
                 w_mm *= 1000.0
                 d_mm *= 1000.0
             
@@ -173,8 +201,8 @@ class CADLoader:
                 y=y_m,
                 width_nb=w_mm,
                 depth_nb=d_mm,
-                level=0, 
-                z_top=3.0
+                level=0,
+                z_top=story_height_m
             )
             
             if auto_frame:
@@ -231,7 +259,8 @@ class CADLoader:
             if self.scale_factor < 1.0:
                 wall_thickness = wall_thickness  # Already in mm
             
-            wall_height = gm.story_height_m - 0.45  # Deduct avg beam depth
+            # Clear height = storey - slab (125) - beam (400): same rule as GridManager.generate_walls
+            wall_height = max(gm.story_height_m - 0.125 - 0.400, 0.5)
             
             for wi, wl in enumerate(raw_arch_walls):
                 sx = wl[0][0] * self.scale_factor
@@ -257,6 +286,11 @@ class CADLoader:
                 ))
             
             logger.info("Extracted %d wall segments (thickness=%.0fmm)", len(gm.walls), wall_thickness)
+            self.load_warnings.extend(self.parser.warnings)
+
+        if not beams:
+            self.load_warnings.append("No beams found in the DXF (no BEAM layer): beams will be generated along "
+                                      "all column grid lines.")
         
         return gm, beams
     

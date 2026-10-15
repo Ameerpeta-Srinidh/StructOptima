@@ -225,47 +225,53 @@ def generate_bbs_from_grid_manager(grid_mgr, beams_list, project_name: str = "Pr
     column_inputs = []
     slab_inputs = []
     
-    # Extract beam BBS inputs from beam_schedule
+    import re as _re
+
+    def _bars(desc, default_n, default_d):
+        m = _re.match(r"\s*(\d+)-(\d+)#", desc or "")
+        return (int(m.group(1)), int(m.group(2))) if m else (default_n, default_d)
+
+    def _spacing(desc, default):
+        m = _re.search(r"@\s*(\d+)", desc or "")
+        return float(m.group(1)) if m and float(m.group(1)) > 0 else default
+
+    def _base(mid):
+        return _re.sub(r"_L\d+$", "", mid)
+
+    # Beams: one entry per plan beam (BBS covers ONE typical floor - see docs)
     if hasattr(grid_mgr, 'beam_schedule') and grid_mgr.beam_schedule:
+        plan = {}
+        for b in beams_list:
+            plan.setdefault(_base(b.id), b)
         for bid, det in grid_mgr.beam_schedule.items():
-            # Find corresponding beam from list
-            beam_obj = None
-            for b in beams_list:
-                if b.id == bid:
-                    beam_obj = b
-                    break
-            
+            beam_obj = plan.get(_base(bid))
             if beam_obj and beam_obj.end_point:
-                # Calculate beam length from start and end points
                 dx = beam_obj.end_point.x - beam_obj.start_point.x
                 dy = beam_obj.end_point.y - beam_obj.start_point.y
                 beam_length_m = (dx**2 + dy**2) ** 0.5
-                
+                nb, db = _bars(det.bottom_bars_desc, 4, 16)
+                nt, _dt = _bars(det.top_bars_desc, 2, 12)
                 beam_inputs.append(BeamBBSInput(
                     member_id=bid,
                     length_mm=beam_length_m * 1000,
                     width_mm=beam_obj.properties.width_mm,
                     depth_mm=beam_obj.properties.depth_mm,
                     clear_cover_mm=25,
-                    main_bar_dia_mm=16,
-                    top_bars=2,
-                    bottom_bars=4,
+                    main_bar_dia_mm=db,
+                    top_bars=max(nt, 2),
+                    bottom_bars=max(nb, 2),
                     stirrup_dia_mm=8,
-                    stirrup_spacing_mm=150
+                    stirrup_spacing_mm=_spacing(det.stirrups_desc, 150.0)
                 ))
-    
-    # Extract column BBS inputs
+
+    # Columns: level-0 segments
     level_0_cols = [c for c in grid_mgr.columns if c.level == 0]
     for col in level_0_cols:
-        # Get rebar info if available
-        main_dia = 16
-        num_bars = 8
-        tie_spacing = 150
-        
-        if hasattr(grid_mgr, 'rebar_schedule') and col.id in grid_mgr.rebar_schedule:
-            res = grid_mgr.rebar_schedule[col.id]
-            main_dia = res.phi_main if hasattr(res, 'phi_main') else 16
-        
+        main_dia, num_bars, tie_spacing = 16, 8, 150.0
+        res = grid_mgr.rebar_schedule.get(col.id) if hasattr(grid_mgr, 'rebar_schedule') else None
+        if res is not None:
+            num_bars, main_dia = _bars(res.main_bars_desc, 8, getattr(res, 'phi_main', 16))
+            tie_spacing = getattr(res, 'link_spacing_mm', 0.0) or _spacing(res.links_desc, 150.0)
         column_inputs.append(ColumnBBSInput(
             member_id=col.id,
             height_mm=grid_mgr.story_height_m * 1000,
@@ -273,24 +279,28 @@ def generate_bbs_from_grid_manager(grid_mgr, beams_list, project_name: str = "Pr
             depth_mm=col.depth_nb,
             clear_cover_mm=40,
             main_bar_dia_mm=main_dia,
-            num_bars=num_bars,
+            num_bars=max(num_bars, 4),
             tie_dia_mm=8,
             tie_spacing_mm=tie_spacing
         ))
-    
-    # Extract slab BBS inputs
+
+    # Slabs: actual panel dimensions and bottom steel
     if hasattr(grid_mgr, 'slab_schedule') and grid_mgr.slab_schedule:
         for sid, det in grid_mgr.slab_schedule.items():
+            lx = (getattr(det, 'lx_m', 0.0) or 4.0) * 1000
+            ly = (getattr(det, 'ly_m', 0.0) or 5.0) * 1000
+            md = _re.match(r"\s*(\d+)#", det.main_steel_desc or "")
+            dd = _re.match(r"\s*(\d+)#", det.dist_steel_desc or "")
             slab_inputs.append(SlabBBSInput(
                 member_id=sid,
-                lx_mm=4000,
-                ly_mm=5000,
+                lx_mm=lx,
+                ly_mm=ly,
                 thickness_mm=det.thickness_mm,
                 clear_cover_mm=20,
-                main_bar_dia_mm=10,
-                main_bar_spacing_mm=150,
-                dist_bar_dia_mm=8,
-                dist_bar_spacing_mm=200
+                main_bar_dia_mm=int(md.group(1)) if md else 10,
+                main_bar_spacing_mm=_spacing(det.main_steel_desc, 150.0),
+                dist_bar_dia_mm=int(dd.group(1)) if dd else 8,
+                dist_bar_spacing_mm=_spacing(det.dist_steel_desc, 200.0)
             ))
-    
+
     return generate_project_bbs(beam_inputs, column_inputs, slab_inputs, project_name)

@@ -11,12 +11,21 @@ from src.ui_components import (
     render_member_search, render_is_code_reference, render_status_badge
 )
 from src.stability import FIRE_RESISTANCE_TABLE
-from src.load_combinations import LoadCombinationManager, get_summary_report
 
 @st.cache_data(show_spinner="Optimizing structure...")
-def run_optimization(_columns, story_height, num_stories, fck):
-    from src.optimizer import optimize_structure, OptimizationLevel
-    return optimize_structure(_columns, story_height, num_stories, fck=fck, enable_optimization=True)
+def run_optimization(_columns, _rebar_schedule, cache_key, story_height, num_stories, fck, fy, seismic_zone):
+    """``cache_key`` is a hashable fingerprint of the columns and their design
+    forces; the unhashed ``_columns`` argument alone previously produced stale
+    results for new geometry (audit finding R22)."""
+    from src.optimizer import optimize_structure
+    return optimize_structure(_columns, story_height, num_stories, fck=fck, enable_optimization=True, fy=fy,
+                              seismic_zone=seismic_zone, rebar_schedule=_rebar_schedule)
+
+
+def _columns_fingerprint(columns):
+    return tuple((c.id, round(c.x, 3), round(c.y, 3), c.level, c.width_nb, c.depth_nb, round(c.load_kn, 1),
+                  tuple((f[0], round(f[1], 1), round(f[2], 1), round(f[3], 1)) for f in c.design_forces))
+                 for c in columns)
 
 st.set_page_config(page_title='StructOptima — Analysis', layout='wide', page_icon='📊')
 inject_css()
@@ -69,15 +78,21 @@ if seismic_result:
     if seismic_result.parameters.scwb_required:
         z1, z2 = st.columns(2)
         with z1:
-            if seismic_result.all_scwb_pass:
-                st.success("✅ Strong Column-Weak Beam: PASS")
+            _sd = getattr(seismic_result, 'scwb_details', []) or []
+            if not getattr(seismic_result, 'scwb_evaluated', False):
+                st.info("Strong Column-Weak Beam: not evaluated")
+            elif seismic_result.all_scwb_pass:
+                st.success(f"✅ Strong Column-Weak Beam: {len(_sd)}/{len(_sd)} joints ΣMc ≥ 1.4 ΣMb (from designed members)")
             else:
-                st.error("❌ Strong Column-Weak Beam: FAIL (Some joints need review)")
+                st.error(f"❌ Strong Column-Weak Beam: {sum(1 for d in _sd if not d['pass'])}/{len(_sd)} joints below 1.4 "
+                         f"({'mandatory for SMRF' if st.session_state.get('structural_system') == 'SMRF' else 'advisory for OMRF'})")
         with z2:
-            if seismic_result.all_ductile_pass:
-                st.success(f"✅ Ductile Detailing: Ta={seismic_result.parameters.fundamental_period:.2f}s")
+            if getattr(seismic_result, 'ductile_verification', '') == "PARTIAL_SPACING_ONLY":
+                st.warning("⚠️ Ductile detailing: end-zone tie spacing checked only — confining steel (Ash) and other "
+                           "IS 13920 provisions NOT verified" + ("" if seismic_result.all_ductile_pass else
+                           " — some columns exceed the spacing limit"))
             else:
-                st.warning("⚠️ Ductile Detailing: Review stirrup spacing")
+                st.info(f"Ductile detailing: {getattr(seismic_result, 'ductile_verification', 'not evaluated')}")
                 
     # Deep Beam Check
     if beams:
@@ -144,6 +159,16 @@ if seismic_result:
                     f"(X: {_torsion_ratio_x:.1%}, Y: {_torsion_ratio_y:.1%})"
                 )
             
+    if getattr(seismic_result, 'storey_forces_kn', None):
+        with st.expander("Equivalent static storey forces (applied to the frame analysis)"):
+            st.dataframe([{"Level": i + 1, "Height (m)": round(h, 2), "Seismic weight (kN)": round(w, 0),
+                           "Storey force (kN)": round(f, 1)}
+                          for i, (h, w, f) in enumerate(zip(seismic_result.storey_heights_m, seismic_result.storey_weights_kn,
+                                                            seismic_result.storey_forces_kn))], hide_index=True)
+            st.caption(f"Importance factor I = {seismic_result.parameters.importance_factor}, "
+                       f"R = {seismic_result.parameters.response_reduction}, soil type {seismic_result.parameters.soil_type}. "
+                       "Forces shared between parallel frames by column stiffness; torsion not modelled.")
+
     with st.expander("View Ductile Detailing Requirements (IS 13920)"):
         if seismic_result.ductile_checks:
             ductile_data = []
@@ -169,8 +194,9 @@ render_section_header("Wind Analysis")
 if wind_result and hasattr(wind_result, 'pressure_results') and wind_result.pressure_results:
     w1, w2, w3 = st.columns(3)
     w1.metric("Design Wind Speed (Top)", f"{wind_result.pressure_results[-1].design_wind_speed_ms:.1f} m/s")
-    w2.metric("Wind Base Shear (X)", f"{wind_result.total_base_shear_x_kn:.0f} kN")
-    w3.metric("Wind Base Shear (Y)", f"{wind_result.total_base_shear_y_kn:.0f} kN")
+    w2.metric("Wind Base Shear (wind along X)", f"{wind_result.total_base_shear_x_kn:.0f} kN")
+    w3.metric("Wind Base Shear (wind along Y)", f"{wind_result.total_base_shear_y_kn:.0f} kN")
+    st.caption("Wind storey forces are applied to the frame analysis as load cases WLX / WLY.")
     
     if hasattr(wind_result, 'warnings') and wind_result.warnings:
         for w in wind_result.warnings:
@@ -266,35 +292,41 @@ if safety_summary:
         | Beams | 1.0 Ig | **0.35 Ig** |
         | Slabs | 1.0 Ig | **0.25 Ig** |
         
-        *Current analysis uses Gross Stiffness (Ig). Deflections may be 1.5-2x higher in reality.*
         """)
+        if st.session_state.get('use_cracked'):
+            st.caption("Current analysis: cracked modifiers APPLIED to columns (0.70) and beams (0.35) for all load cases. "
+                       "Slab stiffness is not modelled.")
+        else:
+            st.caption("Current analysis: GROSS section stiffness (Ig) for all load cases.")
 
 
 # 5. Load Combinations section
 st.markdown("---")
-render_section_header("Load Combinations (IS 875 Part 3 / IS 456 Table 18)")
-
-if gm and num_stories is not None and live_load is not None and building_weight is not None:
-    floor_area_m2 = gm.width_m * gm.length_m
-    total_dl = building_weight - (floor_area_m2 * num_stories * live_load)
-    total_ll = floor_area_m2 * num_stories * live_load
-    
-    total_wl = 0
-    if wind_result and hasattr(wind_result, 'total_base_shear_x_kn'):
-        total_wl = max(wind_result.total_base_shear_x_kn, wind_result.total_base_shear_y_kn)
-        
-    total_eq = 0
-    if seismic_result and hasattr(seismic_result, 'base_shear_kn'):
-        total_eq = seismic_result.base_shear_kn
-        
-    combo_mgr = LoadCombinationManager(
-        include_wind=True,
-        include_seismic=True,
-        seismic_zone=seismic_zone if seismic_zone else "II"
-    )
-    
-    with st.expander("View Governing Load Combinations & Stability Check", expanded=True):
-        st.code(get_summary_report(combo_mgr, total_dl, total_ll, total_wl, total_eq), language="text")
+render_section_header("Load Cases & Combinations (IS 456 Table 18 / IS 1893)")
+_asum = st.session_state.get('analysis_summary')
+if _asum is not None:
+    a1, a2, a3 = st.columns(3)
+    a1.metric("Frames solved", f"{_asum.frames_solved}/{_asum.frames_total}")
+    a2.metric("Combinations", len(_asum.combinations))
+    a3.metric("Beams outside frames", len(_asum.beams_not_in_frame))
+    with st.expander("Combinations applied to member forces", expanded=False):
+        st.code("\n".join(_asum.combinations), language="text")
+        st.caption("Load cases: DL, LL (gravity, from slab panels, walls and self-weight), EQX/EQY (seismic storey forces), "
+                   "WLX/WLY (wind storey forces). Beam envelopes = max sagging, hogging and shear over all combinations "
+                   "and storeys; columns are designed for every combination at both ends.")
+    for _f in _asum.failed_frames:
+        st.error(f"Frame not solved: {_f}")
+    for _m in _asum.messages:
+        st.caption(f"ℹ️ {_m}")
+    if building_weight:
+        from src.load_combinations import check_overturning
+        _ot = 0.0
+        if wind_result is not None:
+            _ot = max(getattr(wind_result, 'total_overturning_moment_x_knm', 0), getattr(wind_result, 'total_overturning_moment_y_knm', 0))
+        if seismic_result is not None and seismic_result.storey_forces_kn:
+            _ot = max(_ot, sum(f * h for f, h in zip(seismic_result.storey_forces_kn, seismic_result.storey_heights_m)))
+        _ok, _fos, _msg = check_overturning(building_weight, min(gm.width_m, gm.length_m), _ot)
+        (st.success if _ok else st.error)(f"Overall overturning (0.9 W x B/2 vs 1.5 x M_ot): {_msg}")
 
 
 # 6. Cost Optimization Results
@@ -304,16 +336,15 @@ if enable_optimization:
     
     if gm and hasattr(gm, 'columns') and story_height and num_stories and fck:
         opt_columns, opt_summary = run_optimization(
-            gm.columns,
-            story_height,
-            num_stories,
-            fck
-        )
-        
+            gm.columns, gm.rebar_schedule, _columns_fingerprint(gm.columns), story_height, num_stories, fck,
+            st.session_state.get('fy', 415.0), seismic_zone or "III")
+        st.warning("Indicative only: sizes are checked with member forces from the CURRENT analysis. A full "
+                   "re-analysis and re-design with the optimised sizes is required before use; these sizes are not "
+                   "applied to the model.")
         if opt_summary.all_safe:
-            st.success("✅ All optimized designs pass IS 456 safety checks")
+            st.info("All proposed sizes pass the production column check under the current forces.")
         else:
-            st.warning("⚠️ Some designs require review - using conservative sizing")
+            st.error("Some columns have no standard size passing the column check with the required margin.")
             
         s1, s2, s3 = st.columns(3)
         s1.metric(
@@ -346,13 +377,13 @@ if enable_optimization:
                     "Load (kN)": f"{oc.axial_load_kn:.0f}",
                     "Capacity (kN)": f"{oc.design_capacity_kn:.0f}",
                     "D/C Ratio": f"{oc.dc_ratio:.2f}",
-                    "Xu/d": f"{oc.xu_d_ratio:.2f}",
+                    "P-M ratio": f"{oc.utilization_ratio:.2f}",
                     "Req vs Prov (cm²)": f"{oc.required_steel_mm2/100:.1f} / {oc.provided_steel_mm2/100:.1f}",
                     "Check": "✓" if oc.is_safe else "✗",
                     "Gov": "M_min" if oc.is_min_ecc_governed else "P_u"
                 })
             st.dataframe(opt_data, use_container_width=True)
-            st.caption("Gov: M_min = Governed by Minimum Eccentricity Check (< 0.05D)")
+            st.caption("Gov: M_min = design moment governed by minimum eccentricity / slenderness rather than analysis moments")
 
 
 # 7. L/d Deflection Check
@@ -389,91 +420,28 @@ if beams:
                 st.success("All beams satisfy IS 456 Cl 23.2 basic L/d limits")
 
 
-# 8. Design Failures & Overstress Summary (Change 3)
+# 8. Design Failures & Overstress Summary
 st.markdown("---")
 render_section_header("🔴 Design Failures & Overstress Report")
-
-_failures_found = False
-
-# 8a. Beam Schedule Failures (from gm.beam_schedule)
-if gm and hasattr(gm, 'beam_schedule') and gm.beam_schedule:
-    beam_fails = []
-    for bid, bres in gm.beam_schedule.items():
-        _status = str(getattr(bres, 'status', 'OK'))
-        if 'FAIL' in _status.upper() or 'WARN' in _status.upper():
-            _span = getattr(bres, 'span_m', 0)
-            _w = getattr(bres, 'width_mm', getattr(bres, 'width', '?'))
-            _d = getattr(bres, 'depth_mm', getattr(bres, 'depth', '?'))
-            _warnings = getattr(bres, 'warnings', [])
-            for w in (_warnings if isinstance(_warnings, list) else [str(_warnings)]):
-                beam_fails.append({
-                    "Beam ID": bid,
-                    "Size (mm)": f"{_w}×{_d}",
-                    "Span (m)": f"{float(_span):.2f}" if _span else "—",
-                    "Issue": str(w),
-                    "Status": "❌ FAIL" if 'FAIL' in _status.upper() else "⚠️ WARNING"
-                })
-    if beam_fails:
-        _failures_found = True
-        st.error(f"**{len(beam_fails)} beam design issue(s) found:**")
-        st.dataframe(pd.DataFrame(beam_fails), use_container_width=True, hide_index=True)
-        st.caption("📌 Beam failures typically indicate span too large for the given section size. Increase depth (L/12 rule) or reduce span.")
-
-# 8b. Column Schedule Failures
-if gm and hasattr(gm, 'rebar_schedule') and gm.rebar_schedule:
-    col_fails = []
-    for cid, cres in gm.rebar_schedule.items():
-        _status = str(getattr(cres, 'status', 'OK'))
-        if 'FAIL' in _status.upper() or 'WARN' in _status.upper():
-            _warnings = getattr(cres, 'warnings', [])
-            for w in (_warnings if isinstance(_warnings, list) else [str(_warnings)]):
-                col_fails.append({
-                    "Column ID": cid,
-                    "Issue": str(w),
-                    "Status": "❌ FAIL" if 'FAIL' in _status.upper() else "⚠️ WARNING"
-                })
-    if col_fails:
-        _failures_found = True
-        st.error(f"**{len(col_fails)} column design issue(s) found:**")
-        st.dataframe(pd.DataFrame(col_fails), use_container_width=True, hide_index=True)
-        st.caption("📌 Column failures typically indicate under-sized section for the applied axial load. Increase column size.")
-
-# 8c. SCWB Joint Failures — show which specific joints fail and their Mc/Mb ratio
-if seismic_result and hasattr(seismic_result, 'scwb_details') and seismic_result.scwb_details:
-    scwb_fails = [d for d in seismic_result.scwb_details if not d.get('pass', True)]
-    if scwb_fails:
-        _failures_found = True
-        st.error(f"**{len(scwb_fails)} joint(s) fail Strong Column–Weak Beam check (IS 13920 Cl 7.2):**")
-        st.dataframe(pd.DataFrame(scwb_fails), use_container_width=True, hide_index=True)
-        st.caption("📌 IS 13920 Cl 7.2: Sum of column moments ≥ 1.4 × Sum of beam moments at each joint")
-elif seismic_result and hasattr(seismic_result, 'all_scwb_pass') and not seismic_result.all_scwb_pass:
-    _failures_found = True
-    st.error("**SCWB joint failures detected** — detailed joint list not available. Check the seismic report section above.")
-    st.caption("📌 IS 13920 Cl 7.2: ΣMc ≥ 1.4 × ΣMb at every beam-column joint in seismic zones III/IV/V")
-
-# 8d. Shear Overstress (tau_v > tau_c_max)
-if beams and gm and hasattr(gm, 'beam_schedule') and gm.beam_schedule:
-    shear_fails = []
-    for bid, bres in gm.beam_schedule.items():
-        _tau_v = getattr(bres, 'tau_v_Nmm2', 0)
-        _tau_max = getattr(bres, 'tau_c_max_Nmm2', 3.1)
-        if _tau_v and _tau_v > _tau_max:
-            _w = getattr(bres, 'width_mm', '?')
-            _d = getattr(bres, 'depth_mm', '?')
-            shear_fails.append({
-                "Beam ID": bid,
-                "Size (mm)": f"{_w}×{_d}",
-                "τv (N/mm²)": f"{_tau_v:.2f}",
-                "τc,max (N/mm²)": f"{_tau_max:.2f}",
-                "Overstress": f"{(_tau_v/_tau_max - 1)*100:.1f}%",
-                "Action": "Increase beam width (b) — shear cannot be resisted by stirrups alone"
-            })
-    if shear_fails:
-        _failures_found = True
-        st.error(f"**{len(shear_fails)} beam(s) exceed τc,max (IS 456 Table 20):**")
-        st.dataframe(pd.DataFrame(shear_fails), use_container_width=True, hide_index=True)
-        st.caption("📌 When τv > τc,max, the beam section must be enlarged. Stirrups alone cannot carry the excess shear.")
-
-if not _failures_found:
-    st.success("✅ No design failures or overstress conditions detected in beam or column schedules.")
-
+# Single source of truth: the status list produced by design_pipeline.run_design
+# (audit finding R5: the previous screen read attributes that did not exist and
+# always reported success).
+_failures = st.session_state.get('design_failures')
+if _failures is None:
+    st.warning("Design status not available — re-run the analysis.")
+else:
+    _fails = [f for f in _failures if f["Status"] == "FAIL"]
+    _warns = [f for f in _failures if f["Status"] == "WARN"]
+    if _fails:
+        st.error(f"**{len(_fails)} failing item(s)** — the design is not acceptable as is.")
+        st.dataframe(pd.DataFrame(_fails), use_container_width=True, hide_index=True)
+    if _warns:
+        st.warning(f"**{len(_warns)} item(s) need engineering review**")
+        st.dataframe(pd.DataFrame(_warns), use_container_width=True, hide_index=True)
+    if seismic_result is not None and getattr(seismic_result, 'scwb_details', None):
+        with st.expander("Strong Column–Weak Beam details (all joints)"):
+            st.dataframe(pd.DataFrame(seismic_result.scwb_details), use_container_width=True, hide_index=True)
+            st.caption("ΣMc: column capacities at the smallest factored axial load; ΣMb: beam capacities from provided steel "
+                       "(slab steel ignored). Required ratio 1.4.")
+    if not _failures:
+        st.success("✅ No failing or warning items among the implemented checks. This is not a substitute for independent verification.")

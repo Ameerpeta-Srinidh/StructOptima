@@ -1,3 +1,5 @@
+> **Status (2026-10-15): legacy document.** Formulas here describe earlier code and the statement that "all formulas have been verified" and the quoted test counts are historical claims without recorded evidence. Current, source-referenced documentation: [engineering/calculation-catalogue.md](engineering/calculation-catalogue.md), [engineering/standards-register.md](engineering/standards-register.md), [verification/verification-matrix.md](verification/verification-matrix.md).
+
 # StructOptima — Engineering Basis Document
 ### Structural Design Methodology & IS Code References
 

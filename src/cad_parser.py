@@ -19,6 +19,7 @@ class CADParser:
         self.filepath = filepath
         self.doc = None
         self.msp = None
+        self.warnings: List[str] = []   # user-facing parsing warnings (audit finding R17)
         
         # Default layer mapping
         self.layer_map = {
@@ -41,6 +42,37 @@ class CADParser:
         except ezdxf.DXFStructureError:
             logger.error("Invalid or corrupted DXF file: %s", self.filepath)
             raise
+
+    # DXF $INSUNITS codes -> metres per drawing unit
+    INSUNITS_TO_M = {1: 0.0254, 2: 0.3048, 4: 0.001, 5: 0.01, 6: 1.0}
+
+    def get_unit_scale(self) -> Optional[float]:
+        """Metres per drawing unit from the DXF header ($INSUNITS), or None if
+        the drawing is unitless / uses an unsupported unit."""
+        if not self.doc:
+            return None
+        try:
+            code = int(self.doc.header.get('$INSUNITS', 0))
+        except Exception:
+            return None
+        return self.INSUNITS_TO_M.get(code)
+
+    # Layer-name keywords that never carry structural walls (Tier 2 exclusion)
+    NON_WALL_KW = ['DIM', 'TEXT', 'ANNO', 'FURN', 'HATCH', 'TITLE', 'BORDER', 'GRID', 'AXIS', 'DEFPOINTS',
+                   'SYMB', 'DOOR', 'WIND', 'LANDSCAPE', 'TREE', 'SANIT', 'ELEC', 'PLUMB', 'NOTE', 'TAG',
+                   'LABEL', 'VIEWPORT', 'FIXTURE', 'FIX-']
+
+    def _all_layer_names(self) -> List[str]:
+        """Layers declared in the layer table plus layers referenced by
+        model-space entities (valid DXFs need not declare every layer)."""
+        names = [layer.dxf.name for layer in self.doc.layers]
+        seen = set(names)
+        for e in self.msp:
+            lay = e.dxf.get("layer", "0")
+            if lay not in seen:
+                seen.add(lay)
+                names.append(lay)
+        return names
 
     def _by_type_and_layer(self, dxftype, layer_name):
         """Filter entities directly — avoids ezdxf's query()/pyparsing dependency entirely."""
@@ -146,7 +178,7 @@ class CADParser:
         if not self.msp or not self.doc:
             return []
 
-        layer_names = [layer.dxf.name for layer in self.doc.layers]
+        layer_names = self._all_layer_names()
         col_layers = [n for n in layer_names if any(kw in n.upper() for kw in ['COL', 'PILLAR', 'STANCHION'])]
         if not col_layers and self.layer_map['columns'] in layer_names:
             col_layers.append(self.layer_map['columns'])
@@ -171,7 +203,7 @@ class CADParser:
         if not self.msp or not self.doc:
              return []
 
-        layer_names = [layer.dxf.name for layer in self.doc.layers]
+        layer_names = self._all_layer_names()
         beam_layers = [n for n in layer_names if 'BEAM' in n.upper()]
         if not beam_layers and self.layer_map['beams'] in layer_names:
             beam_layers.append(self.layer_map['beams'])
@@ -198,7 +230,7 @@ class CADParser:
         if not self.msp or not self.doc:
             return []
             
-        layer_names = [layer.dxf.name for layer in self.doc.layers]
+        layer_names = self._all_layer_names()
         
         # Keywords for wall layers (broad enough to catch any convention)
         WALL_KW = ['WALL', 'STRUCT', 'LOAD', 'BEAR', 'MASONRY', 'BRICK',
@@ -227,11 +259,16 @@ class CADParser:
             logger.info("Tier 1 wall extraction: %d segments from %d layers", len(walls), len(wall_layers))
             return walls
         
-        # Tier 2: Scan ALL layers for any line geometry
-        logger.warning("Tier 1 failed. Tier 2: scanning ALL layers for line geometry.")
-        walls = _get_lines_for_layers(layer_names)
+        # Tier 2: scan the remaining layers, excluding annotation / furniture layers
+        candidate = [n for n in layer_names if not any(kw in n.upper() for kw in self.NON_WALL_KW)]
+        excluded = sorted(set(layer_names) - set(candidate))
+        logger.warning("Tier 1 failed. Tier 2: scanning %d layers (excluded: %s).", len(candidate), excluded)
+        walls = _get_lines_for_layers(candidate)
         if walls:
-            logger.info("Tier 2 wall extraction: %d segments from all layers", len(walls))
+            self.warnings.append(
+                f"No WALL-type layer found: {len(walls)} line segments from layers {sorted(candidate)[:8]} were treated "
+                f"as walls. Check that no non-structural geometry is on these layers.")
+            logger.info("Tier 2 wall extraction: %d segments", len(walls))
             return walls
 
         # Tier 3: Geometric detection — find ANY lines in modelspace
@@ -267,6 +304,9 @@ class CADParser:
                     pass
 
         logger.info("Tier 3 geometric extraction: %d segments", len(walls))
+        if walls:
+            self.warnings.append(f"Wall layers not identified: {len(walls)} model-space line segments used as walls "
+                                 f"(geometric fallback) - verify the wall layout.")
         return walls
 
     def normalize_to_centerlines(

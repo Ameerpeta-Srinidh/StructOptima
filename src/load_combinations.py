@@ -498,6 +498,31 @@ def check_uplift_stability(
         return False, fos, f"UNSTABLE: 0.9DL < 1.5WL - Foundation may uplift! (Unfactored FoS = {fos:.2f})"
 
 
+def check_overturning(
+    weight_kn: float,
+    base_width_m: float,
+    overturning_moment_knm: float,
+    dead_factor: float = 0.9,
+    lateral_factor: float = 1.5
+) -> Tuple[bool, float, str]:
+    """Overall overturning of the building as a rigid block about a base edge.
+
+    Resisting moment = 0.9 x W x B/2 (W = seismic/dead weight, B = smaller plan
+    dimension); overturning = 1.5 x sum(storey force x height).  The older
+    ``check_uplift_stability`` compared forces, not moments (audit finding R8),
+    and is retained only for backward compatibility.
+
+    Returns (is_stable, factor_of_safety = Mr / M_ot unfactored, message).
+    """
+    if overturning_moment_knm <= 0:
+        return True, float('inf'), "No lateral overturning moment"
+    m_r = weight_kn * base_width_m / 2.0
+    fos = m_r / overturning_moment_knm
+    ok = dead_factor * m_r > lateral_factor * overturning_moment_knm
+    return ok, fos, (f"{'Stable' if ok else 'NOT stable'}: 0.9 Mr = {dead_factor * m_r:.0f} kNm vs 1.5 M_ot = "
+                     f"{lateral_factor * overturning_moment_knm:.0f} kNm (unfactored FoS {fos:.2f})")
+
+
 def get_summary_report(
     manager: LoadCombinationManager,
     dead_load_kn: float,

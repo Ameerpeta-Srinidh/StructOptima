@@ -141,8 +141,8 @@ with tab1:
                         congestion_warnings.append(f"Column {col.id}: {res.congestion_status}")
 
             for bm in all_beams:
-                 if hasattr(gm, 'beam_schedule') and bm.id in gm.beam_schedule:
-                     res = gm.beam_schedule[bm.id]
+                 res = gm.get_beam_result(bm.id) if hasattr(gm, 'get_beam_result') else None
+                 if res is not None:
                      
                      n_bot, d_bot = parse_rebar_string(res.bottom_bars_desc)
                      if n_bot > 0:

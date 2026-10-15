@@ -8,6 +8,11 @@ from src.geometry_exporter import GeometryExporter
 from src.visualizer import Visualizer
 from src.dxf_exporter import StructuralDXFExporter, ProfessionalDXFExporter
 import datetime
+import tempfile
+
+# Exports are written to a private temporary directory, never to the current
+# working directory (writing there overwrote tracked repository files - finding N10).
+_EXPORT_DIR = tempfile.mkdtemp(prefix="structoptima_dxf_")
 
 st.set_page_config(page_title='StructOptima — Drawings', layout='wide', page_icon='📐')
 inject_css()
@@ -96,7 +101,7 @@ with v_tab3:
     st.info("💡 **Tip:** Scroll to zoom, click and drag to pan.")
     if gm and all_beams:
         # Generate temporary DXF for the viewer
-        temp_dxf = "temp_viewer.dxf"
+        temp_dxf = os.path.join(_EXPORT_DIR, "temp_viewer.dxf")
         StructuralDXFExporter.export_structural_dxf(gm, all_beams, temp_dxf)
         
         # Convert to SVG HTML
@@ -117,7 +122,7 @@ c_d1, c_d2 = st.columns(2)
 
 if gm and all_beams:
     # Structural DXF Export
-    dxf_filename = "Structural_Plan.dxf"
+    dxf_filename = os.path.join(_EXPORT_DIR, "Structural_Plan.dxf")
     StructuralDXFExporter.export_structural_dxf(gm, all_beams, dxf_filename)
     
     with open(dxf_filename, "rb") as f:
@@ -129,7 +134,7 @@ if gm and all_beams:
         )
 
     # Professional DXF Export (Foundation Plan & Beam Schedule)
-    prof_dxf_filename = "Foundation_Plan_Professional.dxf"
+    prof_dxf_filename = os.path.join(_EXPORT_DIR, "Foundation_Plan_Professional.dxf")
     design_info = {
         "project_name": project_name,
         "engineer": engineer_name,
@@ -149,7 +154,7 @@ if gm and all_beams:
                 mime="application/dxf"
             )
             
-        beam_sched_filename = "Beam_Schedule.dxf"
+        beam_sched_filename = os.path.join(_EXPORT_DIR, "Beam_Schedule.dxf")
         prof_exporter.export_beam_schedule_table(beam_sched_filename)
         with open(beam_sched_filename, "rb") as f:
             c_d2.download_button(
@@ -169,7 +174,7 @@ if gm and all_beams:
         col_idx = lvl % 4
         
         # Generate floor DXF
-        floor_dxf = f"Floor_{lvl}_Plan.dxf"
+        floor_dxf = os.path.join(_EXPORT_DIR, f"Floor_{lvl}_Plan.dxf")
         StructuralDXFExporter.export_floor_dxf(gm, all_beams, lvl, floor_dxf)
         
         with open(floor_dxf, "rb") as f:

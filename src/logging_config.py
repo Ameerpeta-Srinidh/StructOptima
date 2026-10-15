@@ -68,21 +68,24 @@ def setup_logging(
     root_logger = logging.getLogger("src")
     root_logger.setLevel(log_level)
     
-    # Avoid adding duplicate handlers
-    if root_logger.handlers:
-        return
-    
     formatter = logging.Formatter(DEFAULT_LOG_FORMAT, DEFAULT_DATE_FORMAT)
-    
+    has_console = any(type(h) is logging.StreamHandler for h in root_logger.handlers)
+    has_file = any(isinstance(h, RotatingFileHandler) for h in root_logger.handlers)
+
+    # Avoid adding duplicate handlers (each handler type is added at most once,
+    # so an explicit setup_logging() can still add file output later)
+    if (has_console or not console_output) and (has_file or not file_output):
+        return
+
     # Console handler
-    if console_output:
+    if console_output and not has_console:
         console_handler = logging.StreamHandler(sys.stdout)
         console_handler.setLevel(log_level)
         console_handler.setFormatter(formatter)
         root_logger.addHandler(console_handler)
     
     # File handler with rotation
-    if file_output:
+    if file_output and not has_file:
         try:
             file_handler = RotatingFileHandler(
                 log_file,
@@ -111,9 +114,12 @@ def get_logger(name: str) -> logging.Logger:
     Returns:
         Configured Logger instance.
     """
-    # Ensure logging is configured
-    setup_logging()
-    
+    # Ensure logging is configured.  Importing a module must not create files:
+    # file output only when STRUCTOPTIMA_LOG_FILE is set (path) or when an
+    # entry point calls setup_logging() explicitly (main.py does).
+    env_file = os.environ.get("STRUCTOPTIMA_LOG_FILE")
+    setup_logging(log_file=env_file or None, file_output=bool(env_file))
+
     return logging.getLogger(name)
 
 

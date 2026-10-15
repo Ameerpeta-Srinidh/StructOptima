@@ -1,188 +1,152 @@
+"""
+IFC import (IfcBuildingStorey / IfcColumn / IfcBeam with IfcExtrudedAreaSolid
+and IfcRectangleProfileDef).
 
+Rewritten in the 2026-10 remediation (audit finding R14).  Behaviour:
+  * Length unit scale read from the IFC project (ifcopenshell.util.unit).
+  * Column base = object placement origin; height = extrusion depth.
+  * Beam axis = object placement x extrusion position x extruded direction.
+  * Plan coordinates shifted so the minimum column x / y is 0.
+  * Beams are de-duplicated by plan position: the design pipeline assumes the
+    same beam layout on every storey (limitation).
+  * Non-rectangular profiles fall back to 300 x 300 mm columns / 230 x 450 mm
+    beams with a warning.
+"""
+
+import math
+from typing import List, Optional, Tuple
+
+import numpy as np
 import ifcopenshell
 import ifcopenshell.util.element
 import ifcopenshell.util.placement
-import math
-from typing import List, Tuple, Optional
-from .grid_manager import GridManager, Column
-from .framing_logic import StructuralMember, Point, MemberProperties
+import ifcopenshell.util.unit
+
+from .framing_logic import MemberProperties, Point, StructuralMember
+from .grid_manager import Column, GridManager
 from .logging_config import get_logger
 
 logger = get_logger(__name__)
 
+
 class BIMLoader:
-    """
-    Parses Industry Foundation Classes (.ifc) files to extract structural data.
-    """
     def __init__(self, file_path: str):
         self.file_path = file_path
         self.model = ifcopenshell.open(file_path)
-        self.gm = None
-        self.beams = []
-        
+        self.gm: Optional[GridManager] = None
+        self.beams: List[StructuralMember] = []
+        self.warnings: List[str] = []
+        try:
+            self.unit = float(ifcopenshell.util.unit.calculate_unit_scale(self.model))  # metres per file unit
+        except Exception:
+            self.unit = 1.0
+            self.warnings.append("IFC length unit could not be read - metres assumed")
+
+    # ---------------------------------------------------------- helpers --
+    def _placement(self, elem) -> np.ndarray:
+        return ifcopenshell.util.placement.get_local_placement(elem.ObjectPlacement)
+
+    def _solid(self, elem):
+        rep = getattr(elem, "Representation", None)
+        if not rep:
+            return None
+        for r in rep.Representations:
+            for item in r.Items:
+                if item.is_a("IfcExtrudedAreaSolid"):
+                    return item
+                if item.is_a("IfcMappedItem"):
+                    for sub in item.MappingSource.MappedRepresentation.Items:
+                        if sub.is_a("IfcExtrudedAreaSolid"):
+                            return sub
+        return None
+
+    def _profile_mm(self, solid, default: Tuple[float, float], kind: str, name: str) -> Tuple[float, float]:
+        if solid is not None and solid.SweptArea.is_a("IfcRectangleProfileDef"):
+            p = solid.SweptArea
+            return round(p.XDim * self.unit * 1000.0 / 5.0) * 5.0, round(p.YDim * self.unit * 1000.0 / 5.0) * 5.0
+        self.warnings.append(f"{kind} {name}: non-rectangular or missing profile - {default[0]:.0f}x{default[1]:.0f} mm assumed")
+        return default
+
+    def _axis(self, elem, solid) -> Tuple[np.ndarray, np.ndarray, float]:
+        """(start point m, unit direction, length m) of the extrusion in world coordinates."""
+        M = self._placement(elem)
+        if solid is None:
+            return M[:3, 3] * self.unit, M[:3, 2], 0.0
+        P = ifcopenshell.util.placement.get_axis2placement(solid.Position) if solid.Position else np.eye(4)
+        W = M @ P
+        d = np.array(solid.ExtrudedDirection.DirectionRatios, dtype=float)
+        direction = W[:3, :3] @ d
+        direction = direction / (np.linalg.norm(direction) or 1.0)
+        return W[:3, 3] * self.unit, direction, float(solid.Depth) * self.unit
+
+    # ------------------------------------------------------------- main --
     def load_grid_manager(self) -> Tuple[GridManager, List[StructuralMember]]:
-        """
-        Main entry point. Returns GridManager and list of Beams.
-        """
         logger.info("Loading IFC: %s", self.file_path)
-        
-        # 1. Analyze Vertical Structure
-        stories = self.model.by_type("IfcBuildingStorey")
-        # Sort by elevation
-        stories.sort(key=lambda s: ifcopenshell.util.placement.get_local_placement(s.ObjectPlacement)[2, 3])
-        
-        num_stories = len(stories)
-        if num_stories == 0:
-             # Fallback if no stories defined properly
-             num_stories = 1
-             story_height = 3.0
+        storeys = self.model.by_type("IfcBuildingStorey")
+        storeys.sort(key=lambda s: self._placement(s)[2, 3])
+        elev = [self._placement(s)[2, 3] * self.unit for s in storeys]
+        n = max(len(storeys), 1)
+        if len(storeys) > 1:
+            h = (elev[-1] - elev[0]) / (len(storeys) - 1)
         else:
-             elevations = [ifcopenshell.util.placement.get_local_placement(s.ObjectPlacement)[2, 3] for s in stories]
-             # Calc avg height
-             if num_stories > 1:
-                 story_height = (elevations[-1] - elevations[0]) / (num_stories - 1)
-             else:
-                 story_height = 3.0 # Default
-                 
-             if story_height < 1.0: story_height = 3.0 # Safety
-             
-        # Initialize GridManager
-        # Dimensions are placeholder, will be updated by grid bounds
-        self.gm = GridManager(width_m=20.0, length_m=20.0, num_stories=num_stories, story_height_m=story_height)
-        self.gm.columns = [] 
-        
-        all_cols = []
-        all_beams = []
-        
-        # 2. Extract Elements per Storey
-        for i, storey in enumerate(stories):
-            logger.debug("Parsing Storey %d: %s", i, storey.Name)
-            
-            # Get elements contained in storey
-            # Uses IfcRelContainedInSpatialStructure
-            elements = ifcopenshell.util.element.get_decomposition(storey)
-            
-            for elem in elements:
+            h = 3.0
+        if h < 1.0:
+            self.warnings.append(f"Derived storey height {h:.2f} m implausible - 3.0 m used")
+            h = 3.0
+
+        raw_cols, raw_beams = [], []
+        for i, storey in enumerate(storeys):
+            for elem in ifcopenshell.util.element.get_decomposition(storey):
                 if elem.is_a("IfcColumn"):
-                    col = self._parse_column(elem, i, storey)
-                    if col: 
-                        all_cols.append(col)
+                    solid = self._solid(elem)
+                    origin, direction, depth = self._axis(elem, solid)
+                    base = self._placement(elem)[:3, 3] * self.unit
+                    w, d = self._profile_mm(solid, (300.0, 300.0), "Column", elem.GlobalId[:8])
+                    raw_cols.append((elem, i, base, depth if depth > 0 else h, w, d))
                 elif elem.is_a("IfcBeam"):
-                    bm = self._parse_beam(elem, i, storey)
-                    if bm:
-                        all_beams.append(bm)
-                        
-        self.gm.columns = all_cols
-        self.beams = all_beams
-        
-        logger.info("Extracted %d columns and %d beams.", len(self.gm.columns), len(self.beams))
-        return self.gm, self.beams
+                    solid = self._solid(elem)
+                    origin, direction, length = self._axis(elem, solid)
+                    if length <= 0:
+                        self.warnings.append(f"Beam {elem.GlobalId[:8]}: no extruded body - skipped")
+                        continue
+                    if abs(direction[2]) > 0.2:
+                        self.warnings.append(f"Beam {elem.GlobalId[:8]}: inclined member skipped")
+                        continue
+                    w, d = self._profile_mm(solid, (230.0, 450.0), "Beam", elem.GlobalId[:8])
+                    raw_beams.append((elem, origin, origin + direction * length, w, d))
 
-    def _Get_Global_Matrix(self, elem):
-         return ifcopenshell.util.placement.get_local_placement(elem.ObjectPlacement)
+        if not raw_cols:
+            raise ValueError("No IfcColumn elements found in IFC storeys")
+        x0 = min(c[2][0] for c in raw_cols)
+        y0 = min(c[2][1] for c in raw_cols)
+        z0 = min(c[2][2] for c in raw_cols)
 
-    def _parse_column(self, elem, level_idx, storey) -> Optional[Column]:
-        # 1. Geometry (Global Coords)
-        matrix = self._Get_Global_Matrix(elem)
-        # 4th column is translation vector (x, y, z, 1)
-        x = matrix[0, 3]
-        y = matrix[1, 3]
-        z_base = matrix[2, 3]
-        
-        # 2. Profile (Dimensions)
-        width = 300.0
-        depth = 300.0
-        
-        # Try to drill down Representation -> RepresentationMap -> MappedRepresentation -> Items -> IfcExtrudedAreaSolid -> ProfileDef
-        # OR: ifcopenshell.util.element.get_psets(elem) might have dimensions? rarely reliable.
-        # Let's inspect 'Representation'
-        
-        rep = elem.Representation
-        if rep:
-            for r in rep.Representations:
-                for item in r.Items:
-                    if item.is_a("IfcExtrudedAreaSolid"):
-                        profile = item.SweptArea
-                        if profile.is_a("IfcRectangleProfileDef"):
-                            width = profile.XDim
-                            depth = profile.YDim
-        
-        # Convert to mm if needed. IFC usually SI (m) or mm
-        # Check Project Units? 
-        # Heuristic: if width < 2.0, assumes meters => convert to mm
-        if width < 2.0: width *= 1000.0
-        if depth < 2.0: depth *= 1000.0
-        
-        # Rounding
-        width = round(width / 10.0) * 10
-        depth = round(depth / 10.0) * 10
-        
-        c = Column(
-            id=f"C_IFC_{elem.GlobalId[:5]}",
-            x=x,
-            y=y,
-            level=level_idx,
-            width_nb=width,
-            depth_nb=depth,
-            height_m=self.gm.story_height_m # Default, or derive from extrusion depth calculation
-        )
-        c.z_bottom = z_base
-        c.z_top = z_base + c.height_m
-        return c
+        cols: List[Column] = []
+        for elem, lvl, base, height, w, d in raw_cols:
+            zb = base[2] - z0
+            cols.append(Column(id=f"C_IFC_{elem.GlobalId[:6]}_L{lvl}", x=round(base[0] - x0, 3), y=round(base[1] - y0, 3),
+                               level=lvl, z_bottom=zb, z_top=zb + height, width_nb=w, depth_nb=d))
+        xs = sorted({round(c.x, 2) for c in cols})
+        ys = sorted({round(c.y, 2) for c in cols})
+        gm = GridManager(width_m=max(xs[-1] - xs[0], 0.1), length_m=max(ys[-1] - ys[0], 0.1),
+                         num_stories=n, story_height_m=h)
+        gm.x_grid_lines, gm.y_grid_lines = xs, ys
+        gm.columns = cols
 
-    def _parse_beam(self, elem, level_idx, storey) -> Optional[StructuralMember]:
-        matrix = self._Get_Global_Matrix(elem)
-        x_start = matrix[0, 3]
-        y_start = matrix[1, 3]
-        z_start = matrix[2, 3]
-        
-        # Need Length and Rotation to find End Point?
-        # Beam Axis usually along local X (1,0,0) extruding along Length? 
-        # Or Curve2D?
-        
-        # Simplification: Assume extrustion along local Z or X given profile alignment
-        # Usually IfcBeam -> ExtrudedAreaSolid -> Depth (Length)
-        length = 3.0 
-        width_mm = 230.0
-        depth_mm = 450.0
-        
-        rep = elem.Representation
-        if rep:
-            for r in rep.Representations:
-                for item in r.Items:
-                    if item.is_a("IfcExtrudedAreaSolid"):
-                        length = item.Depth # Extrusion depth = Length of beam usually
-                        
-                        profile = item.SweptArea
-                        if profile.is_a("IfcRectangleProfileDef"):
-                            width_mm = profile.XDim
-                            depth_mm = profile.YDim
-                                
-        # Units Heuristic
-        if width_mm < 2.0: width_mm *= 1000.0
-        if depth_mm < 2.0: depth_mm *= 1000.0
-        
-        # Transform End Point
-        # Local X is direction of extrusion usually (IfcExtrudedAreaSolid direction? No, Extrusion is usually along Z of Position)
-        # Actually ExtrudedAreaSolid: 'ExtrudedDirection'
-        
-        # Simplified: Use matrix rotation to find vector
-        # Local Z axis is column 2 (0,0,1)?
-        # For Beams, usually X axis is length.
-        
-        # Let's assume X axis of local placement is the beam axis.
-        vec_x = matrix[0, 0] * length
-        vec_y = matrix[1, 0] * length
-        # vec_z = matrix[2, 0] * length
-        
-        x_end = x_start + vec_x
-        y_end = y_start + vec_y
-        
-        bm = StructuralMember(
-            start_point=Point(x=x_start, y=y_start),
-            end_point=Point(x=x_end, y=y_end),
-            id=f"B_IFC_{elem.GlobalId[:5]}"
-        )
-        bm.properties = MemberProperties(width_mm=width_mm, depth_mm=depth_mm)
-        
-        return bm
+        plan = {}
+        for elem, p1, p2, w, d in raw_beams:
+            a = (round(p1[0] - x0, 2), round(p1[1] - y0, 2))
+            b = (round(p2[0] - x0, 2), round(p2[1] - y0, 2))
+            key = tuple(sorted([a, b]))
+            if key in plan or a == b:
+                continue
+            plan[key] = StructuralMember(id=f"B_IFC_{elem.GlobalId[:6]}", type="beam",
+                                         start_point=Point(x=key[0][0], y=key[0][1]),
+                                         end_point=Point(x=key[1][0], y=key[1][1]),
+                                         properties=MemberProperties(width_mm=w, depth_mm=d))
+        beams = list(plan.values())
+        if raw_beams and len(beams) < len(raw_beams):
+            self.warnings.append("Beams de-duplicated by plan position: the same beam layout is assumed on every storey")
+        self.gm, self.beams = gm, beams
+        logger.info("Extracted %d columns and %d plan beams (unit scale %.4f m).", len(cols), len(beams), self.unit)
+        return gm, beams

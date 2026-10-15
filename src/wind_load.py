@@ -108,6 +108,10 @@ class WindLoadResult:
     total_base_shear_y_kn: float = 0.0
     total_overturning_moment_x_knm: float = 0.0
     total_overturning_moment_y_knm: float = 0.0
+    # Storey forces (kN) at floor levels 1..N for wind blowing along +X / +Y
+    storey_forces_x_kn: List[float] = field(default_factory=list)
+    storey_forces_y_kn: List[float] = field(default_factory=list)
+    storey_heights_m: List[float] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
 
 
@@ -314,73 +318,41 @@ class WindLoadCalculator:
                 f"Internal pressure Cpi = ±{cpi} is high. Verify cladding design."
             )
         
-        num_levels = max(1, int(math.ceil(height_m / storey_height_m)))
-        
-        total_base_shear_x = 0.0
-        total_base_shear_y = 0.0
-        total_moment_x = 0.0
-        total_moment_y = 0.0
-        
-        for i in range(num_levels):
-            z = (i + 0.5) * storey_height_m
-            if z > height_m:
-                z = height_m
-            
+        num_levels = max(1, int(round(height_m / storey_height_m)))
+        # X direction: wind blows along X, loaded face spans the building
+        # length (Y extent); Y direction: face spans the width (X extent).
+        cpe_ww_x, cpe_lw_x = self.get_external_pressure_coefficients(height_m, length_m, width_m, "along_length")
+        cpe_ww_y, cpe_lw_y = self.get_external_pressure_coefficients(height_m, width_m, length_m, "along_length")
+
+        for j in range(1, num_levels + 1):
+            z = min(j * storey_height_m, height_m)
             k2 = self.calculate_k2(z)
             vz = self.calculate_design_wind_speed(z)
             pz = self.calculate_design_wind_pressure(z)
-            
-            cpe_ww_x, cpe_lw_x = self.get_external_pressure_coefficients(
-                height_m, width_m, length_m, "along_length"
-            )
-            
-            # Check both +Cpi and -Cpi and use the one that gives the maximum absolute net pressure
-            p_ww_plus = pz * (cpe_ww_x - cpi)
-            p_ww_minus = pz * (cpe_ww_x - (-cpi))
-            net_pressure_windward = p_ww_plus if abs(p_ww_plus) > abs(p_ww_minus) else p_ww_minus
-
-            p_lw_plus = pz * (cpe_lw_x - cpi)
-            p_lw_minus = pz * (cpe_lw_x - (-cpi))
-            net_pressure_leeward = p_lw_plus if abs(p_lw_plus) > abs(p_lw_minus) else p_lw_minus
-            
-            pressure_result = WindPressureResult(
-                height_m=z,
-                k2=k2,
-                design_wind_speed_ms=vz,
-                design_wind_pressure_kn_m2=pz,
-                cpe_windward=cpe_ww_x,
-                cpe_leeward=cpe_lw_x,
-                cpi=cpi,
-                net_pressure_windward_kn_m2=net_pressure_windward,
-                net_pressure_leeward_kn_m2=net_pressure_leeward
-            )
-            result.pressure_results.append(pressure_result)
-            
-            tributary_height = min(storey_height_m, height_m - i * storey_height_m)
-            
-            # Base shear uses external coefficients only (Cpi cancels globally)
-            force_x_windward = pz * cpe_ww_x * width_m * tributary_height
-            force_x_leeward = abs(pz * cpe_lw_x) * width_m * tributary_height
-            force_x = force_x_windward + force_x_leeward
-            
-            total_base_shear_x += force_x
-            total_moment_x += force_x * z
-            
-            cpe_ww_y, cpe_lw_y = self.get_external_pressure_coefficients(
-                height_m, width_m, length_m, "along_width"
-            )
-            force_y_windward = pz * cpe_ww_y * length_m * tributary_height
-            force_y_leeward = abs(pz * cpe_lw_y) * length_m * tributary_height
-            force_y = force_y_windward + force_y_leeward
-            
-            total_base_shear_y += force_y
-            total_moment_y += force_y * z
-        
-        result.total_base_shear_x_kn = total_base_shear_x
-        result.total_base_shear_y_kn = total_base_shear_y
-        result.total_overturning_moment_x_knm = total_moment_x
-        result.total_overturning_moment_y_knm = total_moment_y
-        
+            # cladding-type net pressures (both signs of Cpi considered) - reported only
+            p_ww = max((pz * (cpe_ww_x - cpi), pz * (cpe_ww_x + cpi)), key=abs)
+            p_lw = max((pz * (cpe_lw_x - cpi), pz * (cpe_lw_x + cpi)), key=abs)
+            result.pressure_results.append(WindPressureResult(
+                height_m=z, k2=k2, design_wind_speed_ms=vz, design_wind_pressure_kn_m2=pz,
+                cpe_windward=cpe_ww_x, cpe_leeward=cpe_lw_x, cpi=cpi,
+                net_pressure_windward_kn_m2=p_ww, net_pressure_leeward_kn_m2=p_lw))
+            # Tributary height: full storey for intermediate floors, half at roof
+            trib = storey_height_m if j < num_levels else storey_height_m / 2.0
+            # Global force uses external coefficients only (internal pressure cancels)
+            fx = pz * (cpe_ww_x + abs(cpe_lw_x)) * length_m * trib
+            fy = pz * (cpe_ww_y + abs(cpe_lw_y)) * width_m * trib
+            result.storey_forces_x_kn.append(fx)
+            result.storey_forces_y_kn.append(fy)
+            result.storey_heights_m.append(z)
+        result.total_base_shear_x_kn = sum(result.storey_forces_x_kn)
+        result.total_base_shear_y_kn = sum(result.storey_forces_y_kn)
+        result.total_overturning_moment_x_knm = sum(f * z for f, z in zip(result.storey_forces_x_kn, result.storey_heights_m))
+        result.total_overturning_moment_y_knm = sum(f * z for f, z in zip(result.storey_forces_y_kn, result.storey_heights_m))
+        min_b = min(width_m, length_m) if min(width_m, length_m) > 0 else 1.0
+        if height_m / min_b > 5.0 or height_m > 50.0:
+            result.warnings.append("Height/width > 5 or height > 50 m: dynamic (gust factor) effects of IS 875 Part 3 "
+                                   "are NOT evaluated - static wind only")
+        result.warnings.append("Kd, Ka, Kc and k4 factors of IS 875 Part 3:2015 not applied (taken as 1.0); Cpe values simplified")
         return result
 
 
@@ -390,7 +362,8 @@ def calculate_wind_load(
     width_m: float,
     length_m: float,
     terrain_category: TerrainCategory = TerrainCategory.CATEGORY_2,
-    opening_percentage: float = 10.0
+    opening_percentage: float = 10.0,
+    storey_height_m: float = 3.0
 ) -> WindLoadResult:
     """
     Convenience function to calculate wind loads.
@@ -411,5 +384,6 @@ def calculate_wind_load(
         height_m=height_m,
         width_m=width_m,
         length_m=length_m,
-        opening_percentage=opening_percentage
+        opening_percentage=opening_percentage,
+        storey_height_m=storey_height_m
     )

@@ -57,8 +57,9 @@ class TestBeamPlacer:
         
         depth = placer._calculate_depth(6000, SupportType.COLUMN_COLUMN)
         
-        # Implementation uses span/15 = 400mm, MIN_BEAM_DEPTH_MM=400 enforces floor
-        expected_depth = max(math.ceil((6000 / 15) / 25) * 25, 400)
+        # Primary (column-column) beams use span/12 (SP 34 practice, see
+        # BeamPlacer._calculate_depth "FIX 8"), floor 400 mm, rounded up to 50 mm.
+        expected_depth = math.ceil(max(6000 / 12, 400) / 50) * 50
         assert depth == expected_depth
         assert depth >= 300
     
@@ -67,8 +68,9 @@ class TestBeamPlacer:
         placer = BeamPlacer(columns=columns, walls=[], seismic_zone="III")
         
         depth = placer._calculate_depth(6000, SupportType.BEAM_BEAM)
-        
-        expected_depth = math.ceil((6000 / 15) / 25) * 25
+
+        # Secondary (beam-beam) members use span/10, floor 400 mm, rounded up to 50 mm.
+        expected_depth = math.ceil(max(6000 / 10, 400) / 50) * 50
         assert depth == expected_depth
         assert depth >= 300
     

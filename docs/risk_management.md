@@ -1,3 +1,5 @@
+> **Status (2026-10-15): legacy document** describing the CLI "Black Box" prompts (`src/risk_management.py`). The audit risk register is [assurance/risk-register.md](assurance/risk-register.md).
+
 # Black Box Risk Management Module
 
 ## Overview

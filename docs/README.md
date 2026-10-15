@@ -1,176 +1,118 @@
-# Structural Design Platform
+# StructOptima — Documentation Index
 
-An automated structural engineering platform for analyzing and designing reinforced concrete buildings per IS 456:2000.
+**Status date:** 2026-10-15 (audit, remediation and test execution recorded on this date)
+**Applies to:** working tree after the 2026-10 remediation (base commit `ee7223e` + uncommitted changes)
 
-![Platform Overview](https://img.shields.io/badge/Python-3.10+-blue.svg)
-![License](https://img.shields.io/badge/License-MIT-green.svg)
-![Tests](https://img.shields.io/badge/Tests-92%20passing-brightgreen.svg)
+StructOptima is a Python / Streamlit tool that generates and checks a
+**preliminary** reinforced-concrete frame design (columns, beams, slabs, a
+staircase flight and isolated footings) from manual dimensions, a DXF plan or
+an IFC model, and produces schedules, quantities and PDF / Excel / DXF outputs.
+It references IS 456:2000, IS 1893 (Part 1):2016, IS 875 and IS 13920:2016 but
+is **not** a certified code-compliance tool. Every output requires independent
+verification by a licensed structural engineer.
 
----
+> The previous content of this file (a duplicate of the product README) is
+> superseded and remains available in git history (`git show ee7223e:docs/README.md`).
 
-## Features
+## Current documented status (summary)
 
-- **Multi-Input Support**: Manual dimensions, CAD (DXF), or BIM (IFC) import
-- **Auto-Framing**: Automatically generate structural frames from architectural layouts
-- **IS 456 Compliance**: All calculations follow Indian Standard codes
-- **Comprehensive Analysis**:
-  - Column sizing and load takedown
-  - Beam analysis with deflection checks
-  - Foundation design with punching shear
-  - Rebar detailing schedules
-- **Bill of Materials**: Concrete, steel, excavation quantities with cost estimation
-- **Carbon Tracking**: Embodied carbon calculation with fly-ash optimization
-- **PDF Reports**: Professional structural design reports
-- **DXF Export**: Export structural plans for CAD software
-- **3D Visualization**: Interactive Plotly-based structure visualization
-- **Risk Management**: Comprehensive Black Box risk checks to prevent common software failures
+| Area | Status | Where |
+|---|---|---|
+| Architecture & data flow | Documented from source | [architecture/](architecture/system-overview.md) |
+| Engineering calculations | Catalogued; most `UNVERIFIED` against an independent engineer; FEA and several section checks `VERIFIED_FOR_CASES` | [engineering/calculation-catalogue.md](engineering/calculation-catalogue.md), [verification/verification-matrix.md](verification/verification-matrix.md) |
+| Audit findings R1–R27 + N1–N12 | Code changes made for most; **none** marked resolved without engineer review | [assurance/risk-register.md](assurance/risk-register.md) |
+| Test suite | 493 passed, 3 skipped, 0 failed (executed 2026-10-15) | [verification/verification-results.md](verification/verification-results.md) |
+| Standards clause wording | **Not verified against printed standards** | [engineering/standards-register.md](engineering/standards-register.md) |
 
----
+## Recommended reading order (new developer)
 
-## Quick Start
+1. [architecture/system-overview.md](architecture/system-overview.md) — what runs where
+2. [architecture/execution-flows.md](architecture/execution-flows.md) — app / CLI / CAD / IFC flows and failure paths
+3. [engineering/limitations.md](engineering/limitations.md) — **read before trusting any output**
+4. [engineering/calculation-catalogue.md](engineering/calculation-catalogue.md) and [engineering/units-and-conventions.md](engineering/units-and-conventions.md)
+5. [architecture/interfaces-and-contracts.md](architecture/interfaces-and-contracts.md) and [architecture/data-models.md](architecture/data-models.md)
+6. [verification/test-execution-guide.md](verification/test-execution-guide.md) and [development/setup.md](development/setup.md)
+7. [assurance/risk-register.md](assurance/risk-register.md) and [assurance/decision-log.md](assurance/decision-log.md)
 
-### Installation
+## All documents
 
-```bash
-# Clone or download the project
-cd c:\Srinidh\civil
+**Architecture**
+- [system-overview.md](architecture/system-overview.md)
+- [repository-inventory.md](architecture/repository-inventory.md)
+- [module-catalogue.md](architecture/module-catalogue.md)
+- [dependency-map.md](architecture/dependency-map.md)
+- [execution-flows.md](architecture/execution-flows.md)
+- [data-models.md](architecture/data-models.md)
+- [interfaces-and-contracts.md](architecture/interfaces-and-contracts.md)
 
-# Install dependencies
-pip install -r requirements.txt
-```
+**Engineering**
+- [calculation-catalogue.md](engineering/calculation-catalogue.md)
+- [units-and-conventions.md](engineering/units-and-conventions.md)
+- [assumptions-register.md](engineering/assumptions-register.md)
+- [standards-register.md](engineering/standards-register.md)
+- [limitations.md](engineering/limitations.md)
 
-### Run the Web App
+**Verification**
+- [test-inventory.md](verification/test-inventory.md)
+- [verification-matrix.md](verification/verification-matrix.md)
+- [benchmark-plan.md](verification/benchmark-plan.md)
+- [test-execution-guide.md](verification/test-execution-guide.md)
+- [verification-results.md](verification/verification-results.md)
 
-```bash
-streamlit run app.py
-```
+**Assurance**
+- [risk-register.md](assurance/risk-register.md)
+- [known-defects.md](assurance/known-defects.md)
+- [decision-log.md](assurance/decision-log.md)
+- [remediation-log.md](assurance/remediation-log.md)
 
-Open your browser to `http://localhost:8501`
+**Development**
+- [setup.md](development/setup.md)
+- [developer-workflow.md](development/developer-workflow.md)
+- [troubleshooting.md](development/troubleshooting.md)
+- [release-checklist.md](development/release-checklist.md)
 
-### Run the CLI
+**Legacy documents (kept, partly outdated — see banners inside)**
+- [engineering_basis.md](engineering_basis.md), [api_reference.md](api_reference.md),
+  [installation.md](installation.md), [user_guide.md](user_guide.md), [risk_management.md](risk_management.md)
 
-```bash
-# Default 18x12m building
-python main.py
+## Critical known limitations (short list)
 
-# Import from DXF
-python main.py --cad sample_design.dxf
+Full list: [engineering/limitations.md](engineering/limitations.md).
 
-# Auto-frame from architectural walls
-python main.py --cad sample_arch_only.dxf --auto-frame
-```
+- 2D plane frames along grid lines; **no torsion / accidental eccentricity**, no P-Δ, no response spectrum analysis.
+- IS 13920 ductile detailing is **not** designed (end-zone spacing only); R = 5 (SMRF) is therefore not justified by the tool.
+- Tabulated code values (τc, τc,max, Table 26 coefficients, steel stress–strain, spectra) were transcribed and **need checking against the printed standards**.
+- Column effective length factor is 1.0 by default (engineering decision required, IS 456 Annex E).
+- Footing sizing ignores base moments (flagged as a warning only); no combined footings, piles or rafts.
+- Quantities and costs are estimates with fixed rates and allowances.
 
----
+## Status vocabulary
 
-## Documentation
+| Status | Meaning |
+|---|---|
+| `NOT_ASSESSED` | Not looked at |
+| `IN_PROGRESS` | Work started, not complete |
+| `UNVERIFIED` | Implemented / changed, no independent evidence |
+| `VERIFIED_FOR_CASES` | Matches an independently derived reference for the listed cases only |
+| `CONFIRMED_DEFECT` | Defect reproduced, not yet changed |
+| `BLOCKED` | Needs a decision / information not available |
+| `RESOLVED_WITH_EVIDENCE` | Fixed **and** reviewed by a qualified engineer with documented evidence (none so far) |
 
-| Document | Description |
-|----------|-------------|
-| [Installation Guide](installation.md) | Detailed setup instructions |
-| [User Guide](user_guide.md) | How to use the platform |
-| [API Reference](api_reference.md) | Module and function documentation |
-| [Risk Management](risk_management.md) | Black Box risk management checks |
+## Documentation coverage matrix
 
----
+| Source area | Inventory | Module catalogue | Flows | Calculations | Tests mapped |
+|---|---|---|---|---|---|
+| `app.py`, `main.py`, `pages/` | Yes | Yes | Yes | n/a | UI smoke tests |
+| Production analysis/design (`src/design_pipeline.py`, `analysis_integration`, `fea_solver`, `section_design`, `rebar_detailer`, `grid_manager`, `foundation_eng`, `seismic`, `wind_load`, `load_combinations`) | Yes | Yes | Yes | Yes | Yes |
+| Checks (`audit`, `stability`, `safety_warnings`, `optimizer`, `risk_management`) | Yes | Yes | Yes | Yes | Partial |
+| Ingest (`cad_parser`, `cad_loader`, `auto_framer`, `column_placer`, `beam_placer`, `column_editor`, `bim_loader`) | Yes | Yes | Yes | Geometry only | Partial |
+| Quantities / outputs (`quantifier`, `wall_calculator`, `bbs_*`, `report_gen`, `exporters`, `dxf_exporter`, `visualizer`) | Yes | Yes | Yes | Summary only | Partial |
+| Test-only / unused modules | Yes | Yes (marked) | n/a | Summary | Existing tests |
 
-## Project Structure
+## Incomplete or unverified sections
 
-```
-civil/
-├── app.py                 # Streamlit web application
-├── main.py                # CLI entry point
-├── requirements.txt       # Python dependencies
-├── pytest.ini             # Test configuration
-│
-├── src/                   # Core modules
-│   ├── grid_manager.py    # Grid generation & column management
-│   ├── materials.py       # Concrete & Steel materials
-│   ├── sections.py        # Section geometry
-│   ├── calculations.py    # Load analysis & checks
-│   ├── foundation_eng.py  # Footing design
-│   ├── rebar_detailer.py  # Reinforcement scheduling
-│   ├── quantifier.py      # Bill of Materials
-│   ├── report_gen.py      # PDF report generation
-│   ├── audit.py           # Independent structural audit
-│   ├── risk_management.py # Black Box risk management checks
-│   ├── cad_loader.py      # DXF import
-│   ├── bim_loader.py      # IFC import
-│   ├── dxf_exporter.py    # DXF export
-│   ├── visualizer.py      # 3D visualization
-│   ├── logging_config.py  # Centralized logging
-│   ├── auth.py            # User authentication
-│   └── monitoring.py      # Error monitoring (Sentry)
-│
-├── tests/                 # Unit tests
-│   ├── conftest.py        # Shared fixtures
-│   ├── test_materials.py
-│   ├── test_sections.py
-│   ├── test_calculations.py
-│   ├── test_foundation_eng.py
-│   ├── test_grid_manager.py
-│   ├── test_audit.py
-│   └── test_risk_management.py
-│
-└── docs/                  # Documentation
-    ├── README.md
-    ├── installation.md
-    ├── user_guide.md
-    └── api_reference.md
-```
-
----
-
-## Requirements
-
-- Python 3.10 or higher
-- Windows, macOS, or Linux
-
-### Key Dependencies
-
-| Package | Purpose |
-|---------|---------|
-| streamlit | Web interface |
-| pydantic | Data validation |
-| numpy | Numerical calculations |
-| ezdxf | DXF file handling |
-| reportlab | PDF generation |
-| plotly | 3D visualization |
-| pytest | Testing framework |
-| sentry-sdk | Error monitoring |
-
----
-
-## Running Tests
-
-```bash
-# Run all tests
-python -m pytest tests/ -v
-
-# Run with coverage
-python -m pytest tests/ --cov=src --cov-report=html
-```
-
----
-
-## Configuration
-
-### Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `LOG_LEVEL` | Logging verbosity | `INFO` |
-| `SENTRY_DSN` | Sentry error tracking DSN | (disabled) |
-| `STRUCT_APP_USERNAME` | Auth username | `admin` |
-| `STRUCT_APP_PASSWORD_HASH` | Auth password hash | (see auth.py) |
-
----
-
-## License
-
-This project is for educational and professional use. 
-
----
-
-## Support
-
-For issues or feature requests, please contact the development team.
+- Clause-level wording of every cited standard (see [standards-register.md](engineering/standards-register.md)).
+- Masonry / plaster / paint quantity rules in `wall_calculator.py` and `report_gen.py` — catalogued at summary level only.
+- `auto_framer.py`, `column_placer.py`, `beam_placer.py` placement heuristics — documented at interface level; placement quality unverified.
+- `dxf_exporter.py`, `geometry_exporter.py`, `visualizer.py` drawing correctness — not assessed.
+- Site tools (`site_*`, `shm_*`, `digital_twin`, `bim_interop`, `documentation`) — inventoried; behaviour not assessed.

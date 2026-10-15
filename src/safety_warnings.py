@@ -11,7 +11,7 @@ Structural Engineer before construction.
 """
 
 from dataclasses import dataclass
-from typing import List, Tuple, Optional
+from typing import Optional, List, Tuple, Optional
 from enum import Enum
 import math
 
@@ -108,8 +108,9 @@ class SafetyWarningsChecker:
     def __init__(
         self,
         fck: float = 25.0,
-        fy: float = 500.0,
-        seismic_zone: str = "III"
+        fy: float = 415.0,
+        seismic_zone: str = "III",
+        cracked_sections_applied: bool = False
     ):
         self.fck = fck
         self.fy = fy
@@ -120,9 +121,11 @@ class SafetyWarningsChecker:
             column_modifier=0.70,
             beam_modifier=0.35,
             slab_modifier=0.25,
-            is_applied=False,
-            warning="⚠️ Analysis uses gross section (Ig). For accurate seismic "
-                   "behavior, use cracked section: Columns 0.7Ig, Beams 0.35Ig"
+            is_applied=cracked_sections_applied,
+            warning=("Cracked section modifiers applied in the frame analysis (Columns 0.7Ig, Beams 0.35Ig)"
+                     if cracked_sections_applied else
+                     "⚠️ Analysis uses gross section (Ig). For seismic analysis use cracked sections: "
+                     "Columns 0.7Ig, Beams 0.35Ig")
         )
     
     def check_joint_shear(
@@ -307,7 +310,8 @@ class SafetyWarningsChecker:
         columns: List,
         beams: List,
         floor_width: float = 0.0,
-        floor_length: float = 0.0
+        floor_length: float = 0.0,
+        joint_details: Optional[List[dict]] = None
     ) -> SafetyWarningsSummary:
         """
         Run all Phase 2 safety checks.
@@ -320,19 +324,19 @@ class SafetyWarningsChecker:
         Returns:
             SafetyWarningsSummary
         """
-        # Joint shear checks (sample)
+        # Joint shear checks: only from DESIGNED members (seismic.evaluate_joint_checks).
+        # The former placeholder check (first 5 columns, assumed 450 mm beam with
+        # 800 mm2 steel, all "interior") was audit finding R15.
         joint_checks = []
-        for col in columns[:5] if columns else []:
-            check = self.check_joint_shear(
-                f"J_{col.id}",
-                col.width_nb,
-                col.depth_nb,
-                beam_depth_mm=450,  # Assume typical beam
-                beam_tension_steel_mm2=800,  # ~4×16mm
-                joint_type="interior"
-            )
-            joint_checks.append(check)
-        
+        for jd in (joint_details or []):
+            util = jd["utilization"]
+            joint_checks.append(JointShearCheck(
+                joint_id=jd["joint"], column_width_mm=0.0, column_depth_mm=0.0, beam_depth_mm=0.0,
+                joint_shear_demand_kn=jd["Vj_demand_kN"], joint_shear_capacity_kn=jd["Vj_capacity_kN"],
+                is_adequate=bool(jd["pass"]), utilization_ratio=util,
+                remarks=(f"OK (Utilization: {util:.0%}, k={jd['confinement_factor']})" if jd["pass"]
+                         else f"FAIL: Joint overstressed by {(util - 1) * 100:.0f}%")))
+
         # Irregularity checks
         irregularities = self.check_plan_irregularities(
             floor_width, floor_length
@@ -350,6 +354,9 @@ class SafetyWarningsChecker:
             critical.append(f"⚠️ {joints_failed} beam-column joints overstressed")
             recommendations.append("Increase column size at critical joints")
         
+        if joint_details is None:
+            recommendations.append("Joint shear not evaluated: requires designed beam reinforcement "
+                                   "(run the full design pipeline)")
         if not self.cracked_mods.is_applied:
             recommendations.append(
                 "Apply cracked section modifiers for seismic analysis "
@@ -378,7 +385,10 @@ def run_safety_warnings_check(
     footings_or_width=0.0,
     floor_length: float = 0.0,
     fck: float = 25.0,
-    seismic_zone: str = "III"
+    seismic_zone: str = "III",
+    joint_details: Optional[List[dict]] = None,
+    cracked_sections_applied: bool = False,
+    fy: float = 415.0
 ) -> SafetyWarningsSummary:
     """
     Main function to run Phase 2 safety warnings checks.
@@ -409,8 +419,10 @@ def run_safety_warnings_check(
     
     checker = SafetyWarningsChecker(
         fck=fck,
-        seismic_zone=seismic_zone
+        fy=fy,
+        seismic_zone=seismic_zone,
+        cracked_sections_applied=cracked_sections_applied
     )
-    
-    return checker.run_all_checks(columns, beams, floor_width, floor_length)
+
+    return checker.run_all_checks(columns, beams, floor_width, floor_length, joint_details)
 

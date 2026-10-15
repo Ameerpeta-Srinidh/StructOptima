@@ -1,3 +1,5 @@
+> **Status (2026-10-15): legacy document**, written before the 2026-10 remediation (design status banner, structural system / soil / importance inputs, PRELIMINARY reports). See [architecture/execution-flows.md](architecture/execution-flows.md) and [engineering/limitations.md](engineering/limitations.md).
+
 # User Guide
 
 This guide explains how to use the Structural Design Platform to analyze and design reinforced concrete buildings.

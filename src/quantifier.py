@@ -79,14 +79,13 @@ class Quantifier:
         self.contingency_percent = 5.0
         self.cost_index_percent = 0.0 # User input typically
         
-    def calculate_column_volume(self, columns: List[Column], height_m: float = 3.0) -> float:
+    def calculate_column_volume(self, columns: List[Column], height_m: Optional[float] = None) -> float:
+        """Column concrete volume using each segment's own height
+        (z_top - z_bottom); ``height_m`` overrides when given (legacy)."""
         total_vol = 0.0
         for col in columns:
-            # width_nb is mm, convert to m
-            w_m = col.width_nb / 1000.0
-            d_m = col.depth_nb / 1000.0
-            vol = w_m * d_m * height_m
-            total_vol += vol
+            h = height_m if height_m is not None else max(col.z_top - col.z_bottom, 0.0)
+            total_vol += (col.width_nb / 1000.0) * (col.depth_nb / 1000.0) * h
         return total_vol
         
     def calculate_beam_volume(self, beams: List[StructuralMember]) -> float:
@@ -110,7 +109,8 @@ class Quantifier:
         beams: List[StructuralMember], 
         footings: List[BaseModel] = [],
         grid_mgr: 'GridManager' = None, # Needed to access schedule dicts
-        use_fly_ash: bool = False # Optimization toggle
+        use_fly_ash: bool = False, # Optimization toggle
+        fck: float = 25.0
     ) -> MaterialCost:
         # Volumes
         col_vol = self.calculate_column_volume(columns)
@@ -153,9 +153,15 @@ class Quantifier:
                         if void_area >= 0.1:
                             opening_deduction_area += void_area
                 
-                # Net floor area after opening deductions
-                net_floor_area = total_floor_area - opening_deduction_area
-                slab_vol = net_floor_area * avg_thickness_m * num_stories
+                if actual_area > 0:
+                    # Panel results already exclude void bays: sum each panel's own
+                    # area x thickness (no second deduction).
+                    slab_vol = sum(getattr(sr, 'area_m2', 0.0) * sr.thickness_mm / 1000.0
+                                   for sr in grid_mgr.slab_schedule.values()) * num_stories
+                else:
+                    # Legacy path (schedule without panel areas): IS 1200 deduction
+                    net_floor_area = total_floor_area - opening_deduction_area
+                    slab_vol = net_floor_area * avg_thickness_m * num_stories
         
         total_conc = col_vol + beam_vol + footing_conc_vol + slab_vol
         
@@ -200,8 +206,9 @@ class Quantifier:
         if grid_mgr and hasattr(grid_mgr, 'beam_schedule') and grid_mgr.beam_schedule:
             use_detailed_beams = True
             for b in beams:
-                if b.id in grid_mgr.beam_schedule:
-                    res = grid_mgr.beam_schedule[b.id]
+                # per-level ids (B_H_1_L0) map to the plan beam result (audit finding R13)
+                res = grid_mgr.get_beam_result(b.id) if hasattr(grid_mgr, 'get_beam_result') else grid_mgr.beam_schedule.get(b.id)
+                if res is not None:
                     # Length
                     dx = b.end_point.x - b.start_point.x
                     dy = b.end_point.y - b.start_point.y
@@ -222,40 +229,29 @@ class Quantifier:
             steel_by_dia['Est_Beam'] = steel_beams
             total_steel += steel_beams
             
-        # 3. Slab (Approximation from schedule if possible)
-        # We need area. 
-        # grid_mgr.width_m * grid_mgr.length_m * stories
-        if grid_mgr and hasattr(grid_mgr, 'slab_schedule'):
-             # Avg weight per m2 from a sample slab?
-             # Take S1
-             if 'S1' in grid_mgr.slab_schedule:
-                 s_res = grid_mgr.slab_schedule['S1']
-                 # Total area
-                 actual_area = 0.0
-                 if grid_mgr.slab_schedule:
-                     for slab_id, slab in grid_mgr.slab_schedule.items():
-                         if hasattr(slab, 'area_m2'):
-                             actual_area += slab.area_m2
-                 if actual_area > 0:
-                     total_area = actual_area * grid_mgr.num_stories
-                 else:
-                     total_area = grid_mgr.width_m * grid_mgr.length_m * grid_mgr.num_stories
-                 
-                 # Subtract void?
-                 
-                 if hasattr(s_res, 'weight_breakdown') and s_res.weight_breakdown:
-                     for dia, kg_pm2 in s_res.weight_breakdown.items():
-                         w = kg_pm2 * total_area
-                         steel_by_dia[dia] = steel_by_dia.get(dia, 0) + w
-                         total_steel += w
-                 else:
-                     w = s_res.weight_kg_per_m2 * total_area
-                     steel_by_dia['Unknown'] = steel_by_dia.get('Unknown', 0) + w
-                     total_steel += w
-        
+        # 3. Slabs: each panel's steel weight per m2 x its area x storeys
+        if grid_mgr and getattr(grid_mgr, 'slab_schedule', None):
+            n_st = getattr(grid_mgr, 'num_stories', 1)
+            fallback_area = grid_mgr.width_m * grid_mgr.length_m / max(len(grid_mgr.slab_schedule), 1)
+            for s_res in grid_mgr.slab_schedule.values():
+                area = (getattr(s_res, 'area_m2', 0.0) or fallback_area) * n_st
+                if getattr(s_res, 'weight_breakdown', None):
+                    for dia, kg_pm2 in s_res.weight_breakdown.items():
+                        steel_by_dia[dia] = steel_by_dia.get(dia, 0) + kg_pm2 * area
+                        total_steel += kg_pm2 * area
+                else:
+                    steel_by_dia['Unknown'] = steel_by_dia.get('Unknown', 0) + s_res.weight_kg_per_m2 * area
+                    total_steel += s_res.weight_kg_per_m2 * area
+
         # 4. Footings
-        steel_footings = footing_conc_vol * 80.0
-        steel_by_dia[10] = steel_by_dia.get(10, 0) + steel_footings # Assume 10mm for footings
+        designed = [getattr(f, 'steel_weight_kg', 0.0) for f in footings]
+        if footings and all(w > 0 for w in designed):
+            steel_footings = sum(designed)
+            key = 12
+        else:
+            steel_footings = footing_conc_vol * 80.0   # 80 kg/m3 allowance when not designed
+            key = 10
+        steel_by_dia[key] = steel_by_dia.get(key, 0) + steel_footings
         total_steel += steel_footings
         
         # Apply wastage and rolling margin to steel quantities
@@ -317,8 +313,7 @@ class Quantifier:
         total_carbon = carbon_conc + carbon_steel
         
         # Calculate material breakdown using IS 10262 design mix values
-        # Defaulting to M25 (340 kg/m3) since grade isn't directly passed here.
-        fck = 25.0
+        # Cement content by grade (indicative nominal values, assumption A-QTY-03)
         if fck == 20: cement_per_m3 = 320.0
         elif fck == 25: cement_per_m3 = 340.0
         elif fck == 30: cement_per_m3 = 360.0

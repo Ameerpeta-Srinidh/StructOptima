@@ -65,19 +65,11 @@ if all_levels:
             load = getattr(col, 'load_kn', 0)
             width = getattr(col, 'width_mm', getattr(col, 'width_nb', 300))
             depth = getattr(col, 'depth_mm', getattr(col, 'depth_nb', width))
-            capacity = getattr(col, 'capacity_kn', getattr(col, 'capacity', 0))
-
-            if capacity > 0:
-                dc = load / capacity
-            else:
-                cap_est = (0.4 * fck * width * depth / 1000) + (0.67 * 415 * 0.008 * width * depth / 1000)
-                dc = load / cap_est if cap_est > 0 else 0
-
-            status = "Pass"
-            if dc > 0.9:
-                status = "Fail"
-            elif dc >= 0.7:
-                status = "Warning"
+            # Status and utilisation come from the production column design
+            # (factored combinations, P-M interaction) - not re-estimated here.
+            _res = gm.rebar_schedule.get(col.id) if getattr(gm, 'rebar_schedule', None) else None
+            dc = getattr(_res, 'interaction_ratio', 0.0) if _res is not None else 0.0
+            status = {"PASS": "Pass", "WARN": "Warning", "FAIL": "Fail"}.get(getattr(_res, 'status', ''), "Not designed")
 
             if status_filter != "All" and status != status_filter:
                 continue
@@ -103,7 +95,8 @@ if all_levels:
             h_col = getattr(col, 'z_top', 3.0) - getattr(col, 'z_bottom', 0.0)
             if h_col <= 0: h_col = 3.0
             col_conc_vol = (width / 1000.0) * (depth / 1000.0) * h_col
-            col_steel_wt = col_conc_vol * 150.0  # IS 456 standard column steel ratio ~150 kg/m3
+            col_steel_wt = (getattr(gm.rebar_schedule.get(col.id), 'total_steel_weight_kg_per_m', 0.0) * h_col
+                            if getattr(gm, 'rebar_schedule', None) and col.id in gm.rebar_schedule else 0.0)
 
             data.append({
                 "ID": col.id,
@@ -111,7 +104,7 @@ if all_levels:
                 "Load (kN)": f"{load:.1f}",
                 "Conc (m³)": f"{col_conc_vol:.2f}",
                 "Steel (kg)": f"{col_steel_wt:.1f}",
-                "D/C Ratio": min(dc, 1.0),
+                "P-M Ratio": round(dc, 2),
                 "Main Steel": main_steel,
                 "Stirrups": stirrups,
                 "Footing Size": footing_size,
@@ -125,9 +118,9 @@ if all_levels:
                 use_container_width=True,
                 hide_index=True,
                 column_config={
-                    "D/C Ratio": st.column_config.ProgressColumn(
-                        "D/C Ratio",
-                        help="Demand/Capacity Ratio",
+                    "P-M Ratio": st.column_config.ProgressColumn(
+                        "P-M Ratio",
+                        help="Governing biaxial interaction ratio from the column design (<= 1.0 passes)",
                         format="%.2f",
                         min_value=0,
                         max_value=1.0,
@@ -153,7 +146,7 @@ if hasattr(gm, 'beam_schedule') and gm.beam_schedule:
             bm_d = getattr(b_info, 'depth_mm', getattr(b_info, 'depth', 400))
             bm_span = getattr(b_info, 'span_m', getattr(b_info, 'span', 4.0))
             bm_vol = (bm_w / 1000.0) * (bm_d / 1000.0) * bm_span
-            bm_steel = bm_vol * 120.0
+            bm_steel = getattr(b_info, 'weight_kg_per_m', 0.0) * bm_span
             row = {
                 "Beam ID": str(bid),
                 "Size (mm)": f"{bm_w:.0f}x{bm_d:.0f}",
@@ -163,7 +156,9 @@ if hasattr(gm, 'beam_schedule') and gm.beam_schedule:
                 "Bot Steel": str(getattr(b_info,'bottom_bars_desc',getattr(b_info,'bottom_steel','N/A'))),
                 "Top Steel": str(getattr(b_info,'top_bars_desc',getattr(b_info,'top_steel','N/A'))),
                 "Stirrups": str(getattr(b_info,'stirrups_desc',getattr(b_info,'stirrups','N/A'))),
-                "Status": str(getattr(b_info,'status','OK')),
+                "Mu+ / Mu- (kNm)": f"{getattr(b_info,'mu_sagging_knm',0):.0f} / {getattr(b_info,'mu_hogging_knm',0):.0f}",
+                "Vu (kN)": f"{getattr(b_info,'vu_kn',0):.0f}",
+                "Status": str(getattr(b_info,'status','N/A')),
             }
         beam_data.append(row)
 else:
@@ -202,7 +197,7 @@ if hasattr(gm, 'slab_schedule') and gm.slab_schedule:
         thk = getattr(s_info, 'thickness_mm', getattr(s_info, 'thickness', 125))
         area = getattr(s_info, 'area_m2', getattr(s_info, 'area', 16.0))
         s_vol = area * (thk / 1000.0)
-        s_steel = s_vol * 90.0
+        s_steel = getattr(s_info, 'weight_kg_per_m2', 0.0) * area
         slab_data.append({
             "Slab ID": str(sid),
             "Thickness (mm)": f"{thk:.0f}",

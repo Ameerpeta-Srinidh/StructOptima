@@ -425,8 +425,8 @@ def render_member_search():
                                 bm.end_point.y - bm.start_point.y)
             
             rebar_info = "—"
-            if hasattr(gm, 'beam_schedule') and bm.id in gm.beam_schedule:
-                res = gm.beam_schedule[bm.id]
+            res = gm.get_beam_result(bm.id) if hasattr(gm, 'get_beam_result') else None
+            if res is not None:
                 rebar_info = f"Bot: {res.bottom_bars_desc} | Stirrups: {res.stirrups_desc}"
             
             st.markdown(f"""

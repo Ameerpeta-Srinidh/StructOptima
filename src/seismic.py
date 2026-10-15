@@ -74,14 +74,51 @@ RESPONSE_REDUCTION = {
     StructuralSystem.SHEAR_WALL: 4.0,
 }
 
-# Importance Factors (IS 1893 Table 8)
+# Importance Factors (IS 1893 Table 8) - keyword lookup (legacy)
 IMPORTANCE_FACTORS = {
     "residential": 1.0,
     "commercial": 1.2,
     "school": 1.5,
     "hospital": 1.5,
     "emergency": 1.5,
+    "institutional": 1.5,
+    "assembly": 1.5,
 }
+
+# Default importance factor per StructOptima occupancy (building_types names).
+# Conservative defaults chosen during the 2026-10 remediation (PROPOSED
+# decision D-03) - verify against IS 1893 (Part 1):2016 Table 8 for the actual
+# occupancy / number of occupants.
+OCCUPANCY_IMPORTANCE = {
+    "residential": 1.0,
+    "commercial (office)": 1.2,
+    "commercial (retail/shopping)": 1.5,
+    "institutional": 1.5,
+    "assembly hall": 1.5,
+}
+
+
+def importance_for_occupancy(name: str) -> float:
+    key = (name or "").strip().lower()
+    if key in OCCUPANCY_IMPORTANCE:
+        return OCCUPANCY_IMPORTANCE[key]
+    for k, v in IMPORTANCE_FACTORS.items():
+        if k in key:
+            return v
+    return 1.0
+
+
+def structural_system_from(value) -> "StructuralSystem":
+    if isinstance(value, StructuralSystem):
+        return value
+    v = str(value or "OMRF").upper()
+    if v in ("SMF", "SMRF"):
+        return StructuralSystem.SPECIAL_MOMENT_FRAME
+    if v == "DUAL":
+        return StructuralSystem.DUAL_SYSTEM
+    if v in ("SW", "SHEAR_WALL"):
+        return StructuralSystem.SHEAR_WALL
+    return StructuralSystem.ORDINARY_MOMENT_FRAME
 
 
 @dataclass
@@ -208,6 +245,18 @@ class SeismicAnalysisResult:
     is_regular: bool = True
     static_analysis_allowed: bool = True
     
+    # Storey forces (equivalent static vertical distribution)
+    height_m: float = 0.0
+    storey_weights_kn: List[float] = field(default_factory=list)
+    storey_heights_m: List[float] = field(default_factory=list)
+    storey_forces_kn: List[float] = field(default_factory=list)
+
+    # Design-based joint checks (filled by evaluate_joint_checks)
+    scwb_details: List[dict] = field(default_factory=list)
+    joint_details: List[dict] = field(default_factory=list)
+    scwb_evaluated: bool = False
+    ductile_verification: str = "NOT_EVALUATED"   # NOT_EVALUATED | PARTIAL_SPACING_ONLY | NOT_REQUIRED
+
     # Warnings
     warnings: List[str] = field(default_factory=list)
 
@@ -230,11 +279,13 @@ class SeismicDesignChecker:
         structural_system: StructuralSystem = StructuralSystem.SPECIAL_MOMENT_FRAME,
         soil_type: str = "II",
         fck: float = 25.0,
-        fy: float = 500.0
+        fy: float = 415.0,
+        importance_factor: Optional[float] = None
     ):
         self.zone = zone
         self.building_type = building_type
-        self.structural_system = structural_system
+        self.importance_override = importance_factor
+        self.structural_system = structural_system_from(structural_system)
         self.soil_type = soil_type
         self.fck = fck
         self.fy = fy
@@ -245,7 +296,7 @@ class SeismicDesignChecker:
     def _calculate_parameters(self) -> SeismicParameters:
         """Calculate seismic design parameters per IS 1893."""
         Z = ZONE_FACTORS[self.zone]
-        I = IMPORTANCE_FACTORS.get(self.building_type.lower(), 1.0)
+        I = self.importance_override if self.importance_override else importance_for_occupancy(self.building_type)
         R = RESPONSE_REDUCTION[self.structural_system]
         
         # Spectral acceleration coefficient (simplified for T < 0.55s)
@@ -279,16 +330,22 @@ class SeismicDesignChecker:
             fundamental_period=0.0 # Will be refined with height
         )
     
-    def get_spectral_acceleration(self, Ta: float) -> float:
-        # IS 1893:2016 Spectral Acceleration Sa/g
-        # Simplified for user transparency (Medium Soil Type II)
-        if Ta < 0.10: return 1.0 + 15.0 * Ta
+    # Design spectrum for equivalent static analysis, IS 1893 (Part 1):2016
+    # (transcribed - verify): soil type -> (plateau end T, numerator, floor)
+    SPECTRUM = {"I": (0.40, 1.00, 0.25), "II": (0.55, 1.36, 0.34), "III": (0.67, 1.67, 0.42)}
 
-        if Ta <= 0.55: return 2.5
-        if Ta <= 4.0: return 1.36 / Ta
-        return 0.34
+    def get_spectral_acceleration(self, Ta: float, soil_type: Optional[str] = None) -> float:
+        t_end, num, floor = self.SPECTRUM.get(str(soil_type or self.soil_type or "II").upper(), self.SPECTRUM["II"])
+        if Ta < 0.10:
+            return 1.0 + 15.0 * Ta
+        if Ta <= t_end:
+            return 2.5
+        if Ta <= 4.0:
+            return num / Ta
+        return floor
         
-    def calculate_base_shear(self, building_weight_kn: float, height_m: float = 9.0) -> float:
+    def calculate_base_shear(self, building_weight_kn: float, height_m: float = 9.0,
+                             base_dimension_m: Optional[float] = None, masonry_infill: bool = False) -> float:
         """
         Calculate design base shear per IS 1893.
         Updates internal params with actual Ta and Ah.
@@ -296,8 +353,13 @@ class SeismicDesignChecker:
         Ta = 0.075 * h^0.75 (RC Moment Resisting Frame) // IS 1893 Cl 7.6.1
         Vb = Ah × W
         """
-        # 1. Calc Fundamental Period
-        self.params.fundamental_period = 0.075 * (height_m ** 0.75)
+        # 1. Fundamental period: bare RC MRF 0.075 h^0.75; with masonry infill the
+        # code also gives 0.09 h / sqrt(d).  The SHORTER period is used (Sa/g
+        # equal or larger) - assumption A-SEI-02.
+        ta = 0.075 * (height_m ** 0.75)
+        if masonry_infill and base_dimension_m and base_dimension_m > 0:
+            ta = min(ta, 0.09 * height_m / math.sqrt(base_dimension_m))
+        self.params.fundamental_period = ta
         
         # 2. Get Sa/g
         sa_g = self.get_spectral_acceleration(self.params.fundamental_period)
@@ -477,7 +539,8 @@ class SeismicDesignChecker:
             # Check if ground level (0) column exists
             has_ground = any(c.level == 0 for c in col_stack)
             
-            if not has_ground and len(col_stack) > 0:
+            flagged = any(getattr(c, "is_floating", False) for c in col_stack)
+            if (not has_ground or flagged) and len(col_stack) > 0:
                 # This is a floating column stack
                 first_col = col_stack[0]
                 results.append(FloatingColumnCheck(
@@ -709,90 +772,206 @@ class SeismicDesignChecker:
         columns: List,
         beams: List,
         building_weight_kn: float,
-        height_m: float = 9.0
+        height_m: float = 9.0,
+        storey_weights_kn: Optional[List[float]] = None,
+        storey_heights_m: Optional[List[float]] = None,
+        base_dimension_m: Optional[float] = None,
+        masonry_infill: bool = False,
+        plan_width_m: float = 0.0,
+        plan_length_m: float = 0.0,
+        plan_area_m2: Optional[float] = None,
     ) -> SeismicAnalysisResult:
-        """
-        Run complete seismic analysis including all checks.
-        
-        Args:
-            columns: List of Column objects
-            beams: List of beam StructuralMember objects
-            building_weight_kn: Total seismic weight
-            
-        Returns:
-            SeismicAnalysisResult with all checks
-        """
-        # Base shear (updates params with actual Ta)
-        base_shear = self.calculate_base_shear(building_weight_kn, height_m)
-        
-        # SCWB checks (simplified - at each column)
-        scwb_checks = []
-        if self.params.scwb_required:
-            for col in columns:
-                if col.level == 0:
-                    continue  # Skip foundation level
-                
-                # Estimate column capacity
-                ast_col = 0.02 * col.width_nb * col.depth_nb  # Assume 2%
-                Mc = self.calculate_column_moment_capacity(
-                    col.width_nb, col.depth_nb, col.load_kn, ast_col
-                )
-                
-                # Estimate beam capacity (simplified check, real beam capacities should be used)
-                b_beam = 230.0  # mm
-                d_beam = 450.0  # mm
-                Mb = 0.138 * self.fck * b_beam * (d_beam ** 2) / 1e6  # kNm (IS 456 balanced section)
-                
-                check = self.check_strong_column_weak_beam(
-                    Mc * 2,  # Two columns at joint
-                    Mb * 2,  # Two beams at joint
-                    f"J_{col.id}"
-                )
-                scwb_checks.append(check)
-        
-        # Ductile detailing requirements
-        ductile_checks = []
-        if self.params.ductile_detailing_required:
-            for col in columns[:5]:  # Sample check
-                req = self.get_ductile_detailing_requirements(
-                    "column", col.depth_nb, col.width_nb
-                )
-                req.member_id = col.id
-                ductile_checks.append(req)
-        
-        # Floating column detection
+        """Base shear, vertical distribution, regularity screening and
+        floating-column detection.  Strong-column/weak-beam, joint shear and
+        ductile detailing are evaluated from the designed members by
+        :func:`evaluate_joint_checks` (placeholders before the 2026-10
+        remediation, audit finding R15)."""
+        base_shear = self.calculate_base_shear(building_weight_kn, height_m, base_dimension_m, masonry_infill)
+
+        # Vertical distribution Qi = Vb Wi hi^2 / sum(Wj hj^2)
+        forces: List[float] = []
+        if storey_weights_kn and storey_heights_m:
+            denom = sum(w * h * h for w, h in zip(storey_weights_kn, storey_heights_m))
+            forces = [base_shear * w * h * h / denom if denom > 0 else 0.0
+                      for w, h in zip(storey_weights_kn, storey_heights_m)]
+
         floating = self.detect_floating_columns(columns, beams)
-        
-        # Warnings
-        warnings = []
+        warnings: List[str] = []
         if self.fck < self.params.min_concrete_grade:
-            warnings.append(
-                f"⚠️ Concrete grade M{int(self.fck)} below minimum M{self.params.min_concrete_grade} "
-                f"for Zone {self.zone.value}"
-            )
-        
+            warnings.append(f"Concrete grade M{int(self.fck)} below minimum M{self.params.min_concrete_grade} "
+                            f"for Zone {self.zone.value}")
         if floating:
-            warnings.append(
-                f"⚠️ {len(floating)} floating column(s) detected. "
-                f"Verify transfer beam capacity."
-            )
-        
-        # Summary
-        all_scwb = all(c.is_compliant for c in scwb_checks) if scwb_checks else True
-        all_ductile = all(c.is_compliant for c in ductile_checks) if ductile_checks else True
-        
+            warnings.append(f"{len(floating)} floating column(s) detected. Verify transfer beam capacity.")
+        if self.structural_system == StructuralSystem.SPECIAL_MOMENT_FRAME:
+            warnings.append("R = 5 (SMRF) assumes full IS 13920 ductile detailing. StructOptima provides end-zone "
+                            "tie/stirrup spacing only (confining steel Ash and capacity-design shear are NOT checked) - "
+                            "an engineer must verify IS 13920 compliance before relying on R = 5.")
+        elif self.zone != SeismicZone.ZONE_II:
+            warnings.append(f"Ordinary moment frame (R = 3) selected in Zone {self.zone.value}: verify that this "
+                            f"system is permitted for the zone and building per IS 1893 (Part 1) Table 9.")
+
+        irregularities: List[IrregularityCheck] = []
+        if plan_width_m > 0 and plan_length_m > 0 and plan_area_m2 is not None:
+            bbox = plan_width_m * plan_length_m
+            if plan_area_m2 < 0.95 * bbox:
+                proj = math.sqrt(max(bbox - plan_area_m2, 0.0))
+                irregularities = self.check_irregularities(plan_width_m, plan_length_m,
+                                                           re_entrant_x_m=proj, re_entrant_y_m=proj)
+        method = self.check_analysis_method(irregularities, len(storey_heights_m or []) or 1, height_m)
+        if not method.static_allowed:
+            warnings.append("Equivalent static method NOT permitted: " + method.reason +
+                            ". StructOptima performs equivalent static analysis only - results are not valid for design.")
+
         return SeismicAnalysisResult(
             parameters=self.params,
             building_weight_kn=building_weight_kn,
             base_shear_kn=base_shear,
-            scwb_checks=scwb_checks,
-            ductile_checks=ductile_checks,
+            irregularity_checks=irregularities,
+            analysis_method_check=method,
             floating_columns=floating,
-            all_scwb_pass=all_scwb,
-            all_ductile_pass=all_ductile,
             has_floating_columns=len(floating) > 0,
-            warnings=warnings
+            is_regular=not any(i.is_irregular for i in irregularities),
+            static_analysis_allowed=method.static_allowed,
+            height_m=height_m,
+            storey_weights_kn=list(storey_weights_kn or []),
+            storey_heights_m=list(storey_heights_m or []),
+            storey_forces_kn=forces,
+            warnings=warnings,
         )
+
+
+def _beam_capacity_knm(ast_mm2: float, b: float, d: float, fck: float, fy: float) -> float:
+    """Flexural capacity of a singly reinforced rectangle from provided steel
+    (xu limited to xu,max).  Slab steel and compression steel ignored."""
+    from .section_design import xu_max_ratio
+    if ast_mm2 <= 0 or d <= 0:
+        return 0.0
+    xu = min(0.87 * fy * ast_mm2 / (0.36 * fck * b), xu_max_ratio(fy) * d)
+    return 0.36 * fck * b * xu * (d - 0.42 * xu) / 1e6
+
+
+def evaluate_joint_checks(gm, beams, fck: float, fy: float, result: SeismicAnalysisResult) -> SeismicAnalysisResult:
+    """Strong-column/weak-beam, joint shear and ductile tie spacing computed
+    from the DESIGNED members (audit finding R15).
+
+    * SCWB: sum Mc >= 1.4 sum Mb.  Mc = uniaxial capacity (strain
+      compatibility) of the columns below and above the joint at the smallest
+      factored axial load among their combinations.  Mb = beam capacities
+      from provided steel for the worse sway sense (hogging on one side,
+      sagging on the other).  Not evaluated at the roof level.
+    * Joint shear: demand 1.25 fy (Ast_top + Ast_bot) of the framing beams with
+      no deduction for column shear (conservative); capacity
+      k sqrt(fck) Aj, k = 1.5 / 1.2 / 1.0 for beams on 4 faces / 3 faces or
+      two opposite faces / other, Aj = hc x min(bc, bb + hc).
+      Coefficients and Aj definition must be verified against IS 13920:2016.
+    * Ductility: provided end-zone tie spacing vs min(b/4, 6 db, 100 mm);
+      confining steel area (Ash) is NOT checked.
+    """
+    from . import section_design as sd
+    TOLJ = 0.1
+    cols_by_loc: Dict[Tuple[float, float], Dict[int, object]] = {}
+    for c in gm.columns:
+        cols_by_loc.setdefault((round(c.x, 2), round(c.y, 2)), {})[c.level] = c
+
+    def beams_at(x, y, axis):
+        out = []
+        for bm in beams:
+            if bm.end_point is None:
+                continue
+            p1, p2 = (bm.start_point.x, bm.start_point.y), (bm.end_point.x, bm.end_point.y)
+            along_x = abs(p1[1] - p2[1]) < TOLJ
+            if (axis == "x") != along_x:
+                continue
+            for p, q in ((p1, p2), (p2, p1)):
+                if abs(p[0] - x) < TOLJ and abs(p[1] - y) < TOLJ:
+                    side = 1 if ((q[0] > x) if axis == "x" else (q[1] > y)) else -1
+                    out.append((bm, side))
+        return out
+
+    cap_cache: Dict[Tuple[str, str], float] = {}
+
+    def col_capacity(col, axis):
+        key = (col.id, axis)
+        if key in cap_cache:
+            return cap_cache[key]
+        res = gm.rebar_schedule.get(col.id)
+        val = 0.0
+        if res is not None:
+            n, dia = res.main_bars_desc.split("-")
+            sec = sd.column_section(col.width_nb, col.depth_nb, int(n), int(dia.rstrip("#")), fck, fy)
+            curve = sd.interaction_curve(sec, axis)
+            pus = [f[1] for f in col.design_forces] or [col.load_kn * 1.5]
+            val = min(sd.moment_capacity_at(p, curve) for p in pus)
+        cap_cache[key] = val
+        return val
+
+    scwb, joints = [], []
+    for (x, y), stack in cols_by_loc.items():
+        for lvl in range(1, gm.num_stories):
+            below, above = stack.get(lvl - 1), stack.get(lvl)
+            if below is None:
+                continue
+            framing = {ax: beams_at(x, y, ax) for ax in ("x", "y")}
+            n_faces = sum(len(v) for v in framing.values())
+            opposite = any(len({s for _, s in framing[ax]}) == 2 for ax in ("x", "y"))
+            k = 1.5 if n_faces >= 4 else (1.2 if (n_faces == 3 or (n_faces == 2 and opposite)) else 1.0)
+            for ax in ("x", "y"):
+                caps = []
+                for bm, side in framing[ax]:
+                    r = gm.get_beam_result(bm.id)
+                    if r is None or not getattr(r, "width_mm", 0):
+                        continue
+                    d = r.depth_mm - 25.0 - 8.0 - 8.0
+                    caps.append((side, _beam_capacity_knm(r.ast_top_prov_mm2, r.width_mm, d, fck, fy),
+                                 _beam_capacity_knm(r.ast_bottom_prov_mm2, r.width_mm, d, fck, fy), r))
+                if not caps:
+                    continue
+                mc = col_capacity(below, ax) + (col_capacity(above, ax) if above is not None else 0.0)
+                mb_a = sum(h for s, h, g, _ in caps if s > 0) + sum(g for s, h, g, _ in caps if s < 0)
+                mb_b = sum(h for s, h, g, _ in caps if s < 0) + sum(g for s, h, g, _ in caps if s > 0)
+                mb = max(mb_a, mb_b)
+                ratio = mc / mb if mb > 0 else float("inf")
+                jid = f"J_{below.id}_{ax.upper()}"
+                scwb.append({"Joint": jid, "Level": lvl, "Direction": ax.upper(), "Sum Mc (kNm)": round(mc, 1),
+                             "Sum Mb (kNm)": round(mb, 1), "Ratio": round(ratio, 2), "Required": 1.4,
+                             "pass": ratio >= 1.4})
+                tops = [r.ast_top_prov_mm2 for _, _, _, r in caps]
+                bots = [r.ast_bottom_prov_mm2 for _, _, _, r in caps]
+                ast_sum = max(tops) + (max(bots) if len(caps) > 1 else 0.0)
+                vj = 1.25 * fy * ast_sum / 1000.0
+                hc = below.width_nb if ax == "x" else below.depth_nb
+                bc = below.depth_nb if ax == "x" else below.width_nb
+                bb = max(r.width_mm for _, _, _, r in caps)
+                aj = hc * min(bc, bb + hc)
+                cap = k * math.sqrt(fck) * aj / 1000.0
+                joints.append({"joint": jid, "level": lvl, "direction": ax.upper(), "confinement_factor": k,
+                               "Vj_demand_kN": vj, "Vj_capacity_kN": cap,
+                               "utilization": vj / cap if cap > 0 else float("inf"), "pass": vj <= cap})
+    result.scwb_details = scwb
+    result.joint_details = joints
+    result.scwb_evaluated = True
+    result.scwb_checks = [SCWBCheck(d["Joint"], d["Sum Mc (kNm)"], d["Sum Mb (kNm)"], d["Ratio"], d["pass"],
+                                    "OK (>=1.4)" if d["pass"] else f"FAIL: ratio {d['Ratio']} < 1.4") for d in scwb]
+    result.all_scwb_pass = all(d["pass"] for d in scwb) if scwb else True
+
+    checks = []
+    if result.parameters.ductile_detailing_required:
+        for c in gm.columns:
+            r = gm.rebar_schedule.get(c.id)
+            if r is None:
+                continue
+            req_s = min(min(c.width_nb, c.depth_nb) / 4.0, 6 * r.phi_main, 100.0)
+            lo = max(max(c.width_nb, c.depth_nb), (c.z_top - c.z_bottom) * 1000.0 / 6.0, 450.0)
+            prov = r.hinge_spacing_mm if r.hinge_spacing_mm > 0 else r.link_spacing_mm
+            checks.append(DuctileDetailingCheck(
+                member_id=c.id, member_type="column", hinge_zone_length_mm=lo, max_stirrup_spacing_mm=req_s,
+                min_stirrup_dia_mm=8, required_legs=max(2, int(min(c.width_nb, c.depth_nb) / 150)),
+                actual_spacing_mm=prov, is_compliant=prov <= req_s + 1e-6,
+                remarks="spacing check only - confining steel area (Ash) not verified"))
+    result.ductile_checks = checks
+    result.all_ductile_pass = all(c.is_compliant for c in checks) if checks else True
+    result.ductile_verification = "PARTIAL_SPACING_ONLY" if checks else "NOT_REQUIRED"
+    return result
 
 
 def run_seismic_check(
@@ -802,38 +981,35 @@ def run_seismic_check(
     zone: str = "III",
     building_type: str = "residential",
     fck: float = 25.0,
-    height_m: float = 9.0
+    height_m: Optional[float] = None,
+    soil_type: str = "II",
+    structural_system="OMRF",
+    importance_factor: Optional[float] = None,
+    storey_weights_kn: Optional[List[float]] = None,
+    storey_heights_m: Optional[List[float]] = None,
+    base_dimension_m: Optional[float] = None,
+    masonry_infill: bool = False,
+    fy: float = 415.0,
+    plan_width_m: float = 0.0,
+    plan_length_m: float = 0.0,
+    plan_area_m2: Optional[float] = None,
 ) -> SeismicAnalysisResult:
-    """
-    Main function to run seismic analysis.
-    
-    Args:
-        columns: List of Column objects
-        beams: List of beam StructuralMember objects
-        building_weight_kn: Total building weight
-        zone: Seismic zone ("II", "III", "IV", "V")
-        building_type: Building occupancy type
-        fck: Concrete grade
-        
-    Returns:
-        SeismicAnalysisResult
-    """
-    # Convert zone string to enum
-    zone_map = {
-        "II": SeismicZone.ZONE_II,
-        "III": SeismicZone.ZONE_III,
-        "IV": SeismicZone.ZONE_IV,
-        "V": SeismicZone.ZONE_V,
-    }
+    """Equivalent static seismic analysis (IS 1893 Part 1:2016).
+
+    ``height_m`` should always be supplied; when omitted it is derived from
+    the highest column top (the old fixed 9 m default was audit finding R7)."""
+    zone_map = {"II": SeismicZone.ZONE_II, "III": SeismicZone.ZONE_III,
+                "IV": SeismicZone.ZONE_IV, "V": SeismicZone.ZONE_V}
     seismic_zone = zone_map.get(zone, SeismicZone.ZONE_III)
-    
-    checker = SeismicDesignChecker(
-        zone=seismic_zone,
-        building_type=building_type,
-        fck=fck
-    )
-    
-    return checker.run_full_analysis(columns, beams, building_weight_kn, height_m)
+    if height_m is None:
+        tops = [getattr(c, "z_top", 0.0) for c in columns]
+        height_m = max(tops) if tops and max(tops) > 0 else 9.0
+    checker = SeismicDesignChecker(zone=seismic_zone, building_type=building_type,
+                                   structural_system=structural_system, soil_type=soil_type,
+                                   fck=fck, fy=fy, importance_factor=importance_factor)
+    return checker.run_full_analysis(columns, beams, building_weight_kn, height_m, storey_weights_kn,
+                                     storey_heights_m, base_dimension_m, masonry_infill,
+                                     plan_width_m, plan_length_m, plan_area_m2)
 
 
 # Export zone list for UI

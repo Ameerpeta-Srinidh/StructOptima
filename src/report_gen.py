@@ -548,6 +548,29 @@ class ReportGenerator:
         title_style = styles["Title"]
         elements.append(Paragraph(project_name, title_style))
         elements.append(Spacer(1, 12))
+        elements.append(Paragraph("<font color='red'><b>PRELIMINARY DESIGN AID OUTPUT - NOT FOR CONSTRUCTION.</b> "
+                                  "All results require independent verification by a licensed structural engineer.</font>",
+                                  styles["Normal"]))
+        elements.append(Spacer(1, 8))
+        _status = kwargs.get('design_status')
+        if _status:
+            _fails = kwargs.get('design_failures') or []
+            _col = {'PASS': 'green', 'WARN': 'orange', 'FAIL': 'red'}.get(_status, 'black')
+            elements.append(Paragraph(f"<b>Design status: <font color='{_col}'>{_status}</font></b> - "
+                                      f"{sum(1 for f in _fails if f['Status'] == 'FAIL')} failing item(s), "
+                                      f"{sum(1 for f in _fails if f['Status'] == 'WARN')} warning(s)", styles["Normal"]))
+            if _fails:
+                _rows = [["Member", "Type", "Status", "Issue"]] + [
+                    [f["Member"], f["Type"], f["Status"], Paragraph(str(f["Issue"])[:220], styles["Normal"])] for f in _fails[:60]]
+                _t = Table(_rows, repeatRows=1, colWidths=[70, 80, 45, 330])
+                _t.setStyle(TableStyle([('GRID', (0, 0), (-1, -1), 0.4, colors.grey), ('FONTSIZE', (0, 0), (-1, -1), 7),
+                                        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey)]))
+                elements.append(_t)
+                if len(_fails) > 60:
+                    elements.append(Paragraph(f"... {len(_fails) - 60} further items (see Analysis page)", styles["Normal"]))
+            for _m in (kwargs.get('design_messages') or []):
+                elements.append(Paragraph(f"<font size=8>Note: {_m}</font>", styles["Normal"]))
+            elements.append(Spacer(1, 12))
         
         # 1. Executive Summary
         elements.append(Paragraph("1. Executive Summary", styles["Heading1"]))
@@ -725,7 +748,7 @@ class ReportGenerator:
             sorted_b_ids = sorted(grid_mgr.beam_schedule.keys())
             for bid in sorted_b_ids:
                 det = grid_mgr.beam_schedule[bid]
-                bm_span = getattr(det, 'length_m', getattr(det, 'span_m', 4.0))
+                bm_span = getattr(det, 'span_m', 0.0) or getattr(det, 'length_m', 0.0) or 4.0
                 bm_w = 0.23
                 bm_d = 0.40
                 if hasattr(det, 'size_label') and 'x' in det.size_label:
@@ -735,7 +758,7 @@ class ReportGenerator:
                         bm_d = float(p[1]) / 1000.0
                     except Exception: pass
                 bm_vol = bm_w * bm_d * bm_span
-                bm_steel = bm_vol * 120.0
+                bm_steel = (getattr(det, 'weight_kg_per_m', 0.0) * bm_span) or bm_vol * 120.0
                 
                 beam_data.append([
                     bid,
@@ -768,10 +791,10 @@ class ReportGenerator:
         
         if hasattr(grid_mgr, 'slab_schedule') and grid_mgr.slab_schedule:
             for sid, det in grid_mgr.slab_schedule.items():
-                s_area = getattr(det, 'area_m2', 16.0)
+                s_area = getattr(det, 'area_m2', 0.0) or 16.0
                 s_thk = getattr(det, 'thickness_mm', 125.0)
                 s_vol = s_area * (s_thk / 1000.0)
-                s_steel = s_vol * 90.0
+                s_steel = (getattr(det, 'weight_kg_per_m2', 0.0) * s_area) or s_vol * 90.0
                 slab_data.append([
                     sid,
                     f"{s_thk:.0f}",
@@ -1037,6 +1060,8 @@ class ReportGenerator:
                 _ta = getattr(seismic_result.parameters, 'fundamental_period', 0)
                 _scwb_req = getattr(seismic_result.parameters, 'scwb_required', False)
                 _scwb_ok = getattr(seismic_result, 'all_scwb_pass', True)
+                _det = getattr(seismic_result, 'scwb_details', []) or []
+                _scwb_eval = getattr(seismic_result, 'scwb_evaluated', False)
                 seismic_tbl = [
                     ["Parameter", "Value"],
                     ["Seismic Zone", seismic_zone],
@@ -1045,7 +1070,10 @@ class ReportGenerator:
                     ["Fundamental Period (Ta)", f"{_ta:.3f} s"],
                     ["Base Shear (Vb)", f"{_vb:.1f} kN"],
                     ["Strong Column–Weak Beam", "REQUIRED" if _scwb_req else "Not Required"],
-                    ["SCWB Status", "PASS" if _scwb_ok else "FAIL — See Analysis Page"],
+                    ["SCWB Status", ("NOT EVALUATED" if not _scwb_eval else
+                                     f"{sum(1 for d in _det if d['pass'])}/{len(_det)} joints >= 1.4" +
+                                     ("" if _scwb_ok else " - see Analysis page"))],
+                    ["Ductile detailing", getattr(seismic_result, 'ductile_verification', 'NOT_EVALUATED')],
                 ]
                 t_seis = Table(seismic_tbl, colWidths=[200, 200])
                 t_seis.setStyle(TableStyle([
@@ -1229,8 +1257,8 @@ class ReportGenerator:
         # Footer with code reference
         elements.append(Spacer(1, 12))
         footer_text = """
-        <i>Generated by StructOptima. This report is a preliminary design aid compliant with 
-        IS 456:2000, IS 1893:2016, IS 13920:2016.<br/>
+        <i>Generated by StructOptima. This report is a preliminary design aid applying selected provisions of 
+        IS 456:2000, IS 1893 (Part 1):2016 and IS 875 as documented in docs/engineering; it is NOT a certified code-compliance check.<br/>
         All designs must be verified by a licensed Structural Engineer prior to construction.<br/>
         Safety Factors: γc = 1.5 (concrete), γs = 1.15 (steel) | Load Factor: 1.5 (DL + LL)<br/>
         © 2026 StructOptima — Built by Srinidh Ameerpeta & Charan Tej | v1.0.0</i>
@@ -1760,7 +1788,8 @@ class ReportGenerator:
         elements.append(Spacer(1, 15))
 
         # Footer
-        footer_text = "<i>Report generated by StructOptima · Compliant with IS 1077, IS 2250, IS 1200, IS 1661, IS 1905, NBC 2016</i>"
+        footer_text = ("<i>Report generated by StructOptima · Quantities estimated with rules referenced to IS 1077, IS 2250, "
+                       "IS 1200, IS 1661, IS 1905 (indicative, not certified)</i>")
         elements.append(Paragraph(footer_text, styles["Normal"]))
         
         doc.build(elements)

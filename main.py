@@ -1,176 +1,107 @@
-import sys
+"""
+StructOptima command-line entry point.
+
+Runs the same design pipeline as the Streamlit app (src/design_pipeline.py)
+for a rectangular grid or a DXF file and writes a PDF report.
+
+Example:
+    python main.py --width 18 --length 12 --stories 2 --zone III
+    python main.py --cad samples/sample_design.dxf --stories 3
+"""
+
+import argparse
 import os
-import logging
+import sys
 
 sys.path.append(os.path.join(os.getcwd(), 'src'))
 
+from src.building_types import BUILDING_TYPES
+from src.design_pipeline import DesignInputs, run_design
 from src.grid_manager import GridManager
-from src.materials import Concrete
-from src.framing_logic import MemberProperties, StructuralMember, Point
-from src.quantifier import Quantifier
+from src.logging_config import get_logger, setup_logging
 from src.report_gen import ReportGenerator
-from src.foundation_eng import design_footing
-from src.logging_config import setup_logging, get_logger
+from src.wind_load import TerrainCategory, WindZone
 
-import argparse
-from src.cad_loader import CADLoader
-from src.risk_management import BlackBoxRiskManager
-from src.bbs_module import format_project_summary, generate_project_bbs
+logger = get_logger("src.cli")   # inside the configured "src" logger tree
 
-# Initialize logging
-setup_logging()
-logger = get_logger(__name__)
 
-def generate_beams_for_grid(grid_mgr: GridManager) -> list[StructuralMember]:
-    # Re-using logic from Phase 2
-    beams = []
-    beam_count = 0
-    
-    # Horizontal
-    for y in grid_mgr.y_grid_lines:
-        for i in range(len(grid_mgr.x_grid_lines) - 1):
-            x1 = grid_mgr.x_grid_lines[i]
-            x2 = grid_mgr.x_grid_lines[i+1]
-            beam_count += 1
-            beams.append(StructuralMember(
-                id=f"B_H_{beam_count}",
-                type="beam",
-                start_point=Point(x=x1, y=y),
-                end_point=Point(x=x2, y=y),
-                properties=MemberProperties(width_mm=300, depth_mm=600) # Default
-            ))
-            
-    # Vertical
-    for x in grid_mgr.x_grid_lines:
-        for i in range(len(grid_mgr.y_grid_lines) - 1):
-            y1 = grid_mgr.y_grid_lines[i]
-            y2 = grid_mgr.y_grid_lines[i+1]
-            beam_count += 1
-            beams.append(StructuralMember(
-                id=f"B_V_{beam_count}",
-                type="beam",
-                start_point=Point(x=x, y=y1),
-                end_point=Point(x=x, y=y2),
-                properties=MemberProperties(width_mm=300, depth_mm=600)
-            ))
-    return beams
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(description="StructOptima - preliminary RC frame design (not for construction)")
+    p.add_argument('--cad', type=str, help="Path to a DXF file (columns on COL* layers or walls for auto-framing)")
+    p.add_argument('--auto-frame', action='store_true', help="Place columns automatically from architectural walls")
+    p.add_argument('--width', type=float, default=18.0, help="Plan width in m (manual grid)")
+    p.add_argument('--length', type=float, default=12.0, help="Plan length in m (manual grid)")
+    p.add_argument('--stories', type=int, default=2)
+    p.add_argument('--story-height', type=float, default=3.5)
+    p.add_argument('--occupancy', default="Residential", choices=list(BUILDING_TYPES.keys()))
+    p.add_argument('--zone', default="III", choices=["II", "III", "IV", "V"])
+    p.add_argument('--soil', default="II", choices=["I", "II", "III"])
+    p.add_argument('--system', default="OMRF", choices=["OMRF", "SMRF"])
+    p.add_argument('--wind-zone', default="2", choices=[str(i) for i in range(1, 7)])
+    p.add_argument('--terrain', default="2", choices=["1", "2", "3", "4"])
+    p.add_argument('--sbc', type=float, default=200.0, help="Safe bearing capacity kN/m2")
+    p.add_argument('--grade', default="M25", choices=["M20", "M25", "M30", "M35", "M40"])
+    p.add_argument('--fy', type=float, default=415.0, choices=[415.0, 500.0])
+    p.add_argument('--report', default="Structural_Report_V2.pdf", help="Output PDF path")
+    return p
 
-def main():
-    parser = argparse.ArgumentParser(description="Automated Structural Design Engine")
-    parser.add_argument('--cad', type=str, help="Path to DXF file for structural geometry")
-    parser.add_argument('--auto-frame', action='store_true', help="Automatically generate structure from architectural walls (WALLS layer)")
-    args = parser.parse_args()
 
-    logger.info("=== AUTOMATED STRUCTURAL DESIGN ENGINE ===")
-    
-    # 1. Initialization
-    width = 18.0
-    length = 12.0
-    load_kn_m2 = 50.0
-    sbc = 200.0  # kN/m2
-    
-    gm = None
-    beams = []
-    
+def main(argv=None) -> int:
+    args = build_parser().parse_args(argv)
+    setup_logging()
+    logger.info("=== STRUCTOPTIMA (preliminary design aid - NOT FOR CONSTRUCTION) ===")
+
     if args.cad:
-        logger.info("Loading geometry from CAD: %s", args.cad)
+        from src.cad_loader import CADLoader
         try:
             loader = CADLoader(args.cad)
-            gm, beams = loader.load_grid_manager(auto_frame=args.auto_frame)
-            if args.auto_frame:
-                 logger.info("[Auto-Frame]: Columns auto-generated. Generating default beams for grid...")
-                 beams = generate_beams_for_grid(gm)
-                 
-            logger.info("Loaded %d columns and %d beams from CAD.", len(gm.columns), len(beams))
-            logger.debug("Inferred Grid: %d x-lines, %d y-lines.", len(gm.x_grid_lines), len(gm.y_grid_lines))
+            gm, beams = loader.load_grid_manager(auto_frame=args.auto_frame, seismic_zone=args.zone,
+                                                 story_height_m=args.story_height, num_stories=args.stories)
         except Exception as e:
             logger.error("Error loading CAD: %s", e)
-            return
+            return 2
+        for w in loader.load_warnings:
+            logger.warning("Input: %s", w)
+        gm.columns = gm.stack_columns([c for c in gm.columns if c.level == 0], args.stories, args.story_height)
     else:
-        logger.info("Building: %sx%sm. Load: %s kN/m2. SBC: %s kN/m2", width, length, load_kn_m2, sbc)
-        gm = GridManager(width_m=width, length_m=length)
+        gm = GridManager(width_m=args.width, length_m=args.length, num_stories=args.stories,
+                         story_height_m=args.story_height)
         gm.generate_grid()
-        # For default generation, we generate beams later using the helper
-        beams = generate_beams_for_grid(gm)
-    
-    # 2. Loads & Sizing
-    logger.info("Calculating loads and sizing columns...")
-    gm.calculate_trib_areas()
-    gm.calculate_loads(floor_load_kn_m2=50.0) # High load for testing
-    
-    # 1.5 Advanced Analysis
-    from src.analysis_integration import update_structural_analysis
-    update_structural_analysis(gm, beams) # Assuming 'all_beams' refers to the 'beams' variable
-    
-    # 2. Sizing & Detailing
-    m_grade = Concrete.from_grade("M25")
-    gm.optimize_column_sizes(concrete=m_grade)
-    
-    # 3. Foundation Design
-    logger.info("Designing footings...")
-    footings = []
-    for col in gm.columns:
-        ft = design_footing(
-            axial_load_kn=col.load_kn,
-            sbc_kn_m2=sbc,
-            column_width_mm=col.width_nb,
-            column_depth_mm=col.depth_nb,
-            concrete=m_grade
-        )
-        footings.append(ft)
-    
-    # Attach footings to gm for report
-    gm.footings = footings
-    
-    # Verify Center Column (if exists in this geometry)
-    interior_cols = [c for c in gm.columns if c.type == "interior"]
-    if interior_cols:
-        center_col = interior_cols[0]
-        center_ft = footings[gm.columns.index(center_col)]
-        logger.debug("[CHECK] Sample Interior Col (%s) Load: %.2f kN", center_col.id, center_col.load_kn)
-        logger.debug("[CHECK] Footing: %sx%sm, Depth: %smm", center_ft.length_m, center_ft.width_m, center_ft.thickness_mm)
-    
-    # 3.5 Structural Auditing & Safeguards
-    logger.info("Running Structural Safeguards Analysis...")
-    risk_mgr = BlackBoxRiskManager(gm, beams, footings)
-    risk_results = risk_mgr.run_all_checks()
-    
-    if risk_results:
-        logger.warning("RISK SAFEGUARDS TRIGGERED — %d checks failed", len(risk_results))
-        for res in risk_results:
-             logger.warning("[%s] %s", res.risk_level.name, res.message)
-             logger.warning("    -> Recommendation: %s", res.recommendation)
-    else:
-        logger.info("Structural Safeguards: CLEARED. No critical risks detected.")
-    
-    # 4. Quantification
-    # Use defaults (INR) which are now set in Quantifier class
-    quantifier = Quantifier() 
-    bom = quantifier.calculate_bom(gm.columns, beams, footings)
-    
-    logger.info("=== BILL OF MATERIALS & COSTING ===")
-    logger.info("Total Concrete:       %.2f m3", bom.total_concrete_vol_m3)
-    logger.info("Total Steel (Theor):  %.2f kg", bom.total_steel_weight_kg)
-    logger.info("Total Steel (Proc):   %.2f kg (incl. 4%% Wastage)", bom.total_steel_weight_kg * 1.04)
-    
-    logger.info("--- Cost Estimates ---")
-    logger.info("Concrete Cost:        INR %,.2f", bom.concrete_cost_inr)
-    logger.info("Steel Cost:           INR %,.2f", bom.steel_cost_inr)
-    
-    logger.info("Excavation Cost:      INR %,.2f - %,.2f", bom.excavation_cost_range['min'], bom.excavation_cost_range['max'])
-    logger.info("Finishing Cost:       INR %,.2f - %,.2f", bom.finishing_cost_range['min'], bom.finishing_cost_range['max'])
-    
-    logger.info("Base Project Cost:    INR %,.2f", bom.base_project_cost)
-    logger.info("Contingency (5%%):     INR %,.2f", bom.contingency_amount)
-    logger.info("TOTAL PROJECT COST:   INR %,.2f", bom.final_project_cost)
-    
-    # 5. Reporting
-    report_file = "Structural_Report_V2.pdf"
-    logger.info("Generating report: %s...", report_file)
-    reporter = ReportGenerator()
-    project_name = f"Design from {os.path.basename(args.cad)}" if args.cad else "18x12m Design with Foundation"
-    reporter.generate_report(report_file, gm, bom, project_name=project_name)
-    logger.info("Report generated successfully.")
+        beams = gm.generate_beams()
+
+    inputs = DesignInputs(
+        num_stories=args.stories, story_height_m=args.story_height, building_type_name=args.occupancy,
+        sbc_kn_m2=args.sbc, conc_grade=args.grade, fy=args.fy, seismic_zone=args.zone, soil_type=args.soil,
+        structural_system=args.system, wind_zone=WindZone(args.wind_zone),
+        terrain_category=TerrainCategory(args.terrain),
+        project_name=os.path.basename(args.cad) if args.cad else f"{args.width}x{args.length}m grid")
+    res = run_design(gm, beams, inputs)
+
+    bom = res.bom
+    logger.info("Design status: %s (%d failing, %d warnings, %d iterations, converged=%s)", res.status,
+                sum(f["Status"] == "FAIL" for f in res.failures), sum(f["Status"] == "WARN" for f in res.failures),
+                res.iterations, res.converged)
+    for f in res.failures:
+        logger.warning("[%s] %s %s: %s", f["Status"], f["Type"], f["Member"], f["Issue"])
+    logger.info("Seismic: W = %.0f kN, Vb = %.0f kN, Ta = %.2f s", res.building_weight, res.seismic_result.base_shear_kn,
+                res.seismic_result.parameters.fundamental_period)
+    logger.info("Concrete %.2f m3 | Steel %.0f kg (incl. wastage) | Structure cost INR %,.0f",
+                bom.total_concrete_vol_m3, bom.total_steel_weight_kg, bom.total_cost_inr)
+
+    # "Black Box" engineering-judgement prompts (retained from the previous CLI)
+    from src.risk_management import BlackBoxRiskManager
+    for rr in BlackBoxRiskManager(res.gm, res.all_beams, res.footings, fck=res.gm.fck, fy=res.gm.fy).run_all_checks():
+        logger.warning("[RISK %s] %s -> %s", rr.risk_level.name, rr.message, rr.recommendation)
+
+    ReportGenerator().generate_report(
+        args.report, res.gm, bom, audit_results=res.audit_results, math_breakdown=res.auditor_math,
+        project_name=inputs.project_name, seismic_result=res.seismic_result, wind_result=res.wind_result,
+        stab_checks=res.stab_checks, stab_summary=res.stab_summary, all_beams=res.all_beams,
+        conc_grade=args.grade, building_weight=res.building_weight, seismic_zone=args.zone, footings=res.footings,
+        design_status=res.status, design_failures=res.failures, design_messages=res.messages)
+    logger.info("Report written: %s", args.report)
+    return 1 if res.status == "FAIL" else 0
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

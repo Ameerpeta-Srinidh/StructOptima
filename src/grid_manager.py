@@ -1,4 +1,5 @@
 import math
+import re
 from typing import List, Literal, Tuple, Optional, Any
 from pydantic import BaseModel, PositiveFloat
 
@@ -24,6 +25,13 @@ class Column(BaseModel):
     is_floating: bool = False
     reinforcement_rule: str = "IS_456_Standard"
     orientation_deg: float = 0.0
+    # SERVICE load split from calculate_loads (load_kn = load_dl_kn + load_ll_kn)
+    load_dl_kn: float = 0.0
+    load_ll_kn: float = 0.0
+    plinth_load_kn: float = 0.0      # ground-storey wall load carried by plinth beams (level 0 only)
+    # Factored design actions from analysis_integration: (combo, Pu kN, Mx kNm, My kNm)
+    # Mx = moment with lever arm along X (width_nb), My = lever arm along Y (depth_nb)
+    design_forces: List[Tuple[str, float, float, float]] = []
     
     @property
     def label(self) -> str:
@@ -99,6 +107,22 @@ class GridManager(BaseModel):
     beam_schedule: dict = {} # {beam_id: BeamRebarResult}
     slab_schedule: dict = {} # {slab_id: SlabRebarResult}
     staircase_schedule: dict = {} # {stair_id: StaircaseResult}
+
+    # Material and load context (set by design_pipeline / calculate_loads)
+    fck: float = 25.0
+    fy: float = 415.0
+    slab_thickness_mm: float = 125.0
+    dead_load_kn_m2: float = 0.0          # floor dead load incl. slab self-weight (service)
+    live_load_kn_m2: float = 0.0          # floor live load (service)
+    roof_dead_kn_m2: float = 0.0
+    roof_live_kn_m2: float = 0.0
+    superimposed_dead_kn_m2: float = 0.0  # finishes + partitions + services (for slab design)
+    fallback_wall_load_kn_m: float = 0.0
+    load_split_known: bool = False
+    void_bays: List[Tuple[int, int]] = []  # bays without slab (staircase / voids)
+    # Plan line segments ((x1, y1), (x2, y2)) in m bounding the floor (walls and
+    # beams); used to decide whether a bay lies inside the building.
+    boundary_segments: List[Tuple[Tuple[float, float], Tuple[float, float]]] = []
     
     def _estimate_initial_column_size(self, col_type: str, trib_area_est: float) -> tuple:
         """Estimate column size based on story count, position, and IS 456 Cl 39.3.
@@ -288,6 +312,9 @@ class GridManager(BaseModel):
             all_voids.append(staircase_bay)
         if void_zones:
             all_voids.extend(void_zones)
+        if self.void_zones:
+            all_voids.extend(v for v in self.void_zones if v not in all_voids)
+        self.void_bays = list(all_voids)
             
         # Coordinates of void corners
         void_corners = []
@@ -300,6 +327,8 @@ class GridManager(BaseModel):
         sorted_x = sorted(self.x_grid_lines)
         sorted_y = sorted(self.y_grid_lines)
 
+        for col in self.columns:
+            col.staircase_add_load = 0.0
         for col in self.columns:
             # Find adjacent grid lines for THIS column (non-uniform safe)
             x_idx = None
@@ -367,128 +396,154 @@ class GridManager(BaseModel):
                     current_s = getattr(col, 'staircase_add_load', 0.0)
                     setattr(col, 'staircase_add_load', current_s + s_load)
 
-    def calculate_loads(self, floor_load_kn_m2: float, wall_load_kn_m: float = 0.0):
-        """
-        Cumulative Load Takedown from Top -> Bottom.
-        Wall Load: Distributed from actual self.walls geometry if available, else from uniform parameter.
-        """
-        # Pre-calculate wall load per column stack based on actual wall geometry
-        wall_load_map = {}
-        if self.walls:
-            import math as _m
-            for w in self.walls:
-                total_w_load = w.length_m * w.line_load_kn_m
-                # Distribute half load to the nearest start column, half to nearest end column
-                start_c = min(self.columns, key=lambda c: _m.hypot(c.x - w.start_x, c.y - w.start_y))
-                end_c = min(self.columns, key=lambda c: _m.hypot(c.x - w.end_x, c.y - w.end_y))
-                
-                k1 = (start_c.x, start_c.y)
-                k2 = (end_c.x, end_c.y)
-                wall_load_map[k1] = wall_load_map.get(k1, 0.0) + (total_w_load / 2.0)
-                if start_c != end_c:
-                    wall_load_map[k2] = wall_load_map.get(k2, 0.0) + (total_w_load / 2.0)
+    # ------------------------------------------------------------------
+    # Load takedown
+    # ------------------------------------------------------------------
+    def set_load_intensities(self, dead_kn_m2: float, live_kn_m2: float,
+                             roof_dead_kn_m2: Optional[float] = None, roof_live_kn_m2: Optional[float] = None):
+        """Record SERVICE area loads (kN/m2, slab self-weight included in dead)."""
+        self.dead_load_kn_m2 = dead_kn_m2
+        self.live_load_kn_m2 = live_kn_m2
+        self.roof_dead_kn_m2 = dead_kn_m2 if roof_dead_kn_m2 is None else roof_dead_kn_m2
+        self.roof_live_kn_m2 = live_kn_m2 if roof_live_kn_m2 is None else roof_live_kn_m2
 
-        # Group by (x, y) coordinates to form stacks
+    def _wall_load_map(self) -> dict:
+        """Wall line loads lumped to the nearest columns (half to each end), per
+        plan location {(x, y): kN} for ONE storey of walls."""
+        wall_load_map = {}
+        if not self.walls or not self.columns:
+            return wall_load_map
+        for w in self.walls:
+            total_w_load = w.length_m * w.line_load_kn_m
+            start_c = min(self.columns, key=lambda c: math.hypot(c.x - w.start_x, c.y - w.start_y))
+            end_c = min(self.columns, key=lambda c: math.hypot(c.x - w.end_x, c.y - w.end_y))
+            k1, k2 = (start_c.x, start_c.y), (end_c.x, end_c.y)
+            if k1 == k2:
+                wall_load_map[k1] = wall_load_map.get(k1, 0.0) + total_w_load
+            else:
+                wall_load_map[k1] = wall_load_map.get(k1, 0.0) + total_w_load / 2.0
+                wall_load_map[k2] = wall_load_map.get(k2, 0.0) + total_w_load / 2.0
+        return wall_load_map
+
+    def _beam_self_weight_map(self, beams: Optional[List[Any]]) -> dict:
+        """Half of each framing beam's web self-weight lumped to each end
+        column, {(x, y): kN} per floor.  Web depth = D - slab thickness."""
+        out = {}
+        t = self.slab_thickness_mm / 1000.0
+        if beams:
+            for b in beams:
+                if b.end_point is None:
+                    continue
+                L = math.hypot(b.end_point.x - b.start_point.x, b.end_point.y - b.start_point.y)
+                sw = b.properties.width_mm / 1000.0 * max(b.properties.depth_mm / 1000.0 - t, 0.0) * 25.0 * L
+                for p in (b.start_point, b.end_point):
+                    c = min(self.columns, key=lambda c: math.hypot(c.x - p.x, c.y - p.y)) if self.columns else None
+                    if c is not None and math.hypot(c.x - p.x, c.y - p.y) < 0.3:
+                        out[(c.x, c.y)] = out.get((c.x, c.y), 0.0) + sw / 2.0
+                    # beam ends that do not land on a column (secondary beams)
+                    # are distributed by the slab tributary logic - not lumped here
+        return out
+
+    def calculate_loads(self, floor_load_kn_m2: Optional[float] = None, wall_load_kn_m: float = 0.0,
+                        dead_load_kn_m2: Optional[float] = None, live_load_kn_m2: Optional[float] = None,
+                        roof_dead_kn_m2: Optional[float] = None, roof_live_kn_m2: Optional[float] = None,
+                        beams: Optional[List[Any]] = None):
+        """Cumulative SERVICE load takedown, top to bottom.
+
+        Preferred call: ``dead_load_kn_m2`` (slab self-weight + finishes +
+        partitions + services) and ``live_load_kn_m2`` with optional roof
+        values.  Legacy call: ``floor_load_kn_m2`` alone is treated entirely as
+        dead load (conservative for seismic mass, identical for 1.5DL+1.5LL).
+
+        Per column and storey: slab load (tributary area x roof or floor
+        intensity) + cantilever slab share + wall load (actual Wall objects, or
+        ``wall_load_kn_m`` x half spans when no walls exist) + framing beam web
+        self-weight (from ``beams`` when given, otherwise 230x(450-t) estimate)
+        + column self-weight + staircase allowance.
+
+        Results: ``load_dl_kn``, ``load_ll_kn``, ``load_kn`` (sum, SERVICE).
+        Ground-storey walls are carried by plinth beams and stored as
+        ``plinth_load_kn`` on level-0 columns (added at the footing).
+        """
+        if dead_load_kn_m2 is None and live_load_kn_m2 is None:
+            if floor_load_kn_m2 is None:
+                raise ValueError("calculate_loads needs floor_load_kn_m2 or dead/live intensities")
+            self.set_load_intensities(floor_load_kn_m2, 0.0, roof_dead_kn_m2, roof_live_kn_m2)
+            self.load_split_known = False
+        else:
+            self.set_load_intensities(dead_load_kn_m2 or 0.0, live_load_kn_m2 or 0.0, roof_dead_kn_m2, roof_live_kn_m2)
+            self.load_split_known = True
+        self.fallback_wall_load_kn_m = wall_load_kn_m
+
+        wall_load_map = self._wall_load_map()
+        beam_sw_map = self._beam_self_weight_map(beams)
+        sorted_x = sorted(self.x_grid_lines)
+        sorted_y = sorted(self.y_grid_lines)
+        t = self.slab_thickness_mm / 1000.0
+
         stacks = {}
         for col in self.columns:
-            key = (col.x, col.y)
-            if key not in stacks:
-                stacks[key] = []
-            stacks[key].append(col)
-        
-        # Sort each stack by level descending (Top -> Bottom)
-        for key in stacks:
-            stacks[key].sort(key=lambda c: c.level, reverse=True)
-            
-            cumulative_load = 0.0
-            
-            for col in stacks[key]:
-                # 1. Floor Load
-                level_load = col.trib_area_m2 * floor_load_kn_m2
-                
-                # 2. Wall Load & Beams
-                # Use actual adjacent spans for this column
-                sorted_x = sorted(self.x_grid_lines)
-                sorted_y = sorted(self.y_grid_lines)
+            stacks.setdefault((col.x, col.y), []).append(col)
+
+        for key, stack in stacks.items():
+            stack.sort(key=lambda c: c.level, reverse=True)
+            cum_dl = cum_ll = 0.0
+            for col in stack:
+                is_roof = col.level >= self.num_stories - 1
+                q_dl = self.roof_dead_kn_m2 if is_roof else self.dead_load_kn_m2
+                q_ll = self.roof_live_kn_m2 if is_roof else self.live_load_kn_m2
+                dl = col.trib_area_m2 * q_dl
+                ll = col.trib_area_m2 * q_ll
+
                 x_idx = next((i for i, gx in enumerate(sorted_x) if abs(gx - col.x) < 0.01), None)
                 y_idx = next((i for i, gy in enumerate(sorted_y) if abs(gy - col.y) < 0.01), None)
-                
-                # Half-span contributions
-                left_sp = (sorted_x[x_idx] - sorted_x[x_idx-1]) / 2.0 if x_idx and x_idx > 0 else 0.0
-                right_sp = (sorted_x[x_idx+1] - sorted_x[x_idx]) / 2.0 if x_idx is not None and x_idx < len(sorted_x)-1 else 0.0
-                below_sp = (sorted_y[y_idx] - sorted_y[y_idx-1]) / 2.0 if y_idx and y_idx > 0 else 0.0
-                above_sp = (sorted_y[y_idx+1] - sorted_y[y_idx]) / 2.0 if y_idx is not None and y_idx < len(sorted_y)-1 else 0.0
-                
-                beam_len_x = left_sp + right_sp  # X-direction beam tributary
-                beam_len_y = below_sp + above_sp  # Y-direction beam tributary
-                beam_len = beam_len_x + beam_len_y
-                
-                # Add Cantilever Load (Simplified)
-                # If this is edge/corner, and direction matches cantilever, add load
-                if self.cantilever_dirs:
-                    c_load = 0
-                    # Check bounds
-                    x_min, x_max = min(self.x_grid_lines), max(self.x_grid_lines)
-                    y_min, y_max = min(self.y_grid_lines), max(self.y_grid_lines)
-                    
-                    is_left = abs(col.x - x_min) < 0.1
-                    is_right = abs(col.x - x_max) < 0.1
-                    is_bot = abs(col.y - y_min) < 0.1
-                    is_top = abs(col.y - y_max) < 0.1
-                    
-                    c_len = self.cantilever_len_m
-                    
-                    # Logic: If 'left' is active, and column is on left edge, it supports cantilever
-                    if "left" in self.cantilever_dirs and is_left:
-                         trib_w_y = beam_len_y if not (is_bot or is_top) else beam_len_y/2
-                         c_area = trib_w_y * c_len
-                         c_load += c_area * floor_load_kn_m2
-                         beam_len += c_len # Extension beam
-                         
-                    if "right" in self.cantilever_dirs and is_right:
-                         trib_w_y = beam_len_y if not (is_bot or is_top) else beam_len_y/2
-                         c_area = trib_w_y * c_len
-                         c_load += c_area * floor_load_kn_m2
-                         beam_len += c_len
+                left = (sorted_x[x_idx] - sorted_x[x_idx - 1]) / 2.0 if x_idx else 0.0
+                right = (sorted_x[x_idx + 1] - sorted_x[x_idx]) / 2.0 if x_idx is not None and x_idx < len(sorted_x) - 1 else 0.0
+                below = (sorted_y[y_idx] - sorted_y[y_idx - 1]) / 2.0 if y_idx else 0.0
+                above = (sorted_y[y_idx + 1] - sorted_y[y_idx]) / 2.0 if y_idx is not None and y_idx < len(sorted_y) - 1 else 0.0
+                bl_x, bl_y = left + right, below + above
+                beam_len = bl_x + bl_y
 
+                if self.cantilever_dirs and sorted_x and sorted_y:
+                    is_left, is_right = abs(col.x - sorted_x[0]) < 0.1, abs(col.x - sorted_x[-1]) < 0.1
+                    is_bot, is_top = abs(col.y - sorted_y[0]) < 0.1, abs(col.y - sorted_y[-1]) < 0.1
+                    c_len = self.cantilever_len_m
+                    c_area = 0.0
+                    if "left" in self.cantilever_dirs and is_left:
+                        c_area += (bl_y if not (is_bot or is_top) else bl_y / 2) * c_len; beam_len += c_len
+                    if "right" in self.cantilever_dirs and is_right:
+                        c_area += (bl_y if not (is_bot or is_top) else bl_y / 2) * c_len; beam_len += c_len
                     if "bottom" in self.cantilever_dirs and is_bot:
-                         trib_w_x = beam_len_x if not (is_left or is_right) else beam_len_x/2
-                         c_area = trib_w_x * c_len
-                         c_load += c_area * floor_load_kn_m2
-                         beam_len += c_len
-                         
+                        c_area += (bl_x if not (is_left or is_right) else bl_x / 2) * c_len; beam_len += c_len
                     if "top" in self.cantilever_dirs and is_top:
-                         trib_w_x = beam_len_x if not (is_left or is_right) else beam_len_x/2
-                         c_area = trib_w_x * c_len
-                         c_load += c_area * floor_load_kn_m2
-                         beam_len += c_len
-                    
-                    level_load += c_load
-                
-                # Calculate Wall Load
+                        c_area += (bl_x if not (is_left or is_right) else bl_x / 2) * c_len; beam_len += c_len
+                    dl += c_area * q_dl
+                    ll += c_area * q_ll
+
                 if self.walls:
-                    is_roof = (col.level == self.num_stories - 1)
-                    if is_roof:
-                        # Roof usually only has parapet wall (~1m height, roughly 33% of full story wall)
-                        wall_load = wall_load_map.get(key, 0.0) * 0.33
-                    else:
-                        wall_load = wall_load_map.get(key, 0.0)
+                    # Roof: parapet assumed 1/3 of a storey wall (project assumption)
+                    wall = wall_load_map.get(key, 0.0) * (0.33 if is_roof else 1.0)
                 else:
-                    # Fallback if no specific wall objects exist
-                    wall_load = beam_len * wall_load_kn_m
-                    
-                total_level_load = level_load + wall_load
-                
-                # Column self-weight
-                col_sw = (col.width_nb / 1000.0) * (col.depth_nb / 1000.0) * self.story_height_m * 25.0
-                total_level_load += col_sw
-                
-                # Phase 10: Add Staircase Load if present
-                if hasattr(col, 'staircase_add_load'):
-                    total_level_load += getattr(col, 'staircase_add_load')
-                
-                cumulative_load += total_level_load
-                col.load_kn = cumulative_load
+                    wall = beam_len * wall_load_kn_m
+                dl += wall
+
+                if beams:
+                    dl += beam_sw_map.get(key, 0.0)
+                else:
+                    dl += beam_len * 0.23 * max(0.45 - t, 0.0) * 25.0
+
+                dl += (col.width_nb / 1000.0) * (col.depth_nb / 1000.0) * self.story_height_m * 25.0
+                if col.staircase_add_load:
+                    # 15 kN/m2 stair allowance split 12 DL + 3 LL (project assumption)
+                    dl += col.staircase_add_load * 0.8
+                    ll += col.staircase_add_load * 0.2
+
+                cum_dl += dl
+                cum_ll += ll
+                col.load_dl_kn = cum_dl
+                col.load_ll_kn = cum_ll
+                col.load_kn = cum_dl + cum_ll
+                col.plinth_load_kn = wall_load_map.get(key, 0.0) if (col.level == 0 and self.walls) else 0.0
 
     def optimize_column_sizes(self, concrete: Concrete, fy: float = 415.0,
                               wall_thickness_mm: float = 230.0,
@@ -600,8 +655,8 @@ class GridManager(BaseModel):
         for col in self.columns:
             found = False
             for (gw, gd) in unique_sizes:
-                if abs(col.width_nb - gw) <= 15 and abs(col.depth_nb - gd) <= 15:
-                    # Only group if canonical is ≥ current (don't reduce to smaller)
+                # Only group UPWARD (canonical >= current, within 15 mm) - audit finding R26
+                if 0 <= gw - col.width_nb <= 15 and 0 <= gd - col.depth_nb <= 15:
                     col.width_nb = gw
                     col.depth_nb = gd
                     found = True
@@ -798,124 +853,191 @@ class GridManager(BaseModel):
         logger.info(f"Generated {len(self.walls)} walls (exterior perimeter"
                      f"{' + interior' if include_interior else ''}).")
 
-    def detail_beams(self, beams: List[Any]):
+    # ------------------------------------------------------------------
+    # Slab panels (shared by analysis and slab design)
+    # ------------------------------------------------------------------
+    def slab_panels(self, include_voids: bool = False) -> List[dict]:
+        """Rectangular grid bays treated as slab panels.
+
+        A bay is a panel when it is not a void (staircase / void_zones) and
+        either all 4 corners carry a level-0 column, or its
+        centre is enclosed on all four sides by wall / beam lines (4-ray test on
+        ``walls`` + ``boundary_segments``).  The ray test keeps interior bays of
+        CAD plans that have no corner columns while leaving the notch of an
+        L-shaped plan outside (assumption A-GEO-01).  Each dict: i, j, x0, x1, y0, y1, lx, ly,
+        two_way, disc_short, disc_long, neighbours {'left','right','bottom','top'}.
+        """
+        xs, ys = sorted(self.x_grid_lines), sorted(self.y_grid_lines)
+        if len(xs) < 2 or len(ys) < 2:
+            return []
+        base = {(round(c.x, 2), round(c.y, 2)) for c in self.columns if c.level == 0} or \
+               {(round(c.x, 2), round(c.y, 2)) for c in self.columns}
+        voids = set() if include_voids else set(tuple(v) for v in (self.void_bays or []))
+        segs = [((w.start_x, w.start_y), (w.end_x, w.end_y)) for w in self.walls] + list(self.boundary_segments or [])
+
+        def enclosed(cx, cy):
+            if not segs:
+                return False
+            hit = {"+x": False, "-x": False, "+y": False, "-y": False}
+            for (x1, y1), (x2, y2) in segs:
+                if min(y1, y2) - 1e-6 <= cy <= max(y1, y2) + 1e-6 and abs(y2 - y1) > 1e-9:
+                    xi = x1 + (cy - y1) * (x2 - x1) / (y2 - y1)
+                    hit["+x" if xi > cx else "-x"] = True
+                if min(x1, x2) - 1e-6 <= cx <= max(x1, x2) + 1e-6 and abs(x2 - x1) > 1e-9:
+                    yi = y1 + (cx - x1) * (y2 - y1) / (x2 - x1)
+                    hit["+y" if yi > cy else "-y"] = True
+            return all(hit.values())
+
+        exists = {}
+        for i in range(len(xs) - 1):
+            for j in range(len(ys) - 1):
+                corners = [(xs[i], ys[j]), (xs[i + 1], ys[j]), (xs[i], ys[j + 1]), (xs[i + 1], ys[j + 1])]
+                n = sum((round(x, 2), round(y, 2)) in base for x, y in corners)
+                inside = n == 4 or enclosed((xs[i] + xs[i + 1]) / 2.0, (ys[j] + ys[j + 1]) / 2.0)
+                exists[(i, j)] = inside and (i, j) not in voids
+        panels = []
+        for (i, j), ok in exists.items():
+            if not ok:
+                continue
+            sx, sy = xs[i + 1] - xs[i], ys[j + 1] - ys[j]
+            if sx <= 1e-6 or sy <= 1e-6:
+                continue
+            nb = {"left": exists.get((i - 1, j), False), "right": exists.get((i + 1, j), False),
+                  "bottom": exists.get((i, j - 1), False), "top": exists.get((i, j + 1), False)}
+            # short edges are the edges whose length is lx (the shorter span)
+            if sx <= sy:
+                lx, ly = sx, sy
+                short_edges, long_edges = ("bottom", "top"), ("left", "right")
+            else:
+                lx, ly = sy, sx
+                short_edges, long_edges = ("left", "right"), ("bottom", "top")
+            panels.append({
+                "i": i, "j": j, "x0": xs[i], "x1": xs[i + 1], "y0": ys[j], "y1": ys[j + 1],
+                "lx": lx, "ly": ly, "two_way": ly / lx <= 2.0,
+                "disc_short": sum(not nb[e] for e in short_edges),
+                "disc_long": sum(not nb[e] for e in long_edges),
+                "neighbours": nb,
+            })
+        return panels
+
+    def footprint_area_m2(self) -> float:
+        """Plan area of all framed bays including voids (used for regularity screening)."""
+        return sum((p["x1"] - p["x0"]) * (p["y1"] - p["y0"]) for p in self.slab_panels(include_voids=True))
+
+    @staticmethod
+    def base_member_id(member_id: str) -> str:
+        """Strip the per-level suffix (``B_H_1_L0`` -> ``B_H_1``)."""
+        return re.sub(r"_L\d+$", "", member_id)
+
+    def get_beam_result(self, beam_id: str):
+        """Beam schedule lookup that accepts per-level ids (audit finding R13)."""
+        return self.beam_schedule.get(beam_id) or self.beam_schedule.get(self.base_member_id(beam_id))
+
+    # ------------------------------------------------------------------
+    # Member detailing
+    # ------------------------------------------------------------------
+    def detail_beams(self, beams: List[Any], fck: Optional[float] = None, fy: Optional[float] = None,
+                     ductile: bool = False, max_depth_mm: float = 1200.0):
+        """Design every plan beam.
+
+        Uses the factored envelope written by ``analysis_integration``
+        (``mu_sagging_knm``, ``mu_hogging_knm``, ``vu_kn``).  If a beam has no
+        analysis result, a simplified factored UDL is built from the recorded
+        load intensities and the beam is flagged WARN.
+
+        Depth starts at max(current depth, span/12 rounded up to 50 mm, 300 mm)
+        and is increased in 50 mm steps while the section FAILS (never
+        reduced, so repeated analysis/design iterations converge).
+        """
         from .rebar_detailer import RebarDetailer
+        fck = fck or self.fck
+        fy = fy or self.fy
         self.beam_schedule = {}
+        avg_x = (self.x_grid_lines[-1] - self.x_grid_lines[0]) / max(1, len(self.x_grid_lines) - 1) if len(self.x_grid_lines) > 1 else 4.0
+        avg_y = (self.y_grid_lines[-1] - self.y_grid_lines[0]) / max(1, len(self.y_grid_lines) - 1) if len(self.y_grid_lines) > 1 else 4.0
         for b in beams:
-            # Calc length
-            p1 = b.start_point
-            p2 = b.end_point
-            length_m = math.sqrt((p2.x-p1.x)**2 + (p2.y-p1.y)**2)
-            
-            # Dynamic Sizing (Phase 11)
-            # Depth ~ Span / 12 for simply supported, Span / 15 continuous
-            # Conservative: Span / 12
-            min_depth = (length_m * 1000) / 12.0
-            # Round up to 50mm
-            depth_mm = math.ceil(min_depth / 50.0) * 50.0
-            depth_mm = max(depth_mm, 300.0) # Min depth
-            
-            b.properties.depth_mm = depth_mm
-            
-            # Load? Approx 20kN/m + Self Weight
-            # SW = 0.23 * D * 25
-            # Auto-Sizing Loop
-            # We enforce Max 2.5% steel. If exceeded, increase depth.
-            
+            length_m = math.hypot(b.end_point.x - b.start_point.x, b.end_point.y - b.start_point.y)
+            span_depth = max(math.ceil(length_m * 1000.0 / 12.0 / 50.0) * 50.0, 300.0)
+            b.properties.depth_mm = max(b.properties.depth_mm, span_depth)
+            has_analysis = b.analysis_status != "PENDING" and (b.mu_sagging_knm > 0 or b.mu_hogging_knm > 0)
+            is_fallback = b.analysis_status.startswith("FALLBACK")
             while True:
-                # Stability Check (Blade Beam)
                 if b.properties.depth_mm > 750.0 and b.properties.width_mm < 300.0:
                     b.properties.width_mm = 300.0
-                
-                # Update SW Load based on current depth
-                sw = (b.properties.width_mm / 1000.0) * (b.properties.depth_mm / 1000.0) * 25.0 # Corrected SW volume
-                # Note: Previous code hardcoded 0.23 width. Now dynamic.
-                avg_span_x = (self.x_grid_lines[-1] - self.x_grid_lines[0]) / max(1, len(self.x_grid_lines) - 1) if self.x_grid_lines else 4.0
-                avg_span_y = (self.y_grid_lines[-1] - self.y_grid_lines[0]) / max(1, len(self.y_grid_lines) - 1) if self.y_grid_lines else 4.0
-                trib_width_m = min(avg_span_x, avg_span_y)  # Half-span each side
-                floor_udl = trib_width_m * 12.0  # 12 kN/m2 typical total floor load
-                total_load = floor_udl + sw + 12.0  # + wall load 12 kN/m default
-                
-                res = RebarDetailer.detail_beam(
-                    b_mm=b.properties.width_mm,
-                    d_mm=b.properties.depth_mm,
-                    span_m=length_m,
-                    load_kn_m=total_load,
-                    design_moment_knm=b.design_moment_knm,
-                    design_shear_kn=b.design_shear_kn
-                )
-                
-                # Check Congestion (Max 2.5%)
-                ag = b.properties.width_mm * b.properties.depth_mm
-                rho = (res.provided_steel_area_mm2 / ag) * 100.0
-                
-                if rho > 2.5 and b.properties.depth_mm < 1200:
-                    b.properties.depth_mm += 50.0
-                    # Assign new size to object so next iteration uses it
-                    continue
+                if has_analysis:
+                    res = RebarDetailer.detail_beam(
+                        b.properties.width_mm, b.properties.depth_mm, length_m, fck=fck, fy=fy,
+                        mu_sagging_knm=b.mu_sagging_knm, mu_hogging_knm=b.mu_hogging_knm, vu_kn=b.vu_kn,
+                        ductile=ductile, governing_combo=b.governing_combo)
+                    if is_fallback:
+                        res.warnings.append(f"Analysis fallback ({b.analysis_status}): simply supported moments on both faces")
+                        if res.status == "PASS":
+                            res.status = "WARN"
                 else:
-                    self.beam_schedule[b.id] = res
-                    break
+                    trib = min(avg_x, avg_y)  # half panel each side
+                    sw = b.properties.width_mm / 1000.0 * b.properties.depth_mm / 1000.0 * 25.0
+                    q = (self.dead_load_kn_m2 + self.live_load_kn_m2) or 8.0
+                    wu = 1.5 * (q * trib + sw + (self.fallback_wall_load_kn_m or 0.0))
+                    res = RebarDetailer.detail_beam(
+                        b.properties.width_mm, b.properties.depth_mm, length_m, fck=fck, fy=fy,
+                        mu_sagging_knm=wu * length_m ** 2 / 8.0, mu_hogging_knm=wu * length_m ** 2 / 8.0,
+                        vu_kn=wu * length_m / 2.0, ductile=ductile, governing_combo="simplified 1.5(DL+LL)")
+                    res.warnings.append("No frame analysis result: simplified tributary UDL used (wL^2/8 both faces)")
+                    if res.status == "PASS":
+                        res.status = "WARN"
+                rho = res.provided_steel_area_mm2 / (b.properties.width_mm * b.properties.depth_mm) * 100.0
+                failing = res.status == "FAIL" or rho > 2.5
+                if failing and b.properties.depth_mm < max_depth_mm:
+                    b.properties.depth_mm += 50.0
+                    continue
+                self.beam_schedule[b.id] = res
+                break
 
-    def detail_slabs(self):
-        """Assume slab panels between grid lines."""
+    def detail_slabs(self, fck: Optional[float] = None, fy: Optional[float] = None):
+        """Design each slab panel with its own thickness, factored load
+        1.5 x (slab self-weight + superimposed dead + live) and IS 456
+        Table 26 coefficients chosen from the panel's edge continuity."""
         from .rebar_detailer import RebarDetailer
+        fck = fck or self.fck
+        fy = fy or self.fy
         self.slab_schedule = {}
-        
-        # Grid Panes
-        if not self.x_grid_lines or not self.y_grid_lines: return
-        
+        sdl = self.superimposed_dead_kn_m2
+        ll = self.live_load_kn_m2
+        if sdl <= 0 and ll <= 0:
+            sdl, ll = 3.0, 2.0   # residential defaults when no intensities were recorded
         count = 0
-        for i in range(len(self.x_grid_lines)-1):
-            for j in range(len(self.y_grid_lines)-1):
-                count += 1
-                lx = self.x_grid_lines[i+1] - self.x_grid_lines[i]
-                ly = self.y_grid_lines[j+1] - self.y_grid_lines[j]
-                
-                # Dynamic Slab Thickness
-                # IS 456: Span/Depth <= 26 for continuous (Slab)
-                # Short span governs
-                short_span_mm = min(lx, ly) * 1000.0
-                d_min = short_span_mm / 26.0  # IS 456 Cl 23.2.1 effective depth
-                thk_mm = d_min + 30.0  # Add cover (25mm) + half bar dia (5mm)
-                thk_mm = math.ceil(thk_mm / 5.0) * 5.0
-                thk_mm = max(thk_mm, 125.0)  # Absolute minimum
-                
-                sid = f"S{count}"
-                res = RebarDetailer.detail_slab(lx, ly, slab_thk_mm=thk_mm)
-                self.slab_schedule[sid] = res
+        for p in self.slab_panels():
+            count += 1
+            d_min = p["lx"] * 1000.0 / 26.0
+            thk = max(math.ceil((d_min + 30.0) / 5.0) * 5.0, 125.0, self.slab_thickness_mm)
+            wu = 1.5 * (25.0 * thk / 1000.0 + sdl + ll)
+            res = RebarDetailer.detail_slab(p["x1"] - p["x0"], p["y1"] - p["y0"], slab_thk_mm=thk, fck=fck, fy=fy,
+                                           factored_load_kn_m2=wu, disc_short_edges=p["disc_short"],
+                                           disc_long_edges=p["disc_long"])
+            self.slab_schedule[f"S{count}"] = res
 
-    def detail_columns(self, concrete: Concrete, fy: float = 415.0):
-        """Populate rebar_schedule using RebarDetailer."""
+    def detail_columns(self, concrete: Concrete, fy: float = 415.0, ductile: bool = False, le_factor: float = 1.0):
+        """Design every column segment for all factored combinations written by
+        the analysis (``design_forces``); without analysis results the
+        1.5(DL+LL) axial load with minimum eccentricity is used."""
         from .rebar_detailer import RebarDetailer
         self.rebar_schedule = {}
-        
         for col in self.columns:
-            # col.load_kn is SERVICE (unfactored) load from calculate_loads()
-            # IS 456 Table 18: γf = 1.5 for (1.5 DL + 1.5 LL) combination
-            pu_factored_kn = col.load_kn * 1.5
+            combos = col.design_forces or [("1.5(DL+LL) axial only", col.load_kn * 1.5, 0.0, 0.0)]
             res = RebarDetailer.detail_column(
-                b_mm=col.width_nb,
-                d_mm=col.depth_nb,
-                pu_kn=pu_factored_kn,
-                concrete=concrete,
-                level=col.level,
-                fy=fy
-            )
+                b_mm=col.width_nb, d_mm=col.depth_nb, pu_kn=combos[0][1], concrete=concrete, level=col.level,
+                fy=fy, combos=combos, unsupported_length_m=max(col.z_top - col.z_bottom, 0.1) or self.story_height_m,
+                le_factor=le_factor, ductile=ductile, column_id=col.id)
+            if not col.design_forces:
+                res.warnings.append("No frame analysis result: axial load with minimum eccentricity only")
+                if res.status == "PASS":
+                    res.status = "WARN"
             self.rebar_schedule[col.id] = res
 
-    def detail_staircase(self):
-        """Generates Staircase Design for the building."""
+    def detail_staircase(self, fck: Optional[float] = None, fy: Optional[float] = None, live_load_kn_m2: float = 3.0):
+        """Design the typical dog-legged flight for the storey height."""
         from .rebar_detailer import RebarDetailer
-        self.staircase_schedule = {}
-        
-        # Assume one main staircase per building block
-        # Design for the typical floor height
-        res = RebarDetailer.detail_staircase(
-            floor_height_m=self.story_height_m,
-            flight_width_m=1.2, # Standard width
-            fy=415.0,
-            fck=25.0
-        )
-        self.staircase_schedule["ST-1"] = res
-
+        self.staircase_schedule = {
+            "ST-1": RebarDetailer.detail_staircase(floor_height_m=self.story_height_m, flight_width_m=1.2,
+                                                   fy=fy or self.fy, fck=fck or self.fck, live_load_kn_m2=live_load_kn_m2)
+        }

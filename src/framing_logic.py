@@ -31,10 +31,16 @@ class StructuralMember(BaseModel):
     load_kn: float = 0.0 # Axial load for column, Distributed load for beam (simplification)
     tributary_area_m2: float = 0.0 # For columns
     
-    # Analysis Results (Phase 16 - FEA)
-    design_moment_knm: float = 0.0
+    # Analysis Results (FEA). All values are FACTORED envelopes over the load
+    # combinations and storeys (written by analysis_integration).
+    design_moment_knm: float = 0.0   # max(|sagging|, |hogging|), kept for backward compatibility
     design_shear_kn: float = 0.0
-    analysis_status: str = "PENDING"
+    mu_sagging_knm: float = 0.0
+    mu_hogging_knm: float = 0.0
+    vu_kn: float = 0.0
+    governing_combo: str = ""
+    service_udl_kn_m: float = 0.0    # max service (DL+LL) line load over storeys, for deflection checks
+    analysis_status: str = "PENDING" # PENDING | FEA_SOLVED | FALLBACK_<reason>
     level: int = 0 # To track story level
 
 class GridSystem(BaseModel):

@@ -38,6 +38,13 @@ safety_summary = st.session_state.get('safety_summary')
 conc_grade = st.session_state.get('conc_grade', 'M25')
 live_load = st.session_state.get('live_load', 0)
 building_weight = st.session_state.get('building_weight', 0)
+_design_status = st.session_state.get('design_status')
+if _design_status == "FAIL":
+    st.error("❌ Design status FAIL — reports are generated for review only and list the failing items. NOT FOR CONSTRUCTION.")
+elif _design_status == "WARN":
+    st.warning("⚠️ Design status WARN — reports list items needing engineering review. NOT FOR CONSTRUCTION.")
+else:
+    st.info("All implemented checks pass. Reports remain PRELIMINARY and require independent verification.")
 seismic_zone = st.session_state.get('seismic_zone', 'II')
 building_type_name = st.session_state.get('building_type_name', '')
 footings = st.session_state.get('footings', [])
@@ -80,6 +87,9 @@ def generate_zip_package():
             building_weight=building_weight,
             seismic_zone=seismic_zone,
             footings=footings,
+            design_status=st.session_state.get('design_status'),
+            design_failures=st.session_state.get('design_failures'),
+            design_messages=st.session_state.get('design_messages'),
         )
         
         # 2. BBS Report
@@ -199,6 +209,9 @@ with col1:
                 building_weight=building_weight,
                 seismic_zone=seismic_zone,
                 footings=footings,
+                design_status=st.session_state.get('design_status'),
+                design_failures=st.session_state.get('design_failures'),
+                design_messages=st.session_state.get('design_messages'),
             )
         with open(tmp.name, "rb") as f:
             st.download_button("📑 Complete Report", f.read(), "Structural_Design_Report.pdf", "application/pdf", key="dl_complete_report")

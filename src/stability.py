@@ -221,7 +221,7 @@ class StabilityChecker:
             (slenderness_ratio, max_allowed, is_ok)
         """
         if width_mm <= 0 or depth_mm <= 0:
-            return {"status": "FAIL", "reason": "Invalid member dimensions (zero or negative)"}
+            raise ValueError("Invalid member dimensions (zero or negative)")
             
         Le = effective_length_factor * height_mm
         D = min(width_mm, depth_mm)  # Minimum lateral dimension
@@ -252,7 +252,7 @@ class StabilityChecker:
             (slenderness_ratio, max_allowed, is_ok)
         """
         if width_mm <= 0 or depth_mm <= 0:
-            return {"status": "FAIL", "reason": "Invalid member dimensions (zero or negative)"}
+            raise ValueError("Invalid member dimensions (zero or negative)")
             
         L_by_b = span_mm / width_mm
         limit1 = 60.0
@@ -406,7 +406,9 @@ class StabilityChecker:
         self,
         columns: List,  # Column objects
         beams: List,    # StructuralMember objects
-        story_height_m: float
+        story_height_m: float,
+        column_cover_mm: float = 40.0,
+        beam_cover_mm: float = 25.0
     ) -> Tuple[List[StabilityCheck], StabilitySummary]:
         """
         Check all columns and beams for stability and fire resistance.
@@ -426,7 +428,7 @@ class StabilityChecker:
                 col.width_nb,
                 col.depth_nb,
                 height_mm,
-                cover_mm=40  # Default cover
+                cover_mm=column_cover_mm  # clear cover used by rebar_detailer
             )
             results.append(check)
             if not (check.is_stable and check.is_fire_safe):
@@ -443,7 +445,7 @@ class StabilityChecker:
                 beam.properties.width_mm,
                 beam.properties.depth_mm,
                 span_mm,
-                cover_mm=30
+                cover_mm=beam_cover_mm  # clear cover used by rebar_detailer
             )
             results.append(check)
             if not (check.is_stable and check.is_fire_safe):
@@ -483,7 +485,9 @@ def run_stability_check(
     beams: List,
     num_floors: int,
     story_height_m: float,
-    fire_rating: Optional[FireRating] = None
+    fire_rating: Optional[FireRating] = None,
+    column_cover_mm: float = 40.0,
+    beam_cover_mm: float = 25.0
 ) -> Tuple[List[StabilityCheck], StabilitySummary]:
     """
     Main function to run stability and fire resistance checks.
@@ -506,4 +510,4 @@ def run_stability_check(
         fire_rating=fire_rating
     )
     
-    return checker.check_all_members(columns, beams, story_height_m)
+    return checker.check_all_members(columns, beams, story_height_m, column_cover_mm, beam_cover_mm)

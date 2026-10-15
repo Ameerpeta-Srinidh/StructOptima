@@ -1,293 +1,280 @@
+"""
+2D frame solver (direct stiffness method).
+
+Units: kN, m, kNm.  DOFs per node: (u, v, theta) in the global X-Y plane of the
+frame, where global Y is vertical (up).
+
+Conventions (see docs/engineering/units-and-conventions.md):
+  * Member end forces are expressed in member-local axes: local x runs from
+    node n1 to node n2, local y is local x rotated +90 degrees.
+  * Distributed member loads added with ``add_member_load`` are GRAVITY loads:
+    a positive value acts in global -Y, irrespective of the direction in which
+    the member was defined (fixes audit finding R12).
+  * Internal bending moments returned by ``moment_at`` / ``get_member_forces``
+    use the structural convention "sagging positive" (tension on the bottom
+    face) for horizontal members.  For a horizontal member defined from right
+    to left the local sign is flipped back so that results are orientation
+    independent.
+"""
+
+import math
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-import math
-from typing import List, Dict, Optional, Tuple
+
 from .logging_config import get_logger
 
 logger = get_logger(__name__)
 
+
 class FrameSolver2D:
-    """
-    Direct Stiffness Method Solver for 2D Frames.
-    DOFs per node: 3 (u, v, theta).
-    Units: kN, m, kNm.
-    """
-    def __init__(self):
-        self.nodes = [] # List of (x, y) tuples
-        self.elements = [] # List of dicts {n1, n2, E, I, A}
-        self.loads = {} # {element_index: udl_kn_m}
-        self.node_loads = {} # {node_idx: [Fx, Fy, M]} - Not used much for UDL dominant
-        self.results = {} # {elem_idx: forces}
-        
+    """Direct stiffness method solver for plane frames."""
+
+    #: Condition number above which the reduced stiffness matrix is treated as
+    #: singular / a mechanism (audit finding R23).
+    MAX_CONDITION_NUMBER = 1e12
+
+    def __init__(self, fixed_base: bool = True, base_level: float = 0.0):
+        self.nodes: List[Tuple[float, float]] = []
+        self.elements: List[dict] = []
+        self.loads: Dict[int, float] = {}            # {elem_idx: gravity UDL kN/m}
+        self.node_loads: Dict[int, List[float]] = {}  # {node_idx: [Fx, Fy, M]}
+        self.results: Dict[int, np.ndarray] = {}      # {elem_idx: local end forces}
+        self.fixed_base = fixed_base
+        self.base_level = base_level
+        self.status = "NOT_SOLVED"   # NOT_SOLVED | SOLVED | UNSTABLE | SINGULAR | EMPTY
+        self.status_message = ""
+        self.displacements: Optional[np.ndarray] = None
+
+    # ------------------------------------------------------------------ model
     def add_node(self, x: float, y: float) -> int:
         self.nodes.append((x, y))
         return len(self.nodes) - 1
-        
+
     def add_element(self, n1_idx: int, n2_idx: int, E: float, I: float, A: float) -> int:
-        self.elements.append({
-            "n1": n1_idx,
-            "n2": n2_idx,
-            "E": E,
-            "I": I,
-            "A": A
-        })
+        self.elements.append({"n1": n1_idx, "n2": n2_idx, "E": E, "I": I, "A": A})
         return len(self.elements) - 1
-        
+
     def add_member_load(self, elem_idx: int, udl_kn_m: float):
+        """Gravity UDL (kN/m, positive = downward, global -Y)."""
         self.loads[elem_idx] = udl_kn_m
-        
-    def solve(self):
-        num_nodes = len(self.nodes)
-        num_dof = num_nodes * 3
-        
-        K_global = np.zeros((num_dof, num_dof))
-        F_global = np.zeros(num_dof)
-        
-        # 1. Assemble Stiffness Matrix
-        for i, el in enumerate(self.elements):
-            k_local = self._get_element_stiffness(i)
-            dof_indices = self._get_dof_indices(el['n1'], el['n2'])
-            
-            # Add to Global K
-            for r in range(6):
-                for c in range(6):
-                    row = dof_indices[r]
-                    col = dof_indices[c]
-                    K_global[row, col] += k_local[r, c]
-                    
-        # 2. Load Vector (Fixed End Actions)
-        # Convert Member UDL to Nodal Forces (Global)
-        self.fixed_end_actions = {} # Store for post-processing {elem_idx: local_force_vector}
-        
-        for i, udl in self.loads.items():
-            if udl == 0: continue
-            
-            # Local FER (Fixed End Reactions)
-            # Vector = [Fx1, Fy1, M1, Fx2, Fy2, M2]
-            # UDL (w) corresponds to local y-axis downwards usually? 
-            # Assume local y is perpendicular to beam.
-            
-            # Length
-            n1 = self.nodes[self.elements[i]['n1']]
-            n2 = self.nodes[self.elements[i]['n2']]
-            L = math.sqrt((n2[0]-n1[0])**2 + (n2[1]-n1[1])**2)
-            
-            # Fixed End Moments/Shears (Standard wL^2/12)
-            # Reaction is UP (+y local), Moment is CCW (+).
-            # Left Node: Fy = wL/2, M = wL^2/12
-            # Right Node: Fy = wL/2, M = -wL^2/12
-            
-            # Note: Input UDL is usually gravity (downwards). 
-            # If our local y is up, then force is -w * L.
-            # Let's assume UDL is positive value acting DOWN (Load).
-            # So Reaction is UP (+) wL/2.
-            # Fixed End Moment (Reaction from support to beam):
-            # Left: +wL^2/12 (CCW) 
-            # Right: -wL^2/12 (CW)
-            
-            w = udl 
-            r_shear = w * L / 2.0
-            r_moment = (w * L**2) / 12.0
-            
-            # Fixed End Reactions (Forces applied BY support ON member)
-            fer_local = np.array([0, r_shear, r_moment, 0, r_shear, -r_moment])
-            
-            self.fixed_end_actions[i] = fer_local
-            
-            # Equivalent Nodal Forces (Action ON Node = - Reaction)
-            # We need to transform these to Global Frame before subtracting from F_global
-            
-            T = self._get_transform_matrix(i)
-            fer_global = T.T @ fer_local # F_global = T_transpose * F_local
-            
-            # Add neg of reaction to Nodal Load Vector (Equivalent Load)
-            dof_indices = self._get_dof_indices(self.elements[i]['n1'], self.elements[i]['n2'])
-            for r in range(6):
-                idx = dof_indices[r]
-                F_global[idx] -= fer_global[r]
-                
-        # 3. Boundary Conditions
-        # Assume nodes at y=0 are FIXED supports (classic building frame assumption)
-        fixed_dofs = []
-        for i, (x, y) in enumerate(self.nodes):
-            if abs(y) < 0.01: # Base
-                base_idx = i * 3
-                fixed_dofs.extend([base_idx, base_idx+1, base_idx+2])
-                
-        # Reduce Matrix
-        free_dofs = [i for i in range(num_dof) if i not in fixed_dofs]
-        
-        if not free_dofs:
-            return # Trivial
-            
-        # Check for mechanisms / floating nodes
-        for i in free_dofs:
-            if K_global[i, i] < 1e-4:
-                node_idx = i // 3
-                dof_type = ["X", "Y", "Rot"][i % 3]
-                node_coords = self.nodes[node_idx]
-                logger.error(f"UNSTABLE DOF: Node {node_idx} at {node_coords} DOF={dof_type} (K_ii={K_global[i,i]})")
-                logger.error("  This usually means the node is not connected to any stiff element in this direction.")
-        
-        K_reduced = K_global[np.ix_(free_dofs, free_dofs)]
-        F_reduced = F_global[free_dofs]
-        
-        # Power of Numpy
-        # PERFORMANCE NOTE (Audit W8): Currently using dense numpy matrices for FEA. 
-        # For structures with > 500 nodes, it is highly recommended to switch to scipy.sparse.linalg.spsolve 
-        # to drastically reduce memory usage and improve solve times.
-        try:
-            d_reduced = np.linalg.solve(K_reduced, F_reduced)
-        except np.linalg.LinAlgError:
-            logger.error("Matrix Singular! Check stability.")
-            logger.error("DUMPING MODEL FOR DEBUG:")
-            for i, n in enumerate(self.nodes):
-                logger.error(f"Node {i}: {n}")
-            for i, el in enumerate(self.elements):
-                logger.error(f"Elem {i}: {el['n1']}->{el['n2']}")
-            return
 
-        # map back
-        D_global = np.zeros(num_dof)
-        D_global[free_dofs] = d_reduced
-        
-        self.displacements = D_global
-        
-        # 4. Member End Forces
-        for i, el in enumerate(self.elements):
-            k_local = self._get_element_stiffness(i)
-            T = self._get_transform_matrix(i)
-            
-            dof_indices = self._get_dof_indices(el['n1'], el['n2'])
-            d_global_elem = D_global[dof_indices]
-            
-            # Transform global disp to local
-            d_local = T @ d_global_elem
-            
-            # F = k * d
-            f_local = k_local @ d_local
-            
-            # Superimpose Fixed End Actions
-            if i in self.fixed_end_actions:
-                 f_local += self.fixed_end_actions[i]
-                 
-            self.results[i] = f_local
+    def add_node_load(self, node_idx: int, fx: float = 0.0, fy: float = 0.0, m: float = 0.0):
+        cur = self.node_loads.get(node_idx, [0.0, 0.0, 0.0])
+        self.node_loads[node_idx] = [cur[0] + fx, cur[1] + fy, cur[2] + m]
 
-    def get_member_forces(self, elem_idx: int) -> dict:
-        if elem_idx not in self.results: return {}
-        
-        f = self.results[elem_idx]
-        # f = [Fx1, Fy1, M1, Fx2, Fy2, M2]
-        
-        # Max Moment? 
-        # Check ends
-        m1 = f[2]
-        m2 = f[5]
-        
-        # Check Mid-span for UDL?
-        # Parabolic dip: M_mid = wL^2/8 - (M_avg) approx for simply supported, 
-        # but here we have end moments.
-        # M(x) = M1 + V1*x - w*x^2/2
-        
-        n1 = self.nodes[self.elements[elem_idx]['n1']]
-        n2 = self.nodes[self.elements[elem_idx]['n2']]
-        L = math.sqrt((n2[0]-n1[0])**2 + (n2[1]-n1[1])**2)
-        
-        w = self.loads.get(elem_idx, 0.0)
-        
-        # V1 is f[1]
-        v1 = f[1]
-        
-        # Candidate max locations: Ends and where Shear = 0
-        # V(x) = V1 - w*x = 0 => x = V1/w
-        
-        moments = [abs(m1), abs(m2)]
-        
-        if w != 0:
-            x_zero_shear = v1 / w
-            if 0 < x_zero_shear < L:
-                m_span = m1 + v1*x_zero_shear - (w * x_zero_shear**2)/2.0
-                moments.append(abs(m_span))
-                
-        max_m = max(moments)
-        max_v = max(abs(f[1]), abs(f[4]))
-        
-        return {
-            "max_moment": max_m,
-            "max_shear": max_v
-        }
-
-    def _get_element_stiffness(self, elem_idx: int):
+    # --------------------------------------------------------------- geometry
+    def _geom(self, elem_idx: int) -> Tuple[float, float, float]:
         el = self.elements[elem_idx]
-        n1 = self.nodes[el['n1']]
-        n2 = self.nodes[el['n2']]
-        
+        n1 = self.nodes[el["n1"]]
+        n2 = self.nodes[el["n2"]]
         dx = n2[0] - n1[0]
         dy = n2[1] - n1[1]
-        L = math.sqrt(dx*dx + dy*dy)
+        L = math.hypot(dx, dy)
         if L < 1e-9:
-             raise ValueError(f"Element {elem_idx} has zero length! Nodes: {n1} to {n2}")
-        
-        E = el['E'] # kN/m2 (kPa)
-        I = el['I'] # m4
-        A = el['A'] # m2
-        
-        # Local Stiffness Matrix (6x6)
-        # u1, v1, th1, u2, v2, th2
-        k = np.zeros((6, 6))
-        
-        a1 = (E * A) / L
-        b1 = (12 * E * I) / (L**3)
-        b2 = (6 * E * I) / (L**2)
-        b3 = (4 * E * I) / L
-        b4 = (2 * E * I) / L
-        
-        # Axial
-        k[0, 0] = a1; k[0, 3] = -a1
-        k[3, 0] = -a1; k[3, 3] = a1
-        
-        # Bending
-        k[1, 1] = b1; k[1, 2] = b2; k[1, 4] = -b1; k[1, 5] = b2
-        k[2, 1] = b2; k[2, 2] = b3; k[2, 4] = -b2; k[2, 5] = b4
-        k[4, 1] = -b1; k[4, 2] = -b2; k[4, 4] = b1; k[4, 5] = -b2
-        k[5, 1] = b2; k[5, 2] = b4; k[5, 4] = -b2; k[5, 5] = b3
-        
-        # Transform to Global
-        T = self._get_transform_matrix(elem_idx)
-        k_global = T.T @ k @ T
-        return k_global
+            raise ValueError(f"Element {elem_idx} has zero length! Nodes: {n1} to {n2}")
+        return L, dx / L, dy / L
 
-    def _get_transform_matrix(self, elem_idx: int):
+    def _get_local_stiffness(self, elem_idx: int) -> np.ndarray:
         el = self.elements[elem_idx]
-        n1 = self.nodes[el['n1']]
-        n2 = self.nodes[el['n2']]
-        
-        dx = n2[0] - n1[0]
-        dy = n2[1] - n1[1]
-        L = math.sqrt(dx*dx + dy*dy)
-        if L == 0: L = 1e-9
-        
-        c = dx / L
-        s = dy / L
-        
-        # T = [ R 0 ]
-        #     [ 0 R ]
-        # R = [ c  s  0 ]
-        #     [-s  c  0 ]
-        #     [ 0  0  1 ]
-        
-        T = np.zeros((6, 6))
-        
-        R = np.array([
-            [c, s, 0],
-            [-s, c, 0],
-            [0, 0, 1]
+        L, _, _ = self._geom(elem_idx)
+        E, I, A = el["E"], el["I"], el["A"]
+        a1 = E * A / L
+        b1 = 12 * E * I / L**3
+        b2 = 6 * E * I / L**2
+        b3 = 4 * E * I / L
+        b4 = 2 * E * I / L
+        return np.array([
+            [a1, 0, 0, -a1, 0, 0],
+            [0, b1, b2, 0, -b1, b2],
+            [0, b2, b3, 0, -b2, b4],
+            [-a1, 0, 0, a1, 0, 0],
+            [0, -b1, -b2, 0, b1, -b2],
+            [0, b2, b4, 0, -b2, b3],
         ])
-        
+
+    def _get_transform_matrix(self, elem_idx: int) -> np.ndarray:
+        _, c, s = self._geom(elem_idx)
+        R = np.array([[c, s, 0], [-s, c, 0], [0, 0, 1]])
+        T = np.zeros((6, 6))
         T[0:3, 0:3] = R
         T[3:6, 3:6] = R
-        
         return T
-        
-    def _get_dof_indices(self, n1: int, n2: int):
-        return [n1*3, n1*3+1, n1*3+2, n2*3, n2*3+1, n2*3+2]
+
+    def _get_element_stiffness(self, elem_idx: int) -> np.ndarray:
+        """Element stiffness in GLOBAL axes (kept for backward compatibility)."""
+        T = self._get_transform_matrix(elem_idx)
+        return T.T @ self._get_local_stiffness(elem_idx) @ T
+
+    @staticmethod
+    def _get_dof_indices(n1: int, n2: int) -> List[int]:
+        return [n1 * 3, n1 * 3 + 1, n1 * 3 + 2, n2 * 3, n2 * 3 + 1, n2 * 3 + 2]
+
+    def _local_udl(self, elem_idx: int, w_gravity: float) -> Tuple[float, float]:
+        """Resolve a gravity UDL (global -Y, per unit member length) into local
+        (axial p, transverse q) components."""
+        _, c, s = self._geom(elem_idx)
+        # global load per unit length = (0, -w); local x = (c, s); local y = (-s, c)
+        p = -w_gravity * s
+        q = -w_gravity * c
+        return p, q
+
+    def _fixed_end_forces(self, elem_idx: int, w_gravity: float) -> np.ndarray:
+        """Fixed-end forces exerted BY the supports ON the member (local axes)."""
+        L, _, _ = self._geom(elem_idx)
+        p, q = self._local_udl(elem_idx, w_gravity)
+        return np.array([
+            -p * L / 2.0, -q * L / 2.0, -q * L**2 / 12.0,
+            -p * L / 2.0, -q * L / 2.0, q * L**2 / 12.0,
+        ])
+
+    def _fixed_dofs(self) -> List[int]:
+        fixed = []
+        for i, (_, y) in enumerate(self.nodes):
+            if abs(y - self.base_level) < 0.01:
+                fixed.extend([i * 3, i * 3 + 1])
+                if self.fixed_base:
+                    fixed.append(i * 3 + 2)
+        return fixed
+
+    # ------------------------------------------------------------------ solve
+    def solve(self):
+        """Solve the single load case defined by ``self.loads`` and
+        ``self.node_loads``.  Results stored in ``self.results``."""
+        res = self.solve_cases({"_default": (self.loads, self.node_loads)})
+        if "_default" in res:
+            self.results = res["_default"]["forces"]
+            self.displacements = res["_default"]["displacements"]
+
+    def solve_cases(self, cases: Dict[str, Tuple[Dict[int, float], Dict[int, List[float]]]]) -> Dict[str, dict]:
+        """Solve several load cases sharing the same stiffness matrix.
+
+        Args:
+            cases: {name: (member_gravity_udls, node_loads)}
+
+        Returns:
+            {name: {"forces": {elem: local end forces}, "displacements": array}}
+            Empty dict if the structure is unstable / singular (``self.status``
+            explains why).
+        """
+        num_nodes = len(self.nodes)
+        if num_nodes == 0 or not self.elements:
+            self.status = "EMPTY"
+            self.status_message = "No nodes or elements"
+            return {}
+        num_dof = num_nodes * 3
+        K = np.zeros((num_dof, num_dof))
+        for i, el in enumerate(self.elements):
+            idx = self._get_dof_indices(el["n1"], el["n2"])
+            K[np.ix_(idx, idx)] += self._get_element_stiffness(i)
+
+        fixed = set(self._fixed_dofs())
+        free = [i for i in range(num_dof) if i not in fixed]
+        if not free:
+            self.status = "EMPTY"
+            self.status_message = "All DOFs restrained"
+            return {}
+
+        # Mechanism detection: free DOF with no stiffness
+        loose = [i for i in free if K[i, i] < 1e-9]
+        if loose:
+            node_idx = loose[0] // 3
+            self.status = "UNSTABLE"
+            self.status_message = (
+                f"{len(loose)} unrestrained DOF(s) without stiffness, e.g. node {node_idx} "
+                f"at {self.nodes[node_idx]} DOF={['X', 'Y', 'Rot'][loose[0] % 3]}"
+            )
+            logger.error("UNSTABLE frame: %s", self.status_message)
+            return {}
+
+        Kr = K[np.ix_(free, free)]
+        try:
+            cond = np.linalg.cond(Kr)
+        except np.linalg.LinAlgError:
+            cond = float("inf")
+        if not np.isfinite(cond) or cond > self.MAX_CONDITION_NUMBER:
+            self.status = "SINGULAR"
+            self.status_message = f"Stiffness matrix ill-conditioned (cond={cond:.2e}); possible mechanism"
+            logger.error("Frame solve aborted: %s", self.status_message)
+            return {}
+
+        names = list(cases.keys())
+        F = np.zeros((num_dof, len(names)))
+        fea_cache: Dict[str, Dict[int, np.ndarray]] = {}
+        for j, name in enumerate(names):
+            udls, nloads = cases[name]
+            fea_cache[name] = {}
+            for e, w in (udls or {}).items():
+                if not w:
+                    continue
+                fer = self._fixed_end_forces(e, w)
+                fea_cache[name][e] = fer
+                T = self._get_transform_matrix(e)
+                idx = self._get_dof_indices(self.elements[e]["n1"], self.elements[e]["n2"])
+                F[idx, j] -= T.T @ fer
+            for n, (fx, fy, m) in (nloads or {}).items():
+                F[n * 3, j] += fx
+                F[n * 3 + 1, j] += fy
+                F[n * 3 + 2, j] += m
+
+        try:
+            Dr = np.linalg.solve(Kr, F[free, :])
+        except np.linalg.LinAlgError:
+            self.status = "SINGULAR"
+            self.status_message = "Matrix singular"
+            logger.error("Matrix singular! Check stability.")
+            return {}
+
+        out = {}
+        for j, name in enumerate(names):
+            D = np.zeros(num_dof)
+            D[free] = Dr[:, j]
+            forces = {}
+            for i, el in enumerate(self.elements):
+                idx = self._get_dof_indices(el["n1"], el["n2"])
+                f = self._get_local_stiffness(i) @ (self._get_transform_matrix(i) @ D[idx])
+                if i in fea_cache[name]:
+                    f = f + fea_cache[name][i]
+                forces[i] = f
+            out[name] = {"forces": forces, "displacements": D, "udls": dict(cases[name][0] or {})}
+        self.status = "SOLVED"
+        self.status_message = ""
+        return out
+
+    # -------------------------------------------------------- post-processing
+    def moment_at(self, elem_idx: int, x: float, forces: Optional[np.ndarray] = None,
+                  w_gravity: Optional[float] = None) -> float:
+        """Internal bending moment at distance x from n1 (sagging positive for
+        horizontal members, see module docstring)."""
+        f = self.results[elem_idx] if forces is None else forces
+        w = self.loads.get(elem_idx, 0.0) if w_gravity is None else w_gravity
+        _, c, _ = self._geom(elem_idx)
+        _, q = self._local_udl(elem_idx, w)
+        m_local = -f[2] + f[1] * x + q * x * x / 2.0
+        # Express in the frame's "sagging positive" sense for members that run
+        # right-to-left (c < 0); vertical members keep the local sign.
+        return -m_local if c < -1e-9 else m_local
+
+    def get_member_forces(self, elem_idx: int, forces: Optional[np.ndarray] = None,
+                          w_gravity: Optional[float] = None, stations: int = 21) -> dict:
+        """Envelope of internal forces along one member for one load case.
+
+        Returns keys: max_moment (largest absolute moment), max_sagging (>= 0),
+        max_hogging (>= 0, magnitude of the most negative moment),
+        max_shear, axial (compression positive), m_end1, m_end2 (internal
+        moments at the two ends, sign as ``moment_at``).
+        """
+        if forces is None and elem_idx not in self.results:
+            return {}
+        f = self.results[elem_idx] if forces is None else forces
+        L, _, _ = self._geom(elem_idx)
+        ms = [self.moment_at(elem_idx, L * k / (stations - 1), f, w_gravity) for k in range(stations)]
+        return {
+            "max_moment": max(abs(m) for m in ms),
+            "max_sagging": max(0.0, max(ms)),
+            "max_hogging": max(0.0, -min(ms)),
+            "max_shear": max(abs(f[1]), abs(f[4])),
+            "axial": float(f[0]),
+            "m_end1": ms[0],
+            "m_end2": ms[-1],
+        }

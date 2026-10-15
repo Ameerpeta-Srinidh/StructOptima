@@ -1,0 +1,68 @@
+# Interfaces and Contracts
+
+**As of:** 2026-10-15.
+
+## Load semantics (decision D-01, proposed)
+
+| Quantity | Contract |
+|---|---|
+| `Column.load_kn`, `load_dl_kn`, `load_ll_kn`, `plinth_load_kn` | **Service** (unfactored) |
+| `Column.design_forces`, `StructuralMember.mu_*`, `vu_kn`, `design_moment_knm`, `design_shear_kn` | **Factored** combination results |
+| `RebarDetailer.detail_*` inputs (`pu_kn`, `mux_knm`, `mu_sagging_knm`, …, `factored_load_kn_m2`) | **Factored** |
+| `RebarDetailer.detail_slab(load_kn_m2=…)` (legacy argument) | Service, multiplied by 1.5 internally |
+| `design_footing(axial_load_kn)` | Service; `factored_load_kn` optional (else 1.5 × service) |
+| `StructuralAuditor` | Reads service loads and factors them itself |
+
+## `run_design(gm, beams, inputs) -> DesignResults`
+
+Preconditions: `gm` has grid lines and columns stacked for `inputs.num_stories`
+(manual: `generate_grid`; DXF: `CADLoader` + `stack_columns`; IFC: as loaded).
+`beams` are plan beams (one per bay side); may be empty (generated).
+Side effects: mutates `gm` (loads, sizes, schedules) and `beams` (sizes,
+envelopes). No files are written.
+
+`DesignInputs` (defaults): `num_stories=2`, `story_height_m=3.5`,
+`building_type_name="Residential"`, `wall_load_kn_m=12` (only without walls),
+`sbc_kn_m2=200`, `conc_grade="M25"`, `fy=415`, `seismic_zone="III"`,
+`soil_type="II"`, `structural_system="OMRF"`, `importance_factor=None` (occupancy
+default), `wind_zone=None` (no wind), `terrain_category=None` (category 2),
+`wind_opening_percentage=10`, `use_cracked_sections=True`, `fixed_base=True`,
+`add_staircase=False`, masonry settings, `align_to_wall=None`,
+`max_iterations=6`, `le_factor=1.0`.
+
+`DesignResults.status`: worst of the `failures` statuses; at least `WARN` if not converged.
+
+## Analysis
+
+`update_structural_analysis(gm, beams, fck, use_cracked_sections, fixed_base, lateral) -> AnalysisSummary`
+- Reads `gm` service intensities (falls back to residential defaults with a message).
+- `lateral`: `LateralLoads(eq_x, eq_y, wl_x, wl_y)` whole-building storey forces at levels 1..N (kN).
+- Writes beam envelopes and column `design_forces`; resets previous values first.
+
+`FrameSolver2D` contract: gravity UDL positive = global −Y; `solve_cases` returns
+`{}` and sets `status` to `UNSTABLE` / `SINGULAR` / `EMPTY` when the model cannot
+be solved; `moment_at` sign = sagging positive for horizontal members.
+
+## Detailing results
+
+Every `RebarResult`, `BeamRebarResult`, `SlabRebarResult`, `StaircaseResult`
+and `Footing` carries `status` ∈ {PASS, WARN, FAIL} and `warnings`. Consumers must
+use these fields (the Analysis page, PDF and dashboard do); they must not
+re-derive pass/fail from other quantities.
+
+## Ingest contracts
+
+- `CADLoader.load_grid_manager(...) -> (GridManager, beams)`; geometry in metres, column sizes in mm; warnings in `load_warnings`; raises `ValueError` when no geometry.
+- `BIMLoader.load_grid_manager() -> (GridManager, beams)`; warnings in `warnings`; raises `ValueError` when no columns.
+
+## Logging, caching, configuration
+
+- `get_logger(name)`: console handler on the `src` logger; file output only if `STRUCTOPTIMA_LOG_FILE` is set or an entry point calls `setup_logging()` (CLI). `LOG_LEVEL` env var sets the level.
+- Streamlit caching: Analysis page `run_optimization` keyed by an explicit fingerprint of columns and their design forces (R22). `section_design._curve_cached` memoises interaction curves (LRU, 4096 entries, keyed by geometry, bars, fck, fy).
+- Environment variables: `SENTRY_DSN` (monitoring), `LOG_LEVEL`, `STRUCTOPTIMA_LOG_FILE`.
+
+## Error behaviour
+
+Library functions raise `ValueError` for invalid geometry/inputs (e.g. stability
+checks with zero dimensions — R24, `calculate_loads` without loads). Numerical
+non-solvability is reported through statuses, not exceptions.
