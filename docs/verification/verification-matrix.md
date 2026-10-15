@@ -42,4 +42,8 @@ Evidence levels: **0** none · **1** executes · **2** structural assertions · 
 | Ingest | DXF units / walls / IFC | `test_R14_*`, `test_R17_*`, `test_cad_parser.py`, `test_pipeline_e2e.py` | 3 | VERIFIED_FOR_CASES (synthetic DXF/IFC) | Real-world IFC exports |
 | UI | Dashboard and pages | `test_streamlit_app.py` | 1 (renders without exception) | UNVERIFIED | Visual / content review |
 
+| CAL-FEA-06 | Storey drift | `tests/test_drift.py` | 4 (closed-form portal) | VERIFIED_FOR_CASES (portal); limits UNVERIFIED | Multi-storey comparison with a reference program; printed IS 1893 limit |
+| CAL-SITE-01 | Site arithmetic (materials, pour, formwork, cubes, cutting plan, spectrum, strain, survey) | `tests/test_site_tools.py` | 4 (hand values) | VERIFIED_FOR_CASES | — |
+| Viewer | 3D scene geometry and data | `test_viewer_scene_matches_the_design` | 2 | UNVERIFIED | Owner review on a tablet / phone at site |
+
 No calculation is `RESOLVED_WITH_EVIDENCE` or at evidence level 5.

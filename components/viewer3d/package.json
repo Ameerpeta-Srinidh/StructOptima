@@ -1,0 +1,16 @@
+{
+  "name": "structoptima-viewer3d",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Browser 3D viewer / walkthrough for StructOptima designs (bundled into dist/viewer.js)",
+  "license": "MIT",
+  "scripts": {
+    "build": "esbuild src/main.js --bundle --minify --format=iife --global-name=SOViewer --target=es2019 --outfile=dist/viewer.js"
+  },
+  "dependencies": {
+    "three": "0.170.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.24.0"
+  }
+}

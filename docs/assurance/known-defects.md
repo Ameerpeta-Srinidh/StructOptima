@@ -1,6 +1,6 @@
 # Known Defects and Open Issues
 
-**As of:** 2026-10-15. Current behaviour that is known to be wrong, incomplete or
+**As of:** 2026-10-16. Current behaviour that is known to be wrong, incomplete or
 risky after the 2026-10 remediation. For engineering simplifications see
 [../engineering/limitations.md](../engineering/limitations.md); for the full
 history see [risk-register.md](risk-register.md).
@@ -24,3 +24,6 @@ history see [risk-register.md](risk-register.md).
 | KD-15 | CI has not been observed running the 2026-10 changes | M | NOT_ASSESSED | Push to a branch and check CI |
 | KD-16 | Torsional-irregularity indicator on the Analysis page uses a CoM–CoR offset > 5 % heuristic, not the IS 1893 displacement-based definition | M | UNVERIFIED | Engineer review |
 | KD-17 | (Closed in code 2026-10-16) Slab dead load used the occupancy slab thickness while slabs were designed thicker (N13) | — | UNVERIFIED (fix implemented, see RM-26) | Engineer review of the per-panel load rule |
+| KD-18 | Storey drift limits (0.004 h EQ, H/500 wind) and automatic column growth for drift are implemented with UNVERIFIED limit values; drifts exclude torsion (2D frames) | H | UNVERIFIED (D-16) | Engineer to confirm the limits against IS 1893 / IS 456; external 3D check for irregular plans |
+| KD-19 | A column lying on a frame line in one direction only gets no frame moments in the other direction (now WARN, N19) | M | Known | Add beams / frames on that line or check the column separately |
+| KD-20 | 3D viewer: geometry is boxes from the design (no openings, reinforcement or stairs); walk-through has no collision; footings drawn directly below the column base | L | Known (by scope) | Use the drawing set for construction details |

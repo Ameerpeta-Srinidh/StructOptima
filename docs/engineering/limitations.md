@@ -1,6 +1,6 @@
 # Limitations
 
-**As of:** 2026-10-15. Read this before relying on any StructOptima output.
+**As of:** 2026-10-16. Read this before relying on any StructOptima output.
 
 ## Scope
 
@@ -11,6 +11,7 @@
 
 - Independent 2D plane frames along grid lines; beams off grid lines are designed as simply supported (warning).
 - No torsion, accidental eccentricity, diaphragm flexibility, P-Δ or second-order analysis.
+- Storey drift is computed per column from the 2D frames (since 2026-10-16); without torsion it under-estimates drift at the flexible edge of irregular plans. Limit values are UNVERIFIED.
 - Equivalent static seismic method only; buildings that exceed the cited regularity/height limits are reported as FAIL ("Seismic method"), not analysed by response spectrum.
 - No orthogonal seismic combination, vertical seismic or pattern live loading.
 - Column gravity axial load from tributary areas (not from frame continuity).
@@ -52,5 +53,6 @@
 
 ## Operational
 
-- The Drawings page writes DXF files into the current working directory each time it renders (overwrites tracked `Beam_Schedule.dxf` and `Foundation_Plan_Professional.dxf` when run from the repository root).
+- Site Tools results are arithmetic on the design or on data you enter (approved mix, cube results, sensor records, survey); StructOptima does not judge acceptance, damage or repairs.
+- The 3D viewer shows the designed members as boxes (no openings, reinforcement or stairs; no collision in walk-through).
 - IFC export places footings directly below the column base (founding level not designed) and uses one beam/slab layout for every storey.

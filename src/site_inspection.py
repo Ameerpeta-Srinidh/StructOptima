@@ -1,15 +1,20 @@
 """
-Site Inspection & Quality Control Module
+Site inspection records (checklists and a defect log).
 
-Generates digital checklists for site engineers and classifies defects.
-- Inspection Checklists (Pre-pour, Post-pour) based on IS 13920
-- Defect Classification Logic (Simulated AI Vision)
+Checklist items are prompts for the inspecting engineer; the referenced
+standards are named without clause numbers (clauses not verified - see
+docs/engineering/standards-register.md).  Defects are recorded exactly as
+observed; StructOptima does not diagnose causes or prescribe repairs (the
+former keyword-based "classification" was removed, gap analysis N15).
 """
 
-from dataclasses import dataclass, field
-from typing import List, Dict, Optional
-import json
-from datetime import datetime
+from __future__ import annotations
+
+import csv
+import io
+from dataclasses import asdict, dataclass, field
+from datetime import date
+from typing import Dict, List, Optional
 
 from .logging_config import get_logger
 
@@ -19,171 +24,96 @@ logger = get_logger(__name__)
 @dataclass
 class InspectionCheckItem:
     id: str
-    stage: str  # Pre-pour, Post-pour
+    stage: str  # Pre_Pour, Post_Pour
     query: str
     expected_value: str
     reference_code: str
     severity: str = "Medium"
-    status: str = "Pending"
+    status: str = "Pending"     # Pending | Pass | Fail | N/A
     remarks: str = ""
 
 
 @dataclass
-class DefectAnalysis:
-    defect_type: str
-    severity: str
-    pattern_description: str
-    probable_cause: str
-    remedial_action: str
-    location_coords: Optional[Dict[str, float]] = None # {"lat": ..., "lon": ...} or {"x": ..., "y": ...}
+class DefectRecord:
+    member_id: str
+    defect_type: str            # as observed, e.g. crack, honeycombing, exposed bar
+    location: str
+    width_mm: Optional[float] = None
+    length_mm: Optional[float] = None
+    exposed_rebar: bool = False
+    observed_on: str = field(default_factory=lambda: date.today().isoformat())
+    inspector: str = ""
+    notes: str = ""
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+    review_status: str = "Awaiting engineer review"
 
 
 class SiteInspectionManager:
-    
+
     def __init__(self, project_name: str):
         self.project_name = project_name
         self.checklists: Dict[str, List[InspectionCheckItem]] = {}
-        self.defects: List[DefectAnalysis] = []
+        self.defects: List[DefectRecord] = []
 
     def generate_checklist(self, stage: str = "Pre_Pour") -> List[InspectionCheckItem]:
-        """Generate mandatory checklist based on construction stage."""
+        """Inspection prompts for a construction stage."""
         items = []
-        
         if stage == "Pre_Pour":
-            # IS 13920 / IS 456 Checks
-            items.append(InspectionCheckItem(
-                id="CHK_01", stage=stage,
-                query="Are stirrup hooks bent at 135° with 65mm extension?",
-                expected_value="Yes", reference_code="IS 13920 Cl 3.5", severity="Critical"
-            ))
-            items.append(InspectionCheckItem(
-                id="CHK_02", stage=stage,
-                query="Is lap splice location at mid-height (cols) / mid-span (beams)?",
-                expected_value="Yes", reference_code="IS 13920 Cl 7.3", severity="Critical"
-            ))
-            items.append(InspectionCheckItem(
-                id="CHK_03", stage=stage,
-                query="Are cover blocks placed securely?",
-                expected_value="Yes", reference_code="IS 456 Cl 26.4", severity="High"
-            ))
-            items.append(InspectionCheckItem(
-                id="CHK_04", stage=stage,
-                query="Is formwork watertight and cleaned?",
-                expected_value="Yes", reference_code="IS 456 Cl 11.1", severity="High"
-            ))
-            
+            items += [
+                InspectionCheckItem("CHK_01", stage, "Are stirrup / tie hooks bent to the specified angle and extension?",
+                                    "As per drawings", "IS 13920 / IS 456 (detailing)", "Critical"),
+                InspectionCheckItem("CHK_02", stage, "Are lap splices at the locations and lengths shown on the drawings?",
+                                    "As per drawings", "IS 456 / IS 13920 (laps)", "Critical"),
+                InspectionCheckItem("CHK_03", stage, "Are cover blocks of the specified cover placed securely?",
+                                    "Specified cover", "IS 456 (nominal cover)", "High"),
+                InspectionCheckItem("CHK_04", stage, "Is formwork tight, propped, clean and to line and level?",
+                                    "Yes", "IS 456 (formwork)", "High"),
+                InspectionCheckItem("CHK_05", stage, "Bar count and diameters match the schedule for this member?",
+                                    "As per schedule", "Issued drawings / BBS", "Critical"),
+            ]
         elif stage == "Post_Pour":
-            items.append(InspectionCheckItem(
-                id="CHK_05", stage=stage,
-                query="Is honeycombing visible on surface?",
-                expected_value="No", reference_code="IS 456 Cl 14", severity="High"
-            ))
-            items.append(InspectionCheckItem(
-                id="CHK_06", stage=stage,
-                query="Are shrinkage cracks visible?",
-                expected_value="No (<0.3mm)", reference_code="IS 456", severity="Medium"
-            ))
-            items.append(InspectionCheckItem(
-                id="CHK_07", stage=stage,
-                query="Checking for verticality/plumb?",
-                expected_value="< H/500", reference_code="IS 456", severity="Medium"
-            ))
-            
+            items += [
+                InspectionCheckItem("CHK_06", stage, "Is honeycombing visible on the surface?", "No",
+                                    "IS 456 (workmanship)", "High"),
+                InspectionCheckItem("CHK_07", stage, "Are cracks visible? (record width and length in the defect log)",
+                                    "No", "IS 456", "Medium"),
+                InspectionCheckItem("CHK_08", stage, "Is the member plumb / to line within the specified tolerance?",
+                                    "Within specified tolerance", "Project specification", "Medium"),
+                InspectionCheckItem("CHK_09", stage, "Have cube specimens been cast and labelled for this pour?",
+                                    "Yes", "IS 456 / IS 516 (sampling and testing)", "High"),
+            ]
         self.checklists[stage] = items
         return items
 
-    def classify_defect(
-        self, 
-        width_mm: float, 
-        pattern: str, 
-        location: str,
-        exposed_rebar: bool = False,
-        coordinates: Optional[Dict[str, float]] = None
-    ) -> DefectAnalysis:
-        """
-        Classify defect based on visual characteristics (Simulated AI Logic).
-        """
-        severity = "Low"
-        defect_type = "Unknown"
-        cause = "Unknown"
-        action = "Monitor"
-
-        if exposed_rebar:
-            severity = "Critical"
-            defect_type = "Spalling / Corrosion"
-            cause = "Insufficient cover or carbonation"
-            action = "Immediate structural repair (grouting/jacketing)"
-            
-        elif "honeycomb" in pattern.lower():
-            defect_type = "Honeycombing"
-            severity = "High" if width_mm > 50 else "Medium"
-            cause = "Poor compaction or grout leakage"
-            action = "Chip off and pressure grout"
-            
-        elif width_mm > 0.3:
-            severity = "High"
-            # Improved logic: Check pattern AND location for keywords
-            p_low = pattern.lower()
-            l_low = location.lower()
-            
-            if "diagonal" in p_low or "shear" in p_low or "shear" in l_low:
-                defect_type = "Shear Crack"
-                cause = "Shear capacity exceeded (Overloading)"
-                action = "Structural strengthening (FRP/Epoxy injection)"
-            elif "vertical" in p_low and ("mid-span" in l_low or "flexure" in l_low):
-                defect_type = "Flexural Crack"
-                cause = "Bending moment exceeded"
-                action = "Epoxy injection"
-        else:
-            # Fine cracks
-            severity = "Low"
-            defect_type = "Shrinkage Crack"
-            cause = "Rapid moisture loss during curing"
-            action = "Surface sealing"
-
-        analysis = DefectAnalysis(
-            defect_type=defect_type,
-            severity=severity,
-            pattern_description=pattern,
-            probable_cause=cause,
-            remedial_action=action,
-            location_coords=coordinates
-        )
-        self.defects.append(analysis)
-        return analysis
-
-    def generate_qr_code(self, element_id: str) -> str:
-        """
-        Simulates generating a QR code URL/String for an element.
-        In real app, returns image bytes or URL.
-        """
-        return f"https://project-phoenix.app/bim/{element_id}?ver=latest"
-
-    def annotate_site_photo(self, photo_name: str, annotation_type: str) -> str:
-        """
-        Simulates drawing an annotation on an image logic.
-        Returns a status message.
-        """
-        return f"Annotated '{photo_name}' with {annotation_type} marker."
+    def record_defect(self, record: DefectRecord) -> DefectRecord:
+        if not record.member_id or not record.defect_type:
+            raise ValueError("member and defect type are required")
+        if record.width_mm is not None and record.width_mm < 0:
+            raise ValueError("width cannot be negative")
+        self.defects.append(record)
+        return record
 
     def get_defect_map_data(self) -> List[Dict]:
-        """
-        Returns data for Geo-Tag map visualization.
-        """
-        map_data = []
-        for d in self.defects:
-            if d.location_coords:
-                map_data.append({
-                    "lat": d.location_coords.get("lat"),
-                    "lon": d.location_coords.get("lon"),
-                    "type": d.defect_type,
-                    "severity": d.severity
-                })
-        return map_data
+        """Map points for defects recorded with coordinates (none are invented)."""
+        return [{"lat": d.lat, "lon": d.lon, "type": d.defect_type, "member": d.member_id}
+                for d in self.defects if d.lat is not None and d.lon is not None]
 
-    def to_json(self) -> str:
-        return json.dumps({
-            "project": self.project_name,
-            "checklists": {k: [i.__dict__ for i in v] for k, v in self.checklists.items()},
-            "defects": [d.__dict__ for d in self.defects]
-        }, indent=2)
+    def defects_csv(self) -> str:
+        buf = io.StringIO()
+        fields = list(DefectRecord.__dataclass_fields__)
+        w = csv.DictWriter(buf, fieldnames=fields)
+        w.writeheader()
+        for d in self.defects:
+            w.writerow(asdict(d))
+        return buf.getvalue()
+
+    @staticmethod
+    def checklist_csv(items: List[InspectionCheckItem], member: str, inspector: str) -> str:
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(["Member", "Inspector", "Date", "Id", "Stage", "Check", "Expected", "Reference", "Severity", "Result", "Remarks"])
+        for i in items:
+            w.writerow([member, inspector, date.today().isoformat(), i.id, i.stage, i.query, i.expected_value,
+                        i.reference_code, i.severity, i.status, i.remarks])
+        return buf.getvalue()

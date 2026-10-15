@@ -57,6 +57,15 @@ class AnalysisSummary:
     messages: List[str] = field(default_factory=list)
     beams_not_in_frame: List[str] = field(default_factory=list)
     columns_not_in_frame: List[str] = field(default_factory=list)
+    # columns that lie on a frame line in one direction only (no lateral
+    # moments in the other direction) -> {column id: missing plane}
+    columns_one_plane: Dict[str, str] = field(default_factory=dict)
+    # lateral cases (EQX, EQY, WLX, WLY, unfactored): {case: {storey level:
+    # (inter-storey drift m, storey height m, column id)}} - largest drift
+    # ratio over all columns of that storey in every frame of that direction
+    storey_drift: Dict[str, Dict[int, Tuple[float, float, str]]] = field(default_factory=dict)
+    # {case: (largest absolute lateral displacement at the top of the top storey m, column id)}
+    top_displacement: Dict[str, Tuple[float, str]] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -437,6 +446,25 @@ def update_structural_analysis(gm: GridManager, beams: List[StructuralMember], f
             bm.analysis_status = "FEA_SOLVED"
 
         # columns
+        # inter-storey drift per column from the lateral cases (unfactored)
+        for cname in ("EQX", "EQY", "WLX", "WLY"):
+            if cname not in res:
+                continue
+            D = res[cname]["displacements"]
+            per_level = summary.storey_drift.setdefault(cname, {})
+            for c in cols:
+                el = solver.elements[col_elem[c.id]]
+                u_bot, u_top = float(D[3 * el["n1"]]), float(D[3 * el["n2"]])
+                h = max(c.z_top - c.z_bottom, 1e-6)
+                drift = abs(u_top - u_bot)
+                cur = per_level.get(c.level)
+                if cur is None or drift / h > cur[0] / cur[1]:
+                    per_level[c.level] = (drift, h, c.id)
+                if c.level == N - 1:
+                    top = summary.top_displacement.get(cname)
+                    if top is None or abs(u_top) > top[0]:
+                        summary.top_displacement[cname] = (abs(u_top), c.id)
+
         for c in cols:
             e = col_elem[c.id]
             L, _, _ = solver._geom(e)
@@ -457,6 +485,8 @@ def update_structural_analysis(gm: GridManager, beams: List[StructuralMember], f
         planes_res = col_results.get(col.id, {})
         if not planes_res:
             summary.columns_not_in_frame.append(col.id)
+        elif len(planes_res) == 1:
+            summary.columns_one_plane[col.id] = "YZ" if "XZ" in planes_res else "XZ"
         xz, yz = planes_res.get("XZ", {}), planes_res.get("YZ", {})
         forces = []
         for combo, fac in combos:
@@ -480,6 +510,9 @@ def update_structural_analysis(gm: GridManager, beams: List[StructuralMember], f
     if summary.columns_not_in_frame:
         summary.messages.append(f"{len(summary.columns_not_in_frame)} column(s) not on a frame line: gravity axial + "
                                 f"minimum eccentricity only")
+    if summary.columns_one_plane:
+        summary.messages.append(f"{len(summary.columns_one_plane)} column(s) lie on a frame line in one direction only: "
+                                f"no frame moments in the other direction (minimum eccentricity only)")
     logger.info("Frame analysis: %d/%d frames solved, %d combinations", summary.frames_solved,
                 summary.frames_total, len(combos))
     return summary

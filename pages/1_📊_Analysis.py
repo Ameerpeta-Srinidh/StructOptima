@@ -146,7 +146,7 @@ if seismic_result:
                     f"CoM–CoR offset: X = {_offset_x:.3f}m ({_torsion_ratio_x:.1%} of plan), "
                     f"Y = {_offset_y:.3f}m ({_torsion_ratio_y:.1%} of plan)\n\n"
                     f"**The current 2D frame analysis cannot capture torsional response.** "
-                    f"Story drift estimates may be unconservative by 2–3×. "
+                    f"Drifts and member forces from the 2D frames exclude torsion and may be unconservative. "
                     f"A full 3D analysis (ETABS/STAAD) is required for this layout."
                 )
                 st.warning(
@@ -267,19 +267,20 @@ if safety_summary:
                 st.markdown(f"- {rec}")
                 
     with st.expander("View Joint Shear Capacity Checks (IS 13920)"):
-        if safety_summary.joint_checks:
-            joint_data = []
-            for jc in safety_summary.joint_checks:
-                joint_data.append({
-                    "Joint": jc.joint_id,
-                    "Type": "Interior",
-                    "Shear Demand": f"{jc.joint_shear_demand_kn:.1f} kN",
-                    "Capacity": f"{jc.joint_shear_capacity_kn:.1f} kN",
-                    "Util%": f"{jc.utilization_ratio:.0%}",
-                    "Status": "✅ OK" if jc.is_adequate else "❌ FAIL"
-                })
-            st.dataframe(joint_data)
-            st.caption("Simplified check assuming typical reinforcement. Verify interior/exterior conditions.")
+        _jd = getattr(seismic_result, 'joint_details', None) if seismic_result is not None else None
+        if _jd:
+            _conf = {1.5: "Beams on 4 faces", 1.2: "Beams on 3 faces / 2 opposite faces"}
+            st.dataframe([{
+                "Joint": j["joint"], "Level": j["level"], "Direction": j["direction"],
+                "Confinement": _conf.get(j["confinement_factor"], "Other (k = 1.0)"),
+                "Shear demand": f"{j['Vj_demand_kN']:.1f} kN", "Capacity": f"{j['Vj_capacity_kN']:.1f} kN",
+                "Util%": f"{j['utilization']:.0%}", "Status": "✅ OK" if j["pass"] else "❌ FAIL"} for j in _jd],
+                use_container_width=True, hide_index=True)
+            st.caption("Demand from the designed beam reinforcement at each joint; capacity k·√fck·Aj with k by the "
+                       "number of framing beams (coefficients as cited, UNVERIFIED). Slab steel and column shear are "
+                       "not included; advisory for OMRF.")
+        else:
+            st.info("Joint shear not evaluated (requires designed beam reinforcement).")
             
     with st.expander("Modelling Assumptions (Stiffness Modifiers)"):
         st.markdown("""
@@ -299,6 +300,28 @@ if safety_summary:
         else:
             st.caption("Current analysis: GROSS section stiffness (Ig) for all load cases.")
 
+
+# 4b. Storey drift (N16)
+st.markdown("---")
+render_section_header("Storey Drift (IS 1893 Part 1 / IS 456 Cl 20.5)")
+_dres = st.session_state.get('design_results')
+_drows = getattr(_dres, 'drift_results', None) if _dres is not None else None
+if _drows:
+    import pandas as _pd
+    _df = _pd.DataFrame([{**r, "Ratio": f"{r['Ratio']:.5f}", "Limit": "-" if r["Limit"] is None else f"{r['Limit']:.4f}"}
+                         for r in _drows])
+    _bad = [r for r in _drows if r["Status"] in ("FAIL", "WARN")]
+    if _bad:
+        st.error(f"{len(_bad)} drift / sway check(s) exceed the limit — see the table.")
+    else:
+        st.success("All computed storey drifts are within the limits (limit values UNVERIFIED against the printed standards).")
+    st.dataframe(_df, use_container_width=True, hide_index=True)
+    st.caption("Drift = relative lateral displacement of the column ends in each storey under the unfactored design "
+               "lateral force (EQ: design base shear, includes 1/R; WL: design wind), from the 2D frame analysis "
+               "with the stiffness modifiers above. EQ limit 0.004 x storey height (FAIL); wind: top sway H/500 "
+               "(WARN), storey values for information. No torsion or accidental eccentricity is included.")
+else:
+    st.info("No drift results: run the analysis.")
 
 # 5. Load Combinations section
 st.markdown("---")
@@ -337,7 +360,7 @@ if enable_optimization:
     if gm and hasattr(gm, 'columns') and story_height and num_stories and fck:
         opt_columns, opt_summary = run_optimization(
             gm.columns, gm.rebar_schedule, _columns_fingerprint(gm.columns), story_height, num_stories, fck,
-            st.session_state.get('fy', 415.0), seismic_zone or "III")
+            st.session_state.get('fy', 415.0), seismic_zone)
         st.warning("Indicative only: sizes are checked with member forces from the CURRENT analysis. A full "
                    "re-analysis and re-design with the optimised sizes is required before use; these sizes are not "
                    "applied to the model.")

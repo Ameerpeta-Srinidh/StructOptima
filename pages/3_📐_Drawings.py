@@ -104,7 +104,21 @@ with v_tab0:
                    "the Schedules page. DXF sheets are in paper millimetres (plot 1:1).")
 
 with v_tab1:
-    if gm and all_beams:
+    _res3d = st.session_state.get('design_results')
+    from src.viewer_model import bundle_available, build_scene, viewer_html
+    if _res3d is not None and bundle_available():
+        st.caption("Orbit the designed building, isolate a storey, cut a section, colour by design status, click any "
+                   "member for its size, bars and status, or switch View → Walk-through to walk the floors "
+                   "(keyboard, mouse or the on-screen buttons on a tablet / phone).")
+        _skey = id(_res3d)
+        if st.session_state.get('_viewer_key') != _skey:
+            st.session_state['_viewer_html'] = viewer_html(build_scene(_res3d.gm, _res3d.beams, _res3d.footings), 660)
+            st.session_state['_viewer_key'] = _skey
+        components.html(st.session_state['_viewer_html'], height=680)
+        _show_legacy_3d = st.checkbox("Show the older 3D model view", value=False, key="legacy_3d")
+    else:
+        _show_legacy_3d = True
+    if gm and all_beams and _show_legacy_3d:
         col_w_tgl, col_w_info = st.columns([1, 3])
         with col_w_tgl:
             show_walls = st.checkbox("🧱 Show Walls", value=st.session_state.get('show_3d_walls', True), key="toggle_show_3d_walls")

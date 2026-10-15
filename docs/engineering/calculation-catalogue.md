@@ -92,6 +92,18 @@ Columns per entry: **Where** (file::symbol) · **Production?** · **Formula** ·
 - **Rule:** free DOF with K_ii < 1e-9 → UNSTABLE; cond(K_reduced) > 1e12 → SINGULAR; frame skipped and beams fall back to wL²/8 on both faces.
 - **Tests:** `test_mechanism_is_detected_not_solved`. **Status:** VERIFIED_FOR_CASES.
 
+### CAL-FEA-06 Storey drift (added 2026-10-16, N16)
+- **Where:** `update_structural_analysis` (per column: |u_top − u_bottom| from the unfactored EQX/EQY/WLX/WLY displacements, largest ratio per storey and case over all frames), `design_pipeline.drift_checks`. Production.
+- **Rule:** EQ: drift / storey height ≤ 0.004 (IS 1893 (Part 1):2016 Cl 7.11.1.1 as commonly cited — UNVERIFIED) → FAIL and all column stacks grow one preferred size per iteration; wind: top displacement ≤ H/500 (IS 456 Cl 20.5 as commonly cited — UNVERIFIED) → WARN; wind storey drifts reported for information.
+- **Load level:** EQ case = design storey forces (already include Z/2·I/R·Sa/g), factor 1.0; stiffness as analysed (cracked modifiers when selected).
+- **Assumptions:** 2D frames with stiffness-proportional sharing — no torsion or accidental eccentricity, so drifts at flexible edges of irregular plans are under-estimated.
+- **Tests:** `tests/test_drift.py` (one-bay portal: hand 3.333 mm, model 3.356 mm; cracked ratio 1/0.70; limits). **Status:** VERIFIED_FOR_CASES (portal); limit values UNVERIFIED.
+
+### CAL-SITE-01 Site arithmetic (added 2026-10-16)
+- `site_calculators`: materials = volume × approved batch weights (bags = ⌈kg/50⌉); trips = ⌈gross volume / mixer capacity⌉; formwork contact = column perimeter × (height − slab t) + beam (b + 2(D − t)) × L + slab soffit; cube summary = mean / min / max / max deviation; cutting plan = first-fit decreasing per diameter, pieces longer than stock listed for laps.
+- `site_monitoring`: spectrum = |rFFT| of the mean-removed, Hann-windowed record (uniform sampling within 1 %); apparent stiffness ratio = (f/f₀)²; yield strain = fy / Es (Es = 200 000 MPa as cited — UNVERIFIED); as-built deviation = √(dx² + dy²) vs the user's tolerance.
+- **Tests:** `tests/test_site_tools.py` (hand values). **Status:** VERIFIED_FOR_CASES (arithmetic).
+
 ## Seismic (IS 1893 (Part 1):2016, equivalent static)
 
 | ID | Where | Formula / rule | Status |

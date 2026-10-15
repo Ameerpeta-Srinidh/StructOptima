@@ -41,6 +41,10 @@ listed so they can be checked line by line.
 | IS 875 (Part 2):1987 | Imposed loads | Table 1 (as cited) | `building_types.py` | UNVERIFIED |
 | IS 875 (Part 3):2015 | Basic wind speed, k2, pz, Cpe, Cpi | zones, Table 2, Table 5 (as cited) | `wind_load.py` | UNVERIFIED (k2 power-law approximation) |
 | IS 1200, IS 1077, IS 2250, IS 1661, IS 1905 | Quantity measurement, bricks, mortar, plaster | as cited in report text | `quantifier`, `wall_calculator`, `report_gen` | NOT_ASSESSED |
+| IS 1893 (Part 1):2016 | Storey drift limit 0.004 h under design lateral force, load factor 1.0 | Cl 7.11.1.1 (as commonly cited; added 2026-10-16) | `design_pipeline.EQ_DRIFT_LIMIT` | UNVERIFIED |
+| IS 456:2000 | Lateral sway under transient wind ≤ H/500 | Cl 20.5 (as commonly cited; added 2026-10-16) | `design_pipeline.WIND_TOP_SWAY_LIMIT` | UNVERIFIED |
+| IS 456:2000 | Es = 200 kN/mm² for reinforcement (yield strain fy/Es on the Site Tools page) | Cl 5.6.3 (as cited) | `site_monitoring.ES_MPA` | UNVERIFIED |
+| IS 456 / IS 13920 / IS 516 | Site checklist prompts (formwork tolerance, cover, hooks, curing and stripping times) | named without clauses in `site_inspection`; numbers in `site_guide` as cited by the original authors | `site_guide.SITE_CHECKLISTS`, `site_inspection` | UNVERIFIED |
 | NBC 2016 | Fire rating by height | as cited | `stability._get_required_fire_rating` | UNVERIFIED |
 
 The legacy statement "All formulas have been verified against IS 456 …" in

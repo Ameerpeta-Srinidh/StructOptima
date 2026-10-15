@@ -53,6 +53,8 @@ grid_manager`, `rebar_detailer → section_design`).
 | pydantic 2 | most models | Data models (`Column`, `StructuralMember`, result models) |
 | streamlit | `app.py`, `pages/`, `ui_components` | UI; `streamlit.testing` in tests |
 | ezdxf | `cad_parser`, `dxf_exporter`, tests | DXF read/write |
+| segno 1.6.1 (added 2026-10-16) | `site_monitoring` | QR member tags (pure Python, no Pillow) |
+| three 0.170.0, esbuild 0.24.0 (npm, build-time only, 2026-10-16) | `components/viewer3d` | 3D viewer bundle; only the built `dist/viewer.js` is needed at runtime (no npm on Streamlit Cloud) |
 | reportlab | `report_gen`, `bbs_report` | PDF |
 | openpyxl, pandas | `exporters`, pages | Excel, tables |
 | plotly, trimesh | `visualizer`, `geometry_exporter` | Views |

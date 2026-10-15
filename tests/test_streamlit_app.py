@@ -27,6 +27,8 @@ def app(monkeypatch, tmp_path):
 
 
 def _run_analysis(at):
+    at.number_input(key="sbc_input").set_value(200.0).run()
+    at.checkbox(key="site_params_checkbox").check().run()
     at.checkbox(key="disclaimer_checkbox").check().run()
     run_btn = next(b for b in at.button if b.label == "Run Analysis")
     run_btn.click().run()
@@ -57,3 +59,34 @@ def test_analysis_page_failure_screen_uses_design_status(app):
     assert not at.exception
     headers = " ".join(str(m.value) for m in at.markdown)
     assert "Design Failures" in headers
+
+
+def test_run_needs_sbc_and_site_confirmation(app):
+    at = app
+    at.checkbox(key="disclaimer_checkbox").check().run()
+    run_btn = next(b for b in at.button if b.label == "Run Analysis")
+    assert run_btn.disabled                                  # no SBC, site parameters not confirmed
+    at.number_input(key="sbc_input").set_value(150.0).run()
+    assert next(b for b in at.button if b.label == "Run Analysis").disabled
+    at.checkbox(key="site_params_checkbox").check().run()
+    assert not next(b for b in at.button if b.label == "Run Analysis").disabled
+
+
+def test_pass_status_is_never_shown_as_verified(app):
+    at = _run_analysis(app)
+    texts = " ".join(m.value for m in list(at.error) + list(at.warning) + list(at.success))
+    assert "NOT VERIFIED" in texts or "FAIL" in texts or "WARN" in texts
+    assert any("Checks NOT performed" in e.label for e in at.expander)
+
+
+def test_site_tools_show_no_simulated_values(app):
+    at = _run_analysis(app)
+    page = next(p for p in PAGES if "Site_Tools" in p)
+    at.switch_page(f"pages/{page}").run()
+    assert not at.exception, [e.message for e in at.exception]
+    shown = " ".join(str(getattr(e, "value", "")) for e in list(at.text_area) + list(at.markdown) + list(at.metric))
+    for fake in ("92.5", "Damage Index", "Health Score", "Simulate", "placeholder.com", "project-phoenix"):
+        assert fake not in shown
+    summary = next(t for t in at.text_area if t.label == "Preview").value
+    res = at.session_state["design_results"]
+    assert f"base shear Vb = {res.seismic_result.base_shear_kn:.1f} kN" in summary

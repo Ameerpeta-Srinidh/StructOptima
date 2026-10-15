@@ -31,6 +31,29 @@ logger = get_logger(__name__)
 
 PREFERRED_COLUMN_SIZES = [230, 300, 350, 380, 400, 450, 500, 550, 600, 650, 700, 750, 800, 900, 1000]
 
+# Storey drift limit under the design lateral force with partial safety factor
+# 1.0: IS 1893 (Part 1):2016 Cl 7.11.1.1 as commonly cited (0.004 h) - UNVERIFIED
+# against the printed standard (docs/engineering/standards-register.md).
+EQ_DRIFT_LIMIT = 0.004
+# Lateral sway at the top under transient wind load: IS 456:2000 Cl 20.5 as
+# commonly cited (H/500) - UNVERIFIED.  Serviceability -> WARN, not FAIL.
+WIND_TOP_SWAY_LIMIT = 1.0 / 500.0
+
+# Checks that are NOT performed, whatever the status says (gap analysis N17).
+# Shown with every result so PASS cannot be read as complete engineering validation.
+CHECKS_NOT_PERFORMED = [
+    "3D analysis: torsion, accidental eccentricity and diaphragm flexibility (independent 2D frames only)",
+    "Response-spectrum / dynamic analysis (equivalent static method only)",
+    "Orthogonal seismic combination (100 % + 30 %) and vertical seismic action",
+    "Pattern (chequerboard) live loading",
+    "P-Delta / second-order analysis; column effective length is taken as 1.0 x storey height",
+    "IS 13920 ductile detailing design (confining steel, capacity-design shear, joint reinforcement)",
+    "Development length, lap splices and bar curtailment in member design",
+    "Beam torsion design and deflection beyond basic span/depth ratios",
+    "Footing sizing for base moments, settlement and founding level",
+]
+VERIFICATION_STATUS = "NOT_VERIFIED"   # no output has been independently verified by an engineer
+
 
 @dataclass
 class DesignInputs:
@@ -87,6 +110,16 @@ class DesignResults:
     status: str = "PASS"
     failures: List[Dict[str, str]] = field(default_factory=list)
     messages: List[str] = field(default_factory=list)
+    drift_results: List[Dict[str, Any]] = field(default_factory=list)
+    checks_not_performed: List[str] = field(default_factory=lambda: list(CHECKS_NOT_PERFORMED))
+    verification: str = VERIFICATION_STATUS
+
+    @property
+    def status_label(self) -> str:
+        """Status text for screens and reports: never a bare PASS."""
+        return {"PASS": "PASS (implemented checks only) - NOT VERIFIED",
+                "WARN": "WARN - review required - NOT VERIFIED",
+                "FAIL": "FAIL"}.get(self.status, self.status)
 
 
 def _next_pref(v: float) -> float:
@@ -129,6 +162,38 @@ def storey_seismic_weights(gm: GridManager, beams, ll_factor_fn) -> Tuple[List[f
         tops = [c.z_top for c in gm.columns if c.level == j - 1]
         heights.append(sum(tops) / len(tops) if tops else j * gm.story_height_m)
     return weights, heights, area
+
+
+def drift_checks(storey_drift: Dict[str, Dict[int, Tuple[float, float, str]]],
+                 top_displacement: Dict[str, Tuple[float, str]], total_height_m: float) -> List[Dict[str, Any]]:
+    """Storey drift rows from the unfactored lateral cases.
+
+    EQ cases: every storey against ``EQ_DRIFT_LIMIT`` (FAIL above).  Wind cases:
+    storey drifts reported for information and the top sway against
+    ``WIND_TOP_SWAY_LIMIT`` x H (WARN above).
+    """
+    rows: List[Dict[str, Any]] = []
+    for case in ("EQX", "EQY", "WLX", "WLY"):
+        levels = storey_drift.get(case)
+        if not levels:
+            continue
+        eq = case.startswith("EQ")
+        for lvl in sorted(levels):
+            drift, h, cid = levels[lvl]
+            ratio = drift / h if h > 0 else float("inf")
+            rows.append({"Check": "Storey drift", "Case": case, "Direction": case[-1],
+                         "Storey": "Ground storey" if lvl == 0 else f"Storey {lvl}", "Column": cid,
+                         "Drift (mm)": round(drift * 1000.0, 2), "Height (mm)": round(h * 1000.0),
+                         "Ratio": ratio, "Limit": EQ_DRIFT_LIMIT if eq else None,
+                         "Status": ("FAIL" if ratio > EQ_DRIFT_LIMIT else "PASS") if eq else "INFO"})
+        if not eq and case in top_displacement and total_height_m > 0:
+            d, cid = top_displacement[case]
+            ratio = d / total_height_m
+            rows.append({"Check": "Top sway H/500", "Case": case, "Direction": case[-1], "Storey": "Top",
+                         "Column": cid, "Drift (mm)": round(d * 1000.0, 2), "Height (mm)": round(total_height_m * 1000.0),
+                         "Ratio": ratio, "Limit": WIND_TOP_SWAY_LIMIT,
+                         "Status": "WARN" if ratio > WIND_TOP_SWAY_LIMIT else "PASS"})
+    return rows
 
 
 def _ll_factor(q: float) -> float:
@@ -199,6 +264,7 @@ def run_design(gm: GridManager, beams: list, inputs: DesignInputs) -> DesignResu
             base_dimension_m=max(gm.width_m, gm.length_m), masonry_infill=bool(gm.walls), fy=fy,
             plan_width_m=gm.width_m, plan_length_m=gm.length_m, plan_area_m2=gm.footprint_area_m2() or plan_area)
         lateral = LateralLoads(eq_x=seismic_result.storey_forces_kn, eq_y=seismic_result.storey_forces_kn)
+        wind_result = None
         if inputs.wind_zone is not None:
             from .wind_load import TerrainCategory, calculate_wind_load
             wind_result = calculate_wind_load(
@@ -215,6 +281,9 @@ def run_design(gm: GridManager, beams: list, inputs: DesignInputs) -> DesignResu
         changed = before_beams != [(b.properties.width_mm, b.properties.depth_mm) for b in beams]
         # grow failing column stacks (stack-locked sizes)
         failing = {(round(c.x, 2), round(c.y, 2)) for c in gm.columns if gm.rebar_schedule[c.id].status == "FAIL"}
+        # N16: seismic storey drift above the limit -> stiffen every column stack
+        if any(r["Status"] == "FAIL" for r in drift_checks(summary.storey_drift, {}, 0.0)):
+            failing |= {(round(c.x, 2), round(c.y, 2)) for c in gm.columns}
         for key in failing:
             stack = [c for c in gm.columns if (round(c.x, 2), round(c.y, 2)) == key]
             w, d = stack[0].width_nb, stack[0].depth_nb
@@ -245,10 +314,16 @@ def run_design(gm: GridManager, beams: list, inputs: DesignInputs) -> DesignResu
     # Footings (service load incl. plinth walls; factored from the worst level-0 combination)
     level_0 = [c for c in gm.columns if c.level == 0]
     footings = []
+    from .analysis_integration import build_combinations
+    # N20: un-factor each combination's base moment by that combination's own
+    # (largest) load factor, not by 1.5 for every combination
+    combo_factor = {name: max(fac.values()) for name, fac in
+                    build_combinations(True, inputs.wind_zone is not None) if fac}
     for col in level_0:
         service = col.load_kn + col.plinth_load_kn
         pu = max([f[1] for f in col.design_forces], default=1.5 * col.load_kn) + 1.5 * col.plinth_load_kn
-        mbase = max([max(abs(f[2]), abs(f[3])) for f in col.design_forces if f[0].endswith("@bottom")], default=0.0) / 1.5
+        mbase = max([max(abs(f[2]), abs(f[3])) / combo_factor.get(f[0].rsplit("@", 1)[0], 1.5)
+                     for f in col.design_forces if f[0].endswith("@bottom")], default=0.0)
         ft = design_footing(service, inputs.sbc_kn_m2, col.width_nb, col.depth_nb, concrete, fy=fy,
                             factored_load_kn=pu, base_moment_knm=mbase if inputs.fixed_base else 0.0)
         ft.id = f"F-{col.id}"
@@ -330,6 +405,25 @@ def run_design(gm: GridManager, beams: list, inputs: DesignInputs) -> DesignResu
     for m in overlap_msgs:
         add("Footings", "Overlap", "WARN", m)
 
+    # storey drift (N16) from the final analysis
+    total_h = max((c.z_top for c in gm.columns), default=inputs.num_stories * inputs.story_height_m) - \
+        min((c.z_bottom for c in gm.columns), default=0.0)
+    drift_rows = drift_checks(summary.storey_drift, summary.top_displacement, total_h)
+    for r in drift_rows:
+        if r["Status"] in ("FAIL", "WARN"):
+            add(f"{r['Storey']} ({r['Direction']})", "Storey drift" if r["Check"] == "Storey drift" else "Wind top sway",
+                r["Status"], f"{r['Case']}: {r['Drift (mm)']:.1f} mm over {r['Height (mm)']:.0f} mm = {r['Ratio']:.5f} "
+                             f"> limit {r['Limit']:.5f} (limit value UNVERIFIED)")
+    if not any(r["Case"].startswith("EQ") for r in drift_rows):
+        add("Building", "Storey drift", "WARN", "No seismic drift result (lateral analysis not solved)")
+    # N19: columns without frame moments in one direction
+    for cid, plane in summary.columns_one_plane.items():
+        add(cid, "Frame analysis", "WARN", f"Column lies on no {'Y' if plane == 'YZ' else 'X'}-direction frame line: "
+                                           f"no frame moments about that axis (minimum eccentricity only)")
+    # N18: wind not considered
+    if inputs.wind_zone is None:
+        add("Building", "Wind", "WARN", "Wind loads not considered (no wind zone given)")
+
     order = {"PASS": 0, "WARN": 1, "FAIL": 2}
     status = max([f["Status"] for f in failures] + ["PASS"], key=lambda s: order.get(s, 2))
     if not converged:
@@ -341,4 +435,5 @@ def run_design(gm: GridManager, beams: list, inputs: DesignInputs) -> DesignResu
         audit_results=audit_results, auditor_math=auditor.math_breakdown, project_bbs=project_bbs,
         seismic_result=seismic_result, wind_result=wind_result, stab_checks=stab_checks, stab_summary=stab_summary,
         safety_summary=safety_summary, building_weight=building_weight, analysis_summary=summary, load_params=lp,
-        iterations=it, converged=converged, status=status, failures=failures, messages=messages)
+        iterations=it, converged=converged, status=status, failures=failures, messages=messages,
+        drift_results=drift_rows)

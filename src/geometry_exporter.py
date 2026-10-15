@@ -127,11 +127,10 @@ class GeometryExporter:
                 transform = np.dot(trans, rot)
                 box.apply_transform(transform)
                 
-                # Color by utilization if available
-                util = 0.0
-                if getattr(beam, 'analysis_result', None):
-                    util = beam.analysis_result.get('usage_ratio', 0.5) or 0.0
-                if view_mode in ["Engineering", "Utilization"]:
+                # Colour by the designed utilisation (N22); undesigned beams stay neutral
+                from .visualizer import beam_utilisation
+                util, _bstatus = beam_utilisation(grid_mgr, str(beam.id).split("_L")[0])
+                if view_mode in ["Engineering", "Utilization"] and _bstatus:
                     if util < 0.5: c = [0, 255, 0, 255]
                     elif util < 0.9: c = [255, 215, 0, 255]
                     else: c = [255, 0, 0, 255]

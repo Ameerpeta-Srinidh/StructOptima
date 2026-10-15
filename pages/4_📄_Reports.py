@@ -44,8 +44,9 @@ if _design_status == "FAIL":
 elif _design_status == "WARN":
     st.warning("⚠️ Design status WARN — reports list items needing engineering review. NOT FOR CONSTRUCTION.")
 else:
-    st.info("All implemented checks pass. Reports remain PRELIMINARY and require independent verification.")
-seismic_zone = st.session_state.get('seismic_zone', 'II')
+    st.info("PASS for the implemented checks only — NOT VERIFIED. Reports remain PRELIMINARY and require independent "
+            "verification; they list the checks StructOptima does not perform.")
+seismic_zone = st.session_state.get('seismic_zone')   # set by the design run; no fallback zone
 building_type_name = st.session_state.get('building_type_name', '')
 footings = st.session_state.get('footings', [])
 
@@ -90,6 +91,9 @@ def generate_zip_package():
             design_status=st.session_state.get('design_status'),
             design_failures=st.session_state.get('design_failures'),
             design_messages=st.session_state.get('design_messages'),
+            approved_mix=st.session_state.get('approved_mix'),
+            drift_results=getattr(st.session_state.get('design_results'), 'drift_results', None),
+            checks_not_performed=getattr(st.session_state.get('design_results'), 'checks_not_performed', None),
         )
         
         # 2. BBS Report
@@ -212,6 +216,9 @@ with col1:
                 design_status=st.session_state.get('design_status'),
                 design_failures=st.session_state.get('design_failures'),
                 design_messages=st.session_state.get('design_messages'),
+            approved_mix=st.session_state.get('approved_mix'),
+            drift_results=getattr(st.session_state.get('design_results'), 'drift_results', None),
+            checks_not_performed=getattr(st.session_state.get('design_results'), 'checks_not_performed', None),
             )
         with open(tmp.name, "rb") as f:
             st.download_button("📑 Complete Report", f.read(), "Structural_Design_Report.pdf", "application/pdf", key="dl_complete_report")

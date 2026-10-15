@@ -18,6 +18,10 @@ certified analysis/design or code-compliance tool.
   `section_design` (IS 456 section checks); plus `seismic`, `wind_load`,
   `foundation_eng`, `quantifier`, `report_gen`. Ingest: `cad_loader`/`cad_parser`, `bim_loader`.
   Site drawings: `src/drawings/` (one primitive model rendered to PDF/DXF/SVG; marks shared with schedules).
+  3D viewer: `src/viewer_model.py` + `components/viewer3d` (edit `src/main.js`, run `npm run build`, commit
+  `dist/viewer.js` — Streamlit Cloud does not run npm).
+- Nothing shown to users may be simulated, random or placeholder: every value comes from the design or from
+  data the user enters (owner instruction 2026-10-16; see `docs/assurance/gap-analysis.md`).
 - Several modules are test-only or unused (e.g. `member_design`, `validators`,
   `structural_checks`, `auth`) — check `docs/architecture/module-catalogue.md`
   before assuming a module is in the production path.

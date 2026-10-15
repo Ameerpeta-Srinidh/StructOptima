@@ -1,7 +1,8 @@
 # Risk Register
 
-**As of:** 2026-10-15. Original audit IDs R1–R27 are preserved; N1–N12 were
-found during stage-2 verification and remediation.
+**As of:** 2026-10-16. Original audit IDs R1–R27 are preserved; N1–N12 were
+found during stage-2 verification and remediation; N13 by the manual walkthrough; N14–N21 by the
+mandate gap analysis ([gap-analysis.md](gap-analysis.md)).
 
 **Status rule:** no item is `RESOLVED_WITH_EVIDENCE` — that requires review by a
 qualified engineer with documented benchmark evidence. Items with a code change
@@ -50,3 +51,12 @@ C critical · H high · M medium · L low. Confidence refers to the original fin
 | N11 | Footing design divided by zero for absurd loads (spacing 0) | M | High | `foundation_eng.py` | Crash | DXF sweep (0 crashes) | UNVERIFIED | — | RM-12 |
 | N12 | Explicit DXF column outlines in drawing units other than mm were not converted | M | Medium | `cad_loader` | Wrong column sizes | `test_R17_insunits_drives_scale` | UNVERIFIED | — | RM-13 |
 | N13 | Slabs are designed with the span/26 + 30 mm thickness rule (e.g. 185 mm for 4 m) but the dead load used for beams, columns and seismic weight uses the occupancy slab thickness (125 mm) — about 1.5 kN/m2 dead load missing in that example | H | High | `design_pipeline.run_design` (intensities) vs `GridManager.detail_slabs` | Beam, column, footing and seismic loads under-estimated | Found 2026-10-15 by the manual walkthrough; regression `test_N13_dead_load_uses_designed_slab_thickness` (hand values) | UNVERIFIED (fix implemented 2026-10-16) | D-12 (approved) | RM-26 |
+| N14 | Site Tools design report hard-coded modal mass 92.5 % and storey drifts 8/12 mm | C | High | `pages/5_🔧_Site_Tools.py` (old) | Fabricated checks presented as results | `test_site_tools_show_no_simulated_values`, `test_calculation_summary_reports_computed_values_only` | UNVERIFIED (fix implemented 2026-10-16) | D-17 | RM-30 |
+| N15 | SHM / Digital Twin tabs showed random simulated values and invented metadata; COBie hard-coded M25 | H | High | `pages/5_🔧_Site_Tools.py`, `src/shm_viz.py`, `src/digital_twin.py` (removed) | Simulated data mistaken for building data | `tests/test_site_tools.py`, UI test | UNVERIFIED (fix implemented 2026-10-16) | D-17 | RM-30 |
+| N16 | Storey drift not computed in the production pipeline | H | High | `src/design_pipeline.py` | Flexible frames passed without drift check (e.g. 20 x 15 m G+3, zone IV: 0.00462 > 0.004) | `tests/test_drift.py` (portal hand value) | UNVERIFIED (fix implemented 2026-10-16; limit values UNVERIFIED) | D-16 | RM-29 |
+| N17 | Overall PASS meant only "implemented checks passed" | H | High | `src/design_pipeline.py` | PASS read as validation | `test_pass_status_is_never_shown_as_verified` | UNVERIFIED (fix implemented 2026-10-16) | D-18 | RM-30 |
+| N18 | Safety-critical inputs pre-filled (SBC, zone, soil, wind); wind skip silent; inconsistent zone fallbacks | M | High | `app.py`, `design_pipeline.py`, `pages/4`, `pages/1` | Unconfirmed site parameters drive design | `test_run_needs_sbc_and_site_confirmation` | UNVERIFIED (fix implemented 2026-10-16) | D-18 | RM-30 |
+| N19 | Column on one frame line got lateral moments in one direction only, no warning | M | High (reproduced) | `src/analysis_integration.py` | Missing force component | `test_column_on_one_frame_line_is_flagged` | UNVERIFIED (flag implemented 2026-10-16; moments still not computed in that direction) | — | RM-29 |
+| N20 | Footing base moment divided by 1.5 for all combinations | L | High | `src/design_pipeline.py` | Base-moment warning under-estimated | code review | UNVERIFIED (fix implemented 2026-10-16) | — | RM-29 |
+| N21 | Documentation drift (stale CWD-write limitation, old dates) | L | High | `docs/engineering/limitations.md` | Misleading docs | read | UNVERIFIED (corrected 2026-10-16) | — | — |
+| N22 | 3D/2D views coloured members by invented "utilisation" (beam span / 7 m; column service stress / 0.4 fck with M25 assumed; GLB view all beams green) | H | High | `src/visualizer.py`, `src/geometry_exporter.py` | Visual PASS for members that may fail | UI tests (render) | UNVERIFIED (fix implemented 2026-10-16) | D-17 | RM-32 |

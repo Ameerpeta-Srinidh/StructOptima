@@ -1,9 +1,11 @@
 """
 Practical site calculators for construction engineers.
-Concrete pour planning, rebar weight lookup, formwork estimation, curing schedule.
+Concrete pour planning (from an approved mix), rebar weight lookup, formwork areas,
+cube-test arithmetic and stock-length cutting optimisation. Nothing here assumes a mix or
+acceptance criterion.
 """
 import math
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 
 # Standard rebar weights per meter (kg/m) by diameter
@@ -53,127 +55,145 @@ def rebar_weight_table() -> List[Dict]:
     return rows
 
 
+def materials_for_mix(volume_m3: float, mix: Dict) -> Dict:
+    """Material quantities for ``volume_m3`` of concrete from an approved mix.
+
+    ``mix`` holds the batch weights per m3 of the user's approved mix design
+    (lab / RMC supplier): ``cement_kg_m3``, ``water_kg_m3``, ``fine_aggregate_kg_m3``,
+    ``coarse_aggregate_kg_m3`` (and optional ``name``).  No mix is assumed.
+    """
+    for k in ("cement_kg_m3", "water_kg_m3", "fine_aggregate_kg_m3", "coarse_aggregate_kg_m3"):
+        if mix.get(k) is None or mix[k] < 0:
+            raise ValueError(f"approved mix needs {k}")
+    v = max(volume_m3, 0.0)
+    return {
+        "cement_kg": round(v * mix["cement_kg_m3"], 1),
+        "cement_bags": int(math.ceil(v * mix["cement_kg_m3"] / 50.0 - 1e-9)),
+        "water_l": round(v * mix["water_kg_m3"], 0),          # 1 kg water = 1 L
+        "fine_aggregate_t": round(v * mix["fine_aggregate_kg_m3"] / 1000.0, 3),
+        "coarse_aggregate_t": round(v * mix["coarse_aggregate_kg_m3"] / 1000.0, 3),
+        "water_cement_ratio": round(mix["water_kg_m3"] / mix["cement_kg_m3"], 3) if mix["cement_kg_m3"] > 0 else None,
+    }
+
+
 def concrete_pour_calculator(
     volume_m3: float,
-    mixer_type: str = "6 m³ (Standard)",
-    wastage_pct: float = 3.0,
-    pour_rate_m3_hr: float = 8.0,
+    mixer_capacity_m3: float,
+    wastage_pct: float,
+    pour_rate_m3_hr: float,
+    mix: Optional[Dict] = None,
 ) -> Dict:
-    """Calculate concrete pour logistics."""
-    cap = MIXER_CAPACITIES.get(mixer_type, 6.0)
+    """Pour logistics from the user's inputs; materials only from an approved mix."""
+    if mixer_capacity_m3 <= 0 or pour_rate_m3_hr <= 0:
+        raise ValueError("mixer capacity and pour rate must be positive")
     gross_volume = volume_m3 * (1 + wastage_pct / 100)
-    num_trips = math.ceil(gross_volume / cap)
-    pour_time_hr = gross_volume / pour_rate_m3_hr
-    
-    # IS 10262 nominal mix proportions (simplified)
-    # For M25: cement = volume * 1.54 / (1+1+2) * 1/0.035 bags
-    dry_factor = 1.54
-    cement_bags = gross_volume * dry_factor / 4.0 / 0.035
-    sand_m3 = gross_volume * dry_factor * 1 / 4.0
-    agg_m3 = gross_volume * dry_factor * 2 / 4.0
-    water_l = gross_volume * 0.45 * 400  # w/c ratio * cement content approx
-    
-    return {
+    out = {
         "net_volume_m3": round(volume_m3, 2),
         "wastage_pct": wastage_pct,
         "gross_volume_m3": round(gross_volume, 2),
-        "mixer_type": mixer_type,
-        "mixer_capacity_m3": cap,
-        "num_trips": num_trips,
-        "estimated_pour_time_hr": round(pour_time_hr, 1),
-        "cement_bags": int(math.ceil(cement_bags)),
-        "sand_m3": round(sand_m3, 2),
-        "aggregate_m3": round(agg_m3, 2),
-        "water_liters": int(round(water_l)),
+        "mixer_capacity_m3": mixer_capacity_m3,
+        "num_trips": int(math.ceil(gross_volume / mixer_capacity_m3 - 1e-9)),
+        "estimated_pour_time_hr": round(gross_volume / pour_rate_m3_hr, 1),
     }
+    if mix:
+        out["materials"] = materials_for_mix(gross_volume, mix)
+    return out
 
 
 def formwork_area_calculator(
     columns: list = None,
     beams: list = None,
     slab_area_m2: float = 0.0,
-    story_height_m: float = 3.0,
+    slab_thickness_mm: float = 0.0,
 ) -> Dict:
-    """Estimate formwork area for columns, beams, and slabs."""
+    """Contact area of formwork (m2).
+
+    Columns: perimeter x (segment height - slab thickness) for every column
+    segment.  Beams: (soffit width + 2 x (depth - slab thickness)) x centre-line
+    length for every beam copy passed (one per floor).  Slabs: soffit area as
+    given.  Overlaps at joints are not deducted (conservative).
+    """
+    t = slab_thickness_mm / 1000.0
     col_formwork = 0.0
-    if columns:
-        for c in columns:
-            perimeter_m = 2 * (c.width_nb + c.depth_nb) / 1000.0
-            col_formwork += perimeter_m * story_height_m
-    
+    for c in columns or []:
+        perimeter_m = 2 * (c.width_nb + c.depth_nb) / 1000.0
+        col_formwork += perimeter_m * max((c.z_top - c.z_bottom) - t, 0.0)
     beam_formwork = 0.0
-    if beams:
-        for b in beams:
-            span_m = math.hypot(
-                b.end_point.x - b.start_point.x,
-                b.end_point.y - b.start_point.y
-            )
-            # Beam formwork = bottom + 2 sides
-            depth_m = b.properties.depth_mm / 1000.0
-            width_m = b.properties.width_mm / 1000.0
-            beam_formwork += (width_m + 2 * depth_m) * span_m
-    
+    for b in beams or []:
+        span_m = math.hypot(b.end_point.x - b.start_point.x, b.end_point.y - b.start_point.y)
+        depth_m = b.properties.depth_mm / 1000.0
+        width_m = b.properties.width_mm / 1000.0
+        beam_formwork += (width_m + 2 * max(depth_m - t, 0.0)) * span_m
     total = col_formwork + beam_formwork + slab_area_m2
-    
-    # Plywood estimation (standard 8'×4' = 2.44m × 1.22m = 2.97 m²)
-    plywood_sheets = math.ceil(total / 2.97)
-    
     return {
         "column_formwork_m2": round(col_formwork, 1),
         "beam_formwork_m2": round(beam_formwork, 1),
         "slab_formwork_m2": round(slab_area_m2, 1),
         "total_formwork_m2": round(total, 1),
-        "plywood_sheets_8x4": plywood_sheets,
-        "plywood_cost_approx_inr": plywood_sheets * 1200,  # ~INR 1200/sheet
+        "plywood_sheets_8x4": int(math.ceil(total / (2.44 * 1.22) - 1e-9)),   # 2.44 x 1.22 m sheets, no reuse
     }
 
 
-def curing_schedule(grade: str = "M25") -> List[Dict]:
-    """Returns IS 456 curing schedule with expected strength gain."""
-    fck = int(grade.replace("M", ""))
-    
-    return [
-        {"Day": 1, "Expected Strength (%)": 16, f"Expected fck (MPa)": round(0.16 * fck, 1),
-         "Action": "Keep forms wet. No load."},
-        {"Day": 3, "Expected Strength (%)": 40, f"Expected fck (MPa)": round(0.40 * fck, 1),
-         "Action": "Continuous curing. Side forms may be removed for columns."},
-        {"Day": 7, "Expected Strength (%)": 65, f"Expected fck (MPa)": round(0.65 * fck, 1),
-         "Action": "Curing must continue. Slab props can be partially released."},
-        {"Day": 14, "Expected Strength (%)": 90, f"Expected fck (MPa)": round(0.90 * fck, 1),
-         "Action": "Test cubes due. Re-propping may begin for slabs."},
-        {"Day": 28, "Expected Strength (%)": 100, f"Expected fck (MPa)": round(1.00 * fck, 1),
-         "Action": "Design strength reached. Full dead load may be applied."},
-    ]
+def cube_test_summary(fck_mpa: float, specimen_strengths_mpa: List[float]) -> Dict:
+    """Mean / minimum of one sample's cube strengths against the specified fck.
 
-
-def mix_design_table(grade: str = "M25") -> Dict:
-    """Returns IS 10262 indicative mix proportions."""
-    fck = int(grade.replace("M", ""))
-    
-    # Standard target mean strength
-    # ft = fck + 1.65 * s (s = 4 MPa std dev for good control)
-    ft = fck + 1.65 * 4.0
-    
-    # Approximate proportions by grade
-    proportions = {
-        20: {"cement": 340, "water": 170, "fa": 700, "ca": 1200, "wc": 0.50, "ratio": "1:2.06:3.53"},
-        25: {"cement": 380, "water": 171, "fa": 670, "ca": 1190, "wc": 0.45, "ratio": "1:1.76:3.13"},
-        30: {"cement": 410, "water": 168, "fa": 650, "ca": 1180, "wc": 0.41, "ratio": "1:1.59:2.88"},
-        35: {"cement": 440, "water": 165, "fa": 630, "ca": 1170, "wc": 0.38, "ratio": "1:1.43:2.66"},
-        40: {"cement": 460, "water": 161, "fa": 610, "ca": 1160, "wc": 0.35, "ratio": "1:1.33:2.52"},
-    }
-    
-    p = proportions.get(fck, proportions[25])
-    
+    Arithmetic only: acceptance must be judged by the engineer under IS 456
+    (acceptance criteria) and IS 516 (testing) - not decided here.
+    """
+    vals = [float(v) for v in specimen_strengths_mpa if v is not None and v > 0]
+    if not vals or fck_mpa <= 0:
+        raise ValueError("enter at least one cube strength and the specified grade")
+    mean = sum(vals) / len(vals)
     return {
-        "grade": grade,
-        "target_mean_strength_mpa": round(ft, 1),
-        "cement_kg_m3": p["cement"],
-        "water_kg_m3": p["water"],
-        "fine_aggregate_kg_m3": p["fa"],
-        "coarse_aggregate_kg_m3": p["ca"],
-        "water_cement_ratio": p["wc"],
-        "nominal_ratio": p["ratio"],
-        "cement_bags_per_m3": round(p["cement"] / 50, 1),
-        "note": "Indicative proportions per IS 10262. Actual mix design requires trial mixes."
+        "specimens": len(vals),
+        "mean_mpa": round(mean, 2),
+        "min_mpa": round(min(vals), 2),
+        "max_mpa": round(max(vals), 2),
+        "max_deviation_from_mean_pct": round(max(abs(v - mean) for v in vals) / mean * 100.0, 1),
+        "mean_over_fck": round(mean / fck_mpa, 3),
     }
+
+
+def optimise_cutting(pieces: List[Tuple[str, int, float, int]], stock_length_m: float) -> Dict:
+    """First-fit-decreasing cutting plan from stock bars, per diameter.
+
+    ``pieces``: (bar mark, diameter mm, cutting length m, number of pieces).
+    Pieces longer than the stock bar cannot be cut from one bar and are listed
+    under ``needs_lap`` (lap / coupler location to be detailed by the engineer).
+    Returns per diameter: stock bars needed, cut weight, offcut, efficiency.
+    """
+    if stock_length_m <= 0:
+        raise ValueError("stock length must be positive")
+    by_dia: Dict[int, List[Tuple[float, str]]] = {}
+    needs_lap = []
+    for mark, dia, length, n in pieces:
+        if length <= 0 or n <= 0:
+            continue
+        if length > stock_length_m + 1e-9:
+            needs_lap.append({"Mark": mark, "Dia (mm)": dia, "Length (m)": round(length, 3), "Nos": n})
+            continue
+        by_dia.setdefault(int(dia), []).extend([(float(length), mark)] * int(n))
+    out = {}
+    for dia, items in sorted(by_dia.items()):
+        items.sort(key=lambda t: -t[0])
+        bars: List[List] = []          # [remaining length, [cuts]]
+        for length, mark in items:
+            for b in bars:
+                if b[0] >= length - 1e-9:
+                    b[0] -= length
+                    b[1].append(mark)
+                    break
+            else:
+                bars.append([stock_length_m - length, [mark]])
+        unit = REBAR_WEIGHT_PER_M.get(dia, dia ** 2 / 162.0)
+        used = sum(l for l, _ in items)
+        out[dia] = {
+            "stock_bars": len(bars),
+            "cut_length_m": round(used, 2),
+            "offcut_m": round(sum(b[0] for b in bars), 2),
+            "efficiency_pct": round(used / (len(bars) * stock_length_m) * 100.0, 1) if bars else 0.0,
+            "stock_weight_kg": round(len(bars) * stock_length_m * unit, 1),
+            "cut_weight_kg": round(used * unit, 1),
+            "plan": [{"Bar": i + 1, "Cuts": ", ".join(b[1]), "Offcut (m)": round(b[0], 3)} for i, b in enumerate(bars)],
+        }
+    return {"by_diameter": out, "needs_lap": needs_lap}

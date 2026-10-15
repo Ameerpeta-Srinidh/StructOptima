@@ -89,4 +89,10 @@ Status key: **P** production · **C** CLI only · **T** tests/demos only · **U*
 | `logging_config.py` | P | `get_logger` is console-only unless `STRUCTOPTIMA_LOG_FILE` is set; `setup_logging()` adds a rotating file handler (CLI) |
 | `monitoring.py` | P | Sentry wrappers, active only with `SENTRY_DSN` |
 | `auth.py` | U | Password helpers, not imported |
-| `site_calculators.py`, `site_guide.py`, `site_inspection.py`, `shm_module.py`, `shm_viz.py`, `digital_twin.py`, `bim_interop.py`, `documentation.py` | P | Site Tools page utilities; behaviour not assessed |
+| `site_calculators.py` | P | Rebar weights, approved-mix materials (`materials_for_mix`), pour logistics, formwork contact area, cube-test summary, BBS cutting plan (`optimise_cutting`) — nothing assumed (2026-10-16) |
+| `site_monitoring.py` (new 2026-10-16) | P | User-supplied measurements vs design: accelerometer spectrum, frequency change, strain vs yield strain, as-built survey deviation, member info and QR tags (segno) |
+| `documentation.py` (rewritten 2026-10-16) | P | `calculation_summary(res, project, engineer)` — plain-text record built only from `DesignResults` |
+| `site_inspection.py` (rewritten 2026-10-16) | P | Inspection prompts (standards named, clauses not cited), `DefectRecord` log with CSV export; no diagnosis |
+| `site_guide.py`, `bim_interop.py` | P | Static checklists (values as cited, UNVERIFIED); COBie JSON writer (fed from the design on the Site Tools page) |
+| `shm_module.py` | T | Sensor-planning helper used only by tests |
+| `viewer_model.py` (new 2026-10-16) | P | `build_scene(gm, beams, footings)` JSON scene (metres, Z up) and `viewer_html(scene)` with the committed bundle `components/viewer3d/dist/viewer.js` (three.js; source `components/viewer3d/src/main.js`, build `npm run build`) |

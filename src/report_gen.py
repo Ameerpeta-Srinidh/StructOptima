@@ -570,6 +570,23 @@ class ReportGenerator:
                     elements.append(Paragraph(f"... {len(_fails) - 60} further items (see Analysis page)", styles["Normal"]))
             for _m in (kwargs.get('design_messages') or []):
                 elements.append(Paragraph(f"<font size=8>Note: {_m}</font>", styles["Normal"]))
+            elements.append(Spacer(1, 6))
+            elements.append(Paragraph("<b>Verification status: NOT VERIFIED.</b> PASS means only that the checks "
+                                      "implemented in StructOptima passed. Checks NOT performed:", styles["Normal"]))
+            for _c in (kwargs.get('checks_not_performed') or []):
+                elements.append(Paragraph(f"<font size=8>- {_c}</font>", styles["Normal"]))
+            _drift = kwargs.get('drift_results') or []
+            if _drift:
+                elements.append(Spacer(1, 6))
+                elements.append(Paragraph("<b>Storey drift</b> (unfactored design lateral forces, 2D frames; "
+                                          "limit values UNVERIFIED)", styles["Normal"]))
+                _rows = [["Case", "Storey", "Column", "Drift mm", "Height mm", "Ratio", "Limit", "Status"]] + [
+                    [r["Case"], r["Storey"], r["Column"], f"{r['Drift (mm)']:.2f}", f"{r['Height (mm)']:.0f}",
+                     f"{r['Ratio']:.5f}", "-" if r["Limit"] is None else f"{r['Limit']:.4f}", r["Status"]] for r in _drift]
+                _t = Table(_rows, repeatRows=1)
+                _t.setStyle(TableStyle([('GRID', (0, 0), (-1, -1), 0.4, colors.grey), ('FONTSIZE', (0, 0), (-1, -1), 7),
+                                        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey)]))
+                elements.append(_t)
             elements.append(Spacer(1, 12))
         
         # 1. Executive Summary
@@ -1113,36 +1130,37 @@ class ReportGenerator:
         
         # 20. Concrete Material Breakdown
         if bom and bom.total_concrete_vol_m3 > 0:
-            elements.append(Paragraph("20. Concrete Material Breakdown (IS 10262:2019)", styles["Heading1"]))
-            try:
-                from .site_calculators import mix_design_table
-                _mix = mix_design_table(conc_grade)
-                _vol = bom.total_concrete_vol_m3
-                _fa_density = 1600.0
-                _ca_density = 1450.0
-                _fa_m3 = _mix['fine_aggregate_kg_m3'] / _fa_density
-                _ca_m3 = _mix['coarse_aggregate_kg_m3'] / _ca_density
-                mat_tbl = [
-                    ["Material", "Per m³", "Total"],
-                    ["Wet Concrete Volume", "", f"{_vol:.2f} m³"],
-                    ["Cement (50kg bags)", f"{_mix['cement_bags_per_m3']} bags", f"{_vol * _mix['cement_bags_per_m3']:.1f} bags"],
-                    ["Fine Aggregate (Sand)", f"{_fa_m3:.3f} m³", f"{_vol * _fa_m3:.2f} m³"],
-                    ["Coarse Aggregate (20mm)", f"{_ca_m3:.3f} m³", f"{_vol * _ca_m3:.2f} m³"],
-                    ["Water", f"{_mix['water_kg_m3']} kg", f"{_vol * _mix['water_kg_m3']:.0f} kg"],
-                    ["Water:Cement Ratio", str(_mix['water_cement_ratio']), "—"],
-                    ["Nominal Mix Ratio", _mix['nominal_ratio'], "—"],
-                ]
-                t_mat = Table(mat_tbl, colWidths=[170, 100, 130])
-                t_mat.setStyle(TableStyle([
-                    ('BACKGROUND', (0,0), (-1,0), colors.darkorange),
-                    ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
-                    ('GRID', (0,0), (-1,-1), 0.5, colors.black),
-                    ('FONTSIZE', (0,0), (-1,-1), 9),
-                ]))
-                elements.append(t_mat)
-                elements.append(Paragraph("Note: Indicative quantities per IS 10262:2019. Add 3-5% wastage for actual procurement.", styles["Normal"]))
-            except Exception as _e:
-                elements.append(Paragraph(f"Mix design data error: {_e}", styles["Normal"]))
+            elements.append(Paragraph("20. Concrete Material Breakdown (approved mix)", styles["Heading1"]))
+            _amix = kwargs.get('approved_mix')
+            if _amix:
+                try:
+                    from .site_calculators import materials_for_mix
+                    _vol = bom.total_concrete_vol_m3
+                    _m = materials_for_mix(_vol, _amix)
+                    mat_tbl = [
+                        ["Material", "Per m³ (approved mix)", "Total"],
+                        ["Wet concrete volume", "", f"{_vol:.2f} m³"],
+                        ["Cement", f"{_amix['cement_kg_m3']:.0f} kg", f"{_m['cement_bags']} bags (50 kg)"],
+                        ["Fine aggregate", f"{_amix['fine_aggregate_kg_m3']:.0f} kg", f"{_m['fine_aggregate_t']:.2f} t"],
+                        ["Coarse aggregate", f"{_amix['coarse_aggregate_kg_m3']:.0f} kg", f"{_m['coarse_aggregate_t']:.2f} t"],
+                        ["Water", f"{_amix['water_kg_m3']:.0f} kg", f"{_m['water_l']:.0f} L"],
+                    ]
+                    t_mat = Table(mat_tbl, colWidths=[150, 130, 130])
+                    t_mat.setStyle(TableStyle([
+                        ('BACKGROUND', (0,0), (-1,0), colors.darkorange),
+                        ('TEXTCOLOR', (0,0), (-1,0), colors.whitesmoke),
+                        ('GRID', (0,0), (-1,-1), 0.5, colors.black),
+                        ('FONTSIZE', (0,0), (-1,-1), 9),
+                    ]))
+                    elements.append(t_mat)
+                    elements.append(Paragraph(f"Mix: {_amix.get('name', 'approved mix')} (entered by the user). Volume "
+                                              "does not deduct member overlaps; wastage not included.", styles["Normal"]))
+                except Exception as _e:
+                    elements.append(Paragraph(f"Approved mix data error: {_e}", styles["Normal"]))
+            else:
+                elements.append(Paragraph(f"Wet concrete volume {bom.total_concrete_vol_m3:.2f} m³. No approved mix design "
+                                          "was entered, so cement / aggregate / water quantities are not given.",
+                                          styles["Normal"]))
             elements.append(Spacer(1, 12))
         
         # 21. Beam L/d Deflection Check

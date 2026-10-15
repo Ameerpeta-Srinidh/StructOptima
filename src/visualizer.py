@@ -7,6 +7,25 @@ from .foundation_eng import Footing
 from .materials import Concrete
 from .framing_logic import StructuralMember, Point
 
+def beam_utilisation(grid_mgr, beam_id: str):
+    """(utilisation, status) of a designed beam: max of Ast,req / Ast,prov (top,
+    bottom) and tau_v / tau_c,max; FAIL counts as >= 1.  (0.0, "") if not designed."""
+    r = grid_mgr.get_beam_result(beam_id) if hasattr(grid_mgr, 'get_beam_result') else None
+    if r is None:
+        return 0.0, ""
+    vals = []
+    if r.ast_bottom_prov_mm2 > 0:
+        vals.append(r.ast_bottom_req_mm2 / r.ast_bottom_prov_mm2)
+    if r.ast_top_prov_mm2 > 0:
+        vals.append(r.ast_top_req_mm2 / r.ast_top_prov_mm2)
+    if r.tau_c_max_Nmm2 > 0:
+        vals.append(r.tau_v_Nmm2 / r.tau_c_max_Nmm2)
+    u = max(vals, default=0.0)
+    if r.status == "FAIL":
+        u = max(u, 1.0)
+    return (0.0 if math.isnan(u) else u), r.status
+
+
 class Visualizer:
     def __init__(self):
         pass
@@ -57,17 +76,13 @@ class Visualizer:
         try:
             fig = go.Figure()
             
-            # Design Strength
-            fcd = 0.4 * concrete.fck if getattr(concrete, 'fck', None) is not None else 10.0
         
             # View Mode Logic
             # "Engineering": Standard heat map
             # "Architectural": Neutral
-            # "Deflection": Exaggerated deformed shape
             # "Utilization": D/C Ratio heat map (same as Engineering but explicit)
             # "Load Path": Highlight load transfer elements
 
-            deflection_scale = 100.0 if view_mode == "Deflection" else 0.0
         
             # 1. Beams (Horizontal Lines)
             num_stories = grid_mgr.num_stories if hasattr(grid_mgr, 'num_stories') else 1
@@ -98,17 +113,9 @@ class Visualizer:
                     # Calculate color based on mode
                     color = 'darkorange'
                 
-                    # Check utilization for color
-                    util_ratio = 0.0
-                    if hasattr(beam, 'analysis_result') and isinstance(beam.analysis_result, dict):
-                         util_ratio = beam.analysis_result.get('usage_ratio', 0.5)
-                         if util_ratio is None: util_ratio = 0.5
-                    elif hasattr(beam, 'properties') and beam.properties:
-                         length = ((beam.end_point.x - beam.start_point.x)**2 + (beam.end_point.y - beam.start_point.y)**2)**0.5
-                         util_ratio = min(1.0, length / 7.0)
-                
-                    if util_ratio is None or math.isnan(util_ratio):
-                         util_ratio = 0.0
+                    # Utilisation from the beam design (N22): largest of required / provided
+                    # steel (top, bottom) and tau_v / tau_c,max; a FAIL status shows red
+                    util_ratio, b_status = beam_utilisation(grid_mgr, beam.id)
 
                     if view_mode in ["Engineering", "Utilization"]:
                          color = self.get_color_by_stress(util_ratio)
@@ -125,51 +132,19 @@ class Visualizer:
                     z0 = z_nominal
                     z1 = z_nominal
                 
-                    if view_mode == "Deflection":
-                        # Simulate Sag: max at mid-span
-                        # delta = L^2/scale * load_factor
-                        L = ((x1-x0)**2 + (y1-y0)**2)**0.5
-                        mid_sag = (L**2) * 0.002 * deflection_scale * -1 # Downward
-                    
-                        # Discretize beam into 5 segments for smooth curve
-                        steps = 5
-                        for i in range(steps):
-                            t1 = i / steps
-                            t2 = (i+1) / steps
-                        
-                            bx0 = x0 + (x1-x0)*t1
-                            by0 = y0 + (y1-y0)*t1
-                            bz0 = z0 + 4*mid_sag*t1*(1-t1) # Parabola
-                        
-                            bx1 = x0 + (x1-x0)*t2
-                            by1 = y0 + (y1-y0)*t2
-                            bz1 = z1 + 4*mid_sag*t2*(1-t2)
-                        
-                            beam_x.extend([bx0, bx1, None])
-                            beam_y.extend([by0, by1, None])
-                            beam_z.extend([bz0, bz1, None])
-                        
-                            # Fix Color array for line segments - easier to add seperate traces if colors vary
-                            # For single trace, we can't easily vary line color per segment in plotly without line_color array
-                            # We will use 'darkorange' global or split traces.
-                            # Optimization: Use Mesh3d strip or just simple lines. 
-                            # Simple: Just one color per trace.
-                    else:
-                        # Straight Line
-                        beam_x.extend([x0, x1, None])
-                        beam_y.extend([y0, y1, None])
-                        beam_z.extend([z0, z1, None])
+                    beam_x.extend([x0, x1, None])
+                    beam_y.extend([y0, y1, None])
+                    beam_z.extend([z0, z1, None])
 
                     # Hover Text
                     beam_id = getattr(beam, 'id', 'Beam')
-                    hover = f"ID: {beam_id}<br>Util: {util_ratio:.2f}"
-                    if view_mode == "Deflection":
-                         hover += "<br>Deflection: Simulated"
+                    hover = (f"ID: {beam_id}<br>Utilisation: {util_ratio:.2f}<br>Status: {b_status}"
+                             if b_status else f"ID: {beam_id}<br>Not designed")
                 
                     beam_hover.extend([hover, hover, None])
                 
                     # Label
-                    if level == 0 and view_mode != "Deflection":
+                    if level == 0:
                         mid_x = (x0 + x1) / 2
                         mid_y = (y0 + y1) / 2
                         beam_labels_x.append(mid_x)
@@ -216,7 +191,7 @@ class Visualizer:
                              hoverinfo='skip'
                          ))
             else:
-                # Standard single color trace (Deflection Mode or Architectural)
+                # Standard single colour trace (Architectural / Load Path)
                 line_color = 'darkorange' if view_mode != "Architectural" else 'grey'
             
                 # Filter None from hovertext to avoid Plotly JSON serialization issues in some versions
@@ -265,11 +240,11 @@ class Visualizer:
                 z_b = getattr(col, 'z_bottom', 0)
                 z_t = getattr(col, 'z_top', height_m)
             
-                # Utilization Color
-                load_n = (getattr(col, 'load_kn', 0) or 0) * 1000.0
-                area = getattr(col, 'area_mm2', 0) or 0
-                stress = load_n / area if area > 0 else 0
-                ratio = stress / fcd if fcd > 0 else 0
+                # Utilisation = P-M interaction ratio from the column design (N22)
+                _cr = getattr(grid_mgr, 'rebar_schedule', {}).get(col.id)
+                ratio = float(_cr.interaction_ratio) if _cr is not None else 0.0
+                if _cr is not None and _cr.status == "FAIL":
+                    ratio = max(ratio, 1.0)
             
                 c_color = 'lightgrey'
                 if view_mode in ["Engineering", "Utilization"]:
@@ -286,8 +261,6 @@ class Visualizer:
                 else:
                      col_width = 10
                  
-                # Deflection: Slight buckling curve? 
-                # For simplicity, keep columns straight but color-coded.
                 # 3D lines
                 fig.add_trace(go.Scatter3d(
                     x=[col.x, col.x], y=[col.y, col.y], z=[z_b, z_t],
@@ -295,21 +268,10 @@ class Visualizer:
                     line=dict(color=c_color, width=col_width),
                     name=f'{col.id}',
                     showlegend=False,
-                    hovertext=f"ID: {col.id}<br>Util: {ratio:.2f}"
+                    hovertext=(f"ID: {col.id}<br>Interaction ratio: {ratio:.2f}<br>Status: {_cr.status}"
+                               if _cr is not None else f"ID: {col.id}<br>Not designed")
                 ))
 
-            # Animation Frames Logic for Deflection
-            if view_mode == "Deflection":
-                # Animate Camera Rotation to simulate dynamic inspection
-                frames = []
-                for k in range(36):
-                    theta = k * 10 * (3.14159 / 180)
-                    x_eye = 1.5 * math.cos(theta) - 1.5 * math.sin(theta)
-                    y_eye = 1.5 * math.sin(theta) + 1.5 * math.cos(theta)
-                
-                    frames.append(go.Frame(layout=dict(scene=dict(camera=dict(eye=dict(x=x_eye, y=y_eye, z=1.5))))))
-            
-                fig.frames = frames
             
                 fig.update_layout(
                     updatemenus=[
@@ -456,11 +418,11 @@ class Visualizer:
         
         for col in level_cols:
             # Color logic
-            ratio = 0.0
-            if col.load_kn > 0 and col.area_mm2 > 0:
-                stress = (col.load_kn * 1000) / col.area_mm2
-                fcd = 0.4 * 25 # Assume M25 default for color if not passed
-                ratio = stress / fcd
+            # P-M interaction ratio from the column design (N22); FAIL shows red
+            _cr = getattr(grid_mgr, 'rebar_schedule', {}).get(col.id)
+            ratio = float(_cr.interaction_ratio) if _cr is not None else 0.0
+            if _cr is not None and _cr.status == "FAIL":
+                ratio = max(ratio, 1.0)
                 
             color = self.get_color_by_stress(ratio) if view_mode == "Engineering" else 'grey'
             

@@ -13,3 +13,4 @@ sentry-sdk>=1.35.0
 trimesh==5.0.0
 scipy>=1.14.0
 ifcopenshell==0.8.4.post1
+segno==1.6.1

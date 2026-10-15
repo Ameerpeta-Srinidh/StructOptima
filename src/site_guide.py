@@ -3,6 +3,10 @@
 Site Guide Module
 Contains static content and checklists for construction site execution
 based on IS 456, IS 13920, and best practices.
+
+Numerical values below are as cited by the original authors and are UNVERIFIED against the
+printed standards (docs/engineering/standards-register.md); the project specification and the
+engineer's instructions govern.
 """
 
 SITE_CHECKLISTS = {
@@ -21,7 +25,7 @@ SITE_CHECKLISTS = {
 ### 🔗 Phase 3: Reinforcement Placement CHECKLIST
 **Reference: IS 456 & IS 13920 (Seismic)**
 
-- [ ] **Cover Blocks**: Are cover spacers (25mm for beams) placed at max **1.0m spacing**?
+- [ ] **Cover Blocks**: Are cover spacers of the **cover shown on the drawings** placed at close enough spacing to hold it?
 - [ ] **Plumb**: Is the cage vertically/horizontally aligned?
 - [ ] **Cleanliness**: Is rebar free from loose rust, oil, mud, or paint?
 - [ ] **Seismic Hooks**: Do stirrups have **135° hooks** with **6d extension** (>65mm)?

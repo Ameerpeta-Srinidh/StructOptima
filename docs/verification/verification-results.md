@@ -15,6 +15,7 @@ evidence of engineering correctness beyond the stated reference cases.
 | After N13 fix (2026-10-16) | same | **494 passed, 3 skipped, 0 failed** (≈ 63 s; one run, later runs ≈ 22 s) |
 | After drawing set (2026-10-16) | same | **504 passed, 3 skipped, 0 failed** (≈ 22 s) |
 | After IFC export (2026-10-16) | same | **505 passed, 3 skipped, 0 failed** (≈ 23 s) |
+| After drift, site tools, status and 3D viewer (2026-10-16) | same | **520 passed, 3 skipped, 0 failed** (≈ 42 s) |
 
 Skipped: `test_beam_placer.py::test_with_auto_framer` (local `complex_villa.dxf` yields no columns), two `test_column_editor.py` tests (no removable column in the layout).
 
@@ -80,6 +81,12 @@ Sheets for an 18 × 12 m G+1 building with a staircase void and a 40 × 30 m G+2
 (pypdfium2, scratch directory) and reviewed by the developer: grid bubbles, dimension chains, marks, schedules,
 void marking, sections (1:10 / 1:20) and footing sections are legible; fixes applied after review (dimension
 offsets, void cross, slab label overlap, top-bar labels, section scale). **Owner/site-engineer review pending.**
+
+## 5b. Drift and viewer checks (2026-10-16)
+
+- Portal drift: hand 100 / 30 000 = 3.333 mm; model 3.356 mm (+0.7 %, beam flexibility and axial shortening).
+- Sample buildings before column growth for drift: 18 × 12 m G+1 zone III max EQ drift 0.00178 (PASS); 20 × 15 m G+3 zone IV 0.00462 (FAIL); 30 × 20 m G+5 zone V 0.00441 (FAIL). After growth: 0.00379 and 0.00370 (both still FAIL overall on the existing "Seismic method" check).
+- 3D viewer rendered in headless Chrome (SwiftShader) for an 18 × 12 m G+2 building with a stair void: orbit, status colouring with storey isolation, and walk-through with the on-screen pad reviewed by the developer. **Owner review on a site tablet / phone pending.**
 
 ## 6. Side-effect incident during testing
 

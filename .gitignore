@@ -93,3 +93,7 @@ test_slab_generation.py
 # Gemini / Agent
 .gemini/
 .antigravityignore
+
+# 3D viewer build (dist/viewer.js is committed)
+components/viewer3d/node_modules/
+!components/viewer3d/dist/

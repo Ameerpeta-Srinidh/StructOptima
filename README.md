@@ -54,6 +54,9 @@ the CLI (`main.py`), with PDF reports, Excel and DXF exports.
 | Design status and issue list shown in UI and PDF | PDFs marked "PRELIMINARY — NOT FOR CONSTRUCTION" |
 | Site drawing set (A3): column, footing, beam & slab layouts, sections, slab reinforcement, footing sections with schedules | PDF, DXF, SVG, ZIP from the Drawings page; laps/curtailment are typical notes |
 | BIM model export (IFC4) with design data on every member | Opens in any IFC viewer; founding level not designed |
+| 3D viewer and walk-through of the designed building (orbit, storeys, section cut, status colours, click for member data; works with touch) | Boxes only; no openings or reinforcement |
+| Storey drift check (EQ 0.004 h, wind top sway H/500) | Limit values UNVERIFIED; 2D frames, no torsion |
+| Site tools: BBS cutting plan, approved-mix materials, cube register, formwork, QR member tags, inspection and defect log, measured vibration / strain, as-built survey | Arithmetic on the design and on your data; nothing simulated |
 | Quantities, cost, carbon, BBS, masonry/plaster/paint estimates | Estimates with fixed rates |
 | Indicative column optimiser | Requires re-analysis before use |
 
@@ -166,7 +169,7 @@ PYTHONDONTWRITEBYTECODE=1 python -m pytest tests -p no:cacheprovider -q
 python -m pytest tests --cov=src --cov-report=term-missing
 ```
 
-Last recorded run (2026-10-16, Python 3.13.7): **505 passed, 3 skipped, 0 failed**.
+Last recorded run (2026-10-16, Python 3.13.7): **520 passed, 3 skipped, 0 failed**.
 Passing tests show the code behaves as tested; they are not proof of
 engineering correctness. Evidence per calculation:
 [docs/verification/verification-matrix.md](docs/verification/verification-matrix.md).

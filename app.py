@@ -102,7 +102,9 @@ with st.sidebar:
                    f"Finishes+partitions+services {load_params.floor_finish_kn_m2 + load_params.partition_load_kn_m2 + load_params.services_load_kn_m2:.1f} kN/m² · "
                    f"Slab {load_params.slab_thickness_mm:.0f} mm")
         wall_load = st.number_input("Wall Load (kN/m) — used only if no walls are modelled", 0.0, 50.0, 12.0)
-        sbc = st.number_input("SBC (kN/m²)", min_value=50.0, max_value=500.0, value=200.0)
+        sbc = st.number_input("Safe Bearing Capacity, SBC (kN/m²) — from the site's geotechnical report",
+                              min_value=50.0, max_value=1000.0, value=None, step=10.0, key="sbc_input",
+                              placeholder="Enter SBC", help="Required. No default is assumed: the SBC sizes every footing.")
 
     with st.expander("🧱 Wall & Masonry Settings", expanded=False):
         wall_thickness_choice = st.selectbox(
@@ -153,15 +155,23 @@ with st.sidebar:
         fy = float(steel_grade.replace("Fe", ""))
         use_fly_ash = st.checkbox("Use Green Concrete (Fly Ash)")
         enable_optimization = st.checkbox("Show Column Optimisation (indicative)", value=False)
-        view_mode = st.selectbox("View Mode", ["Engineering", "Architectural", "Deflection", "Utilization", "Load Path"], index=0)
+        view_mode = st.selectbox("View Mode", ["Engineering", "Architectural", "Utilization", "Load Path"], index=0)
 
     st.markdown("<br>", unsafe_allow_html=True)
     _disclaimer_accepted = st.checkbox(
         "I confirm that I will independently verify all outputs before use in construction. "
         "I understand this tool provides preliminary structural designs that require review "
         "by a licensed Structural Engineer.", key="disclaimer_checkbox")
-    run_btn = st.button("Run Analysis", type="primary", disabled=not _disclaimer_accepted,
-                        help="Accept the professional use disclaimer above to enable analysis")
+    _site_confirmed = st.checkbox(
+        "I confirm the SBC, seismic zone, soil type, wind zone and terrain category entered above apply to this "
+        "site (geotechnical report and IS 1893 / IS 875 maps).", key="site_params_checkbox")
+    _ready = _disclaimer_accepted and _site_confirmed and sbc is not None
+    run_btn = st.button("Run Analysis", type="primary", disabled=not _ready,
+                        help="Enter the SBC, confirm the site parameters and accept the disclaimer to enable analysis")
+    if sbc is None:
+        st.caption("☝️ Enter the SBC (Occupancy & Loads) — it is not assumed")
+    if not _site_confirmed:
+        st.caption("☝️ Confirm the site parameters")
     if not _disclaimer_accepted:
         st.caption("☝️ Please accept the disclaimer to proceed")
     render_is_code_reference()
@@ -350,7 +360,11 @@ if st.session_state.get('analysis_done', False):
     elif res.status == "WARN":
         st.warning(f"⚠️ Design status: WARN — {n_warn} item(s) need engineering review. PRELIMINARY — NOT FOR CONSTRUCTION.")
     else:
-        st.success("✅ Design status: all implemented checks pass. PRELIMINARY — independent verification still required.")
+        st.success("✅ Design status: PASS for the implemented checks only — NOT VERIFIED. PRELIMINARY — independent "
+                   "verification by a licensed structural engineer is required.")
+    with st.expander(f"Checks NOT performed by StructOptima ({len(res.checks_not_performed)}) — must be done separately"):
+        for _c in res.checks_not_performed:
+            st.markdown(f"- {_c}")
     for m in res.messages:
         st.caption(f"ℹ️ {m}")
     for w in st.session_state.get('cad_warnings', [])[:10]:
@@ -359,22 +373,23 @@ if st.session_state.get('analysis_done', False):
     c1, c2, c3, c4 = st.columns(4)
     with c1:
         with st.expander(f"🏢 Total Concrete: {bom.total_concrete_vol_m3:.2f} m³", expanded=False):
-            from src.site_calculators import mix_design_table
-            _mix = mix_design_table(conc_grade or "M25")
+            from src.site_calculators import materials_for_mix
             vol = bom.total_concrete_vol_m3
-            _fa_per_m3 = _mix["fine_aggregate_kg_m3"] / 1600.0
-            _ca_per_m3 = _mix["coarse_aggregate_kg_m3"] / 1450.0
-            st.caption(f"**Grade:** {conc_grade} | **W/C Ratio:** {_mix['water_cement_ratio']}")
-            st.caption(f"**Wet Volume:** {vol:.2f} m³")
-            st.markdown(f"""
-| Material | Per m³ | Total |
-|---|---|---|
-| Cement | {_mix['cement_bags_per_m3']} bags | **{round(vol * _mix['cement_bags_per_m3'], 1)} bags (50kg)** |
-| Fine Aggregate | {_fa_per_m3:.3f} m³ | **{round(vol * _fa_per_m3, 2)} m³** |
-| Coarse Aggregate | {_ca_per_m3:.3f} m³ | **{round(vol * _ca_per_m3, 2)} m³** |
-| Water | {_mix['water_kg_m3']} kg | {round(vol * _mix['water_kg_m3'], 0):.0f} kg |
+            st.caption(f"**Grade:** {conc_grade} | **Wet Volume:** {vol:.2f} m³ (beam/slab/column overlaps not deducted)")
+            _mix = st.session_state.get('approved_mix')
+            if _mix:
+                _m = materials_for_mix(vol, _mix)
+                st.markdown(f"""
+| Material ({_mix['name']}) | Total |
+|---|---|
+| Cement | **{_m['cement_bags']} bags (50 kg)** |
+| Fine aggregate | **{_m['fine_aggregate_t']:.2f} t** |
+| Coarse aggregate | **{_m['coarse_aggregate_t']:.2f} t** |
+| Water | {_m['water_l']:.0f} L |
 """)
-            st.caption("Indicative nominal mix values — not a mix design.")
+            else:
+                st.caption("Enter your approved mix design (Site Tools → Site Calculators → Approved mix) to get "
+                           "cement, sand, aggregate and water quantities.")
     with c2:
         render_metric_card("Total Steel", f"{bom.total_steel_weight_kg:.0f} kg", icon="🔩")
     with c3:

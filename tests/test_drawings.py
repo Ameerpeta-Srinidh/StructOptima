@@ -165,3 +165,38 @@ def test_ifc_export_roundtrip(res, tmp_path):
     assert len(gm2.columns) == len(res.gm.columns) and len(beams2) == len(res.beams)
     assert sorted((c.width_nb, c.depth_nb) for c in gm2.columns) == \
            sorted((c.width_nb, c.depth_nb) for c in res.gm.columns)
+
+
+# ------------------------------------------------------- 3D viewer scene --
+def test_viewer_scene_matches_the_design(res):
+    from src.viewer_model import build_scene, bundle_available, viewer_html
+    sc = build_scene(res.gm, res.beams, res.footings)
+    kinds = [i["kind"] for i in sc["items"]]
+    n = res.gm.num_stories
+    assert kinds.count("column") == len(res.gm.columns)
+    assert kinds.count("beam") == len(res.beams) * n
+    assert kinds.count("slab") == len(res.gm.slab_schedule) * n
+    assert kinds.count("footing") == len(res.footings)
+    assert len(sc["storeys"]) == n
+    marks = compute_marks(res.gm, res.beams, res.footings)
+    for it in sc["items"]:
+        if it["kind"] == "column":
+            r = res.gm.rebar_schedule[it["id"]]
+            assert it["status"] == r.status and it["props"]["Main bars"] == r.main_bars_desc
+            assert it["props"]["Mark"] == marks.columns[it["id"]]
+            c = next(c for c in res.gm.columns if c.id == it["id"])
+            assert it["c"][2] == pytest.approx((c.z_bottom + c.z_top) / 2, abs=1e-3)
+        if it["kind"] == "beam":
+            r = res.gm.get_beam_result(it["id"])
+            assert it["props"]["Bottom bars"] == r.bottom_bars_desc and it["s"][2] == pytest.approx(r.depth_mm / 1000)
+    assert bundle_available()                       # dist/viewer.js is committed
+    html = viewer_html(sc)
+    assert "SOViewer.mount" in html and html.count("</script>") == 2
+
+
+def test_viewer_html_escapes_script_terminators(res):
+    from src.viewer_model import build_scene, viewer_html
+    sc = build_scene(res.gm, res.beams, res.footings)
+    sc["items"][0]["props"]["Mark"] = "</script><b>x"
+    html = viewer_html(sc)
+    assert "</script><b>x" not in html and html.count("</script>") == 2

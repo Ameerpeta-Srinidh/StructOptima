@@ -75,7 +75,7 @@ Size: large (≈ 2 sessions).
 - Tests: export → `BIMLoader` round-trip (counts, sizes, storeys); file opens with ifcopenshell; skip if ifcopenshell missing.
 Size: medium (≈ 1 session).
 
-### Phase 3 — In-browser 3D viewer (needs Q6)
+### Phase 3 — In-browser 3D viewer (needs Q6) — DONE 2026-10-16 (RM-31; three.js instead of That Open, D-15 refinement PROPOSED)
 
 - Custom Streamlit component `components/structoptima_viewer/` (Vite + `@thatopen/components` + web-ifc); commit the built bundle so Streamlit Cloud needs no npm.
 - Features: orbit, storey isolation, section planes, measurement, click member → properties panel, colour by status, highlight a mark from the schedules.
@@ -83,7 +83,7 @@ Size: medium (≈ 1 session).
 - Tests: AppTest renders the page; manual browser checklist (JS not testable with AppTest).
 Size: large.
 
-### Phase 4 — First-person walkthrough (needs Q6)
+### Phase 4 — First-person walkthrough (needs Q6) — DONE 2026-10-16 (RM-31; drag-to-look + on-screen pad instead of pointer lock, which the Streamlit iframe sandbox does not allow)
 
 - three.js `PointerLockControls` (WASD, 1.7 m eye height, storey switching, collision with slabs only) in the same component, reusing the trimesh GLB or the IFC.
 - **Risk to prototype first:** pointer lock inside Streamlit's component iframe (browser user-gesture/permissions).
