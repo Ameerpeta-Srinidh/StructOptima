@@ -48,6 +48,16 @@ optimizer `all_safe = True` with 6/40 columns below 1.5 × load, SCWB ratios
 unchanged by a 600×1200 beam). After remediation each has a regression test in
 `tests/test_audit_findings.py`.
 
+## 4a. Manual walkthrough (2026-10-15)
+
+A complete 8 × 8 m, 2-storey reference building was hand-checked step by step
+([manual-calculation-walkthrough.md](manual-calculation-walkthrough.md)): load intensities, wall load,
+takedown (C1, C5), beam loads, storey weights, Ta, Ah, Vb, storey forces, wind forces, an
+independently rebuilt 2D frame (B_H_3 envelope −61.61 / +24.32 kNm; C5 base moment 43.44 kNm),
+beam flexure and shear, column interaction (0.588), slab S1, footing F-C5 and concrete
+quantities all reproduce the program values. The walkthrough found finding **N13** (slab
+thickness used in loads ≠ designed slab thickness).
+
 ## 5. End-to-end runs
 
 | Run | Result |
