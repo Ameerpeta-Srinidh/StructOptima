@@ -14,6 +14,7 @@ evidence of engineering correctness beyond the stated reference cases.
 | After remediation (final) | `pytest tests -p no:cacheprovider` | **493 passed, 3 skipped, 0 failed** (≈ 22–33 s) |
 | After N13 fix (2026-10-16) | same | **494 passed, 3 skipped, 0 failed** (≈ 63 s; one run, later runs ≈ 22 s) |
 | After drawing set (2026-10-16) | same | **504 passed, 3 skipped, 0 failed** (≈ 22 s) |
+| After IFC export (2026-10-16) | same | **505 passed, 3 skipped, 0 failed** (≈ 23 s) |
 
 Skipped: `test_beam_placer.py::test_with_auto_framer` (local `complex_villa.dxf` yields no columns), two `test_column_editor.py` tests (no removable column in the layout).
 

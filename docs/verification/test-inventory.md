@@ -1,6 +1,6 @@
 # Test Inventory
 
-**As of:** 2026-10-16. 507 collected tests in `tests/` (504 passed, 3 skipped on 2026-10-16 — see [verification-results.md](verification-results.md)).
+**As of:** 2026-10-16. 508 collected tests in `tests/` (505 passed, 3 skipped on 2026-10-16 — see [verification-results.md](verification-results.md)).
 
 Classification of the strongest assertion type in each file:
 **E** executes only · **A** structural/boolean assertions · **N** meaningful numerical assertions · **R** numerical assertions against an independently derived reference (closed form / hand calculation in the test) · **UI** headless UI smoke.
@@ -12,7 +12,7 @@ Classification of the strongest assertion type in each file:
 | `test_section_design.py` (new) | 10 | R | `section_design` | Annex-G / stress-block equilibrium, doubly reinforced equilibrium, shear rules, interaction end points, independent pure-bending solution |
 | `test_audit_findings.py` (new) | 35 | R/N/A | pipeline, analysis, detailing, seismic, wind, footing, audit, optimiser, CAD, IFC, quantities | One or more tests per finding R1–R26 and N-findings; writes DXF/IFC only to `tmp_path` |
 | `test_pipeline_e2e.py` (new) | 15 | A/N | `design_pipeline`, reports, exporters, CAD/IFC ingest, CLI | PDFs/Excel to `tmp_path`; CLI with file logging monkeypatched off; reads repository DXFs |
-| `test_drawings.py` (new 2026-10-16) | 10 | A | `src/drawings` | Sheets present and ordered, every member marked, identical marks = identical detailing, schedules carry marks and statuses, void marked, PDF/SVG/DXF consistency, large-plan scaling, CAD and IFC inputs, no files written |
+| `test_drawings.py` (new 2026-10-16) | 11 | A | `src/drawings` | Sheets present and ordered, every member marked, identical marks = identical detailing, schedules carry marks and statuses, void marked, PDF/SVG/DXF consistency, large-plan scaling, CAD and IFC inputs, no files written |
 | `test_streamlit_app.py` (new) | 7 | UI | `app.py`, all pages | `streamlit.testing.AppTest`; CWD = `tmp_path` (the Drawings page writes DXFs to CWD) |
 | `test_grid_manager.py` | 23 | A | `grid_manager` | Detailing tests only assert attributes exist (weak) |
 | `test_foundation_eng.py` | 16 | N | `foundation_eng` | Minimum sizes, monotonicity, volumes |
@@ -43,4 +43,4 @@ Helper: `tests/ifc_fixture.py` (builds a 2-storey IFC frame with `ifcopenshell.a
 
 ## CI
 
-`.github/workflows/ci.yml` runs `pytest tests/ --cov=src` on Python 3.11, 3.12 and 3.13 (installs `pytest-cov`). CI does not install `ifcopenshell`, so IFC tests are skipped there (`pytest.importorskip`). The CI command does not disable the pytest cache (harmless in CI). CI results are not visible from this workspace — **no CI run has been observed for the 2026-10 changes**.
+`.github/workflows/ci.yml` runs `pytest tests/ --cov=src` on Python 3.11, 3.12 and 3.13 (installs `pytest-cov`). CI installs `ifcopenshell` from `requirements.txt` since 2026-10-16, so IFC tests should run there (not yet observed). The CI command does not disable the pytest cache (harmless in CI). CI results are not visible from this workspace — **no CI run has been observed for the 2026-10 changes**.

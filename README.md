@@ -53,6 +53,7 @@ the CLI (`main.py`), with PDF reports, Excel and DXF exports.
 | SCWB, joint shear, ductile tie spacing from designed members | Advisory; IS 13920 confinement not designed |
 | Design status and issue list shown in UI and PDF | PDFs marked "PRELIMINARY — NOT FOR CONSTRUCTION" |
 | Site drawing set (A3): column, footing, beam & slab layouts, sections, slab reinforcement, footing sections with schedules | PDF, DXF, SVG, ZIP from the Drawings page; laps/curtailment are typical notes |
+| BIM model export (IFC4) with design data on every member | Opens in any IFC viewer; founding level not designed |
 | Quantities, cost, carbon, BBS, masonry/plaster/paint estimates | Estimates with fixed rates |
 | Indicative column optimiser | Requires re-analysis before use |
 
@@ -73,8 +74,7 @@ Known limitations and open defects: [docs/engineering/limitations.md](docs/engin
 ```bash
 git clone https://github.com/SrinidhAmeerpta/StructOptima.git
 cd StructOptima
-pip install -r requirements.txt
-pip install ifcopenshell        # optional: IFC import
+pip install -r requirements.txt   # includes ifcopenshell for IFC import/export
 ```
 
 ### Run the web application
@@ -166,7 +166,7 @@ PYTHONDONTWRITEBYTECODE=1 python -m pytest tests -p no:cacheprovider -q
 python -m pytest tests --cov=src --cov-report=term-missing
 ```
 
-Last recorded run (2026-10-16, Python 3.13.7): **504 passed, 3 skipped, 0 failed**.
+Last recorded run (2026-10-16, Python 3.13.7): **505 passed, 3 skipped, 0 failed**.
 Passing tests show the code behaves as tested; they are not proof of
 engineering correctness. Evidence per calculation:
 [docs/verification/verification-matrix.md](docs/verification/verification-matrix.md).

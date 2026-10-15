@@ -57,7 +57,7 @@ grid_manager`, `rebar_detailer → section_design`).
 | openpyxl, pandas | `exporters`, pages | Excel, tables |
 | plotly, trimesh | `visualizer`, `geometry_exporter` | Views |
 | scipy | listed in requirements; no production use found | — |
-| ifcopenshell (optional, not in requirements) | `bim_loader`, `tests/ifc_fixture.py` | IFC |
+| ifcopenshell 0.8.4.post1 (in requirements since 2026-10-16) | `bim_loader`, `ifc_exporter`, `tests/ifc_fixture.py` | IFC import/export (manylinux_2_31 wheels for CPython 3.11–3.13 confirmed by pip dry-run) |
 | sentry-sdk (optional at runtime) | `monitoring` | Error reporting |
 
 ## Duplicate implementations (and how they differ)

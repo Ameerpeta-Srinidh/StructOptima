@@ -43,7 +43,7 @@ rewritten: `test_fea_repro.py`; updated: `test_beam_placer.py`.
 
 | File | Purpose |
 |---|---|
-| `requirements.txt` | Runtime + test dependencies (pinned except `sentry-sdk`, `scipy`). `ifcopenshell` is **not** listed (optional, IFC import only) |
+| `requirements.txt` | Runtime + test dependencies (pinned except `sentry-sdk`, `scipy`); `ifcopenshell==0.8.4.post1` added 2026-10-16 (IFC import/export) |
 | `pytest.ini` | `testpaths = tests`, `-v --tb=short`, ignores DeprecationWarning |
 | `.github/workflows/ci.yml` | CI: Python 3.11/3.12/3.13, `pip install -r requirements.txt pytest-cov`, `pytest tests/ --cov=src` |
 | `Dockerfile`, `docker-compose.yml`, `Procfile`, `.dockerignore` | Container / PaaS deployment of the Streamlit app (not assessed) |

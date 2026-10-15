@@ -21,7 +21,7 @@ verification by a licensed structural engineer.
 | Architecture & data flow | Documented from source | [architecture/](architecture/system-overview.md) |
 | Engineering calculations | Catalogued; most `UNVERIFIED` against an independent engineer; FEA and several section checks `VERIFIED_FOR_CASES` | [engineering/calculation-catalogue.md](engineering/calculation-catalogue.md), [verification/verification-matrix.md](verification/verification-matrix.md) |
 | Audit findings R1–R27 + N1–N13 | Code changes made for most; **none** marked resolved without engineer review | [assurance/risk-register.md](assurance/risk-register.md) |
-| Test suite | 504 passed, 3 skipped, 0 failed (executed 2026-10-16) | [verification/verification-results.md](verification/verification-results.md) |
+| Test suite | 505 passed, 3 skipped, 0 failed (executed 2026-10-16) | [verification/verification-results.md](verification/verification-results.md) |
 | Standards clause wording | **Not verified against printed standards** | [engineering/standards-register.md](engineering/standards-register.md) |
 
 ## Recommended reading order (new developer)

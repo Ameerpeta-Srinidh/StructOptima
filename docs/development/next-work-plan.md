@@ -68,7 +68,7 @@ ifcopenshell LGPL; three.js MIT; xeokit AGPL — avoid; Speckle — hosted, avoi
 **Acceptance:** owner review of printed A3 sheets against a checklist (legibility, marks, dimensions, sections match schedules).
 Size: large (≈ 2 sessions).
 
-### Phase 2 — IFC export (needs Q5)
+### Phase 2 — IFC export (needs Q5) — DONE 2026-10-16 (RM-28)
 
 - `src/ifc_exporter.py`: IfcProject/Site/Building/Storeys; IfcColumn, IfcBeam, IfcSlab, IfcFooting, IfcWall with extruded rectangular profiles; property set (mark, size, bars, ties/stirrups, status, governing combination); optional IfcReinforcingBar later.
 - Download button on Drawings/Reports pages.

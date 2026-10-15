@@ -17,7 +17,7 @@ history see [risk-register.md](risk-register.md).
 | KD-08 | Re-entrant corner screen uses √(bbox − footprint) as the projection — crude | M | UNVERIFIED | Engineer review of flagged plans |
 | KD-09 | Optimiser results are indicative; re-analysis with optimised sizes not automated | M | UNVERIFIED | Do not apply optimiser sizes without a full re-run |
 | KD-10 | Quantities double-count beam/slab/column concrete overlaps; fixed rates | L | Known | Treat as estimates |
-| KD-11 | `ifcopenshell` not in `requirements.txt` (IFC optional) | L | BLOCKED (D-07) | `pip install ifcopenshell` |
+| KD-11 | (Closed 2026-10-16) `ifcopenshell` was not in `requirements.txt` | — | Added (D-15) | — |
 | KD-12 | Legacy root scripts and `src/tests/*` use pre-2026-10 APIs and write files | L | Known | Do not run; candidates for removal (D-07) |
 | KD-13 | Legacy docs (`api_reference.md`, `user_guide.md`, `installation.md`, `engineering_basis.md`, `risk_management.md`) partly describe pre-2026-10 behaviour | L | Known | Banners added; rewrite pending |
 | KD-14 | `member_design.py` (test-only) column capacity ignores axial load (CAL-LEG-01) | L | CONFIRMED_DEFECT | Do not use outside tests |

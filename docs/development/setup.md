@@ -7,7 +7,7 @@
 
 - Python 3.11–3.13 (pinned numpy 2.4.2 requires ≥ 3.11; the development machine used 3.13.7).
 - Git.
-- Optional: `ifcopenshell` for IFC import (`pip install ifcopenshell`; not in requirements).
+- `ifcopenshell` (IFC import/export) is installed from `requirements.txt` (Linux wheels need glibc ≥ 2.31).
 
 ## Install
 
@@ -16,7 +16,7 @@ git clone <repository-url>
 cd civil
 python -m venv .venv
 # Windows: .venv\Scripts\activate    Linux/macOS: source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements.txt   # includes ifcopenshell
 pip install pytest-cov            # optional, coverage (used by CI)
 ```
 

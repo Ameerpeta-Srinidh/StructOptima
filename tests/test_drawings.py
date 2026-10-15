@@ -138,3 +138,30 @@ def test_building_drawings_writes_no_files(res, tmp_path, monkeypatch):
     s = build_drawing_set(res.gm, res.beams, res.footings, PROJECT)
     sheets_to_zip(s)
     assert not list(tmp_path.iterdir())
+
+
+# ------------------------------------------------------------- IFC export --
+def test_ifc_export_roundtrip(res, tmp_path):
+    ifcopenshell = pytest.importorskip("ifcopenshell")
+    import ifcopenshell.util.element as ue
+    from src.bim_loader import BIMLoader
+    from src.ifc_exporter import export_ifc
+    p = tmp_path / "model.ifc"
+    p.write_bytes(export_ifc(res.gm, res.beams, res.footings, "Test"))
+    f = ifcopenshell.open(str(p))
+    n = res.gm.num_stories
+    assert len(f.by_type("IfcBuildingStorey")) == n
+    assert len(f.by_type("IfcColumn")) == len(res.gm.columns)
+    assert len(f.by_type("IfcBeam")) == len(res.beams) * n
+    assert len(f.by_type("IfcSlab")) == len(res.gm.slab_schedule) * n
+    assert len(f.by_type("IfcFooting")) == len(res.footings)
+    assert len(f.by_type("IfcWall")) == len(res.gm.walls) * n
+    marks = compute_marks(res.gm, res.beams, res.footings)
+    for el in f.by_type("IfcColumn"):
+        ps = ue.get_psets(el)["Pset_StructOptima"]
+        assert ps["Mark"] == marks.columns[el.Name] and ps["Status"] in ("PASS", "WARN", "FAIL")
+    gm2, beams2 = BIMLoader(str(p)).load_grid_manager()
+    assert gm2.num_stories == n and gm2.story_height_m == pytest.approx(res.gm.story_height_m)
+    assert len(gm2.columns) == len(res.gm.columns) and len(beams2) == len(res.beams)
+    assert sorted((c.width_nb, c.depth_nb) for c in gm2.columns) == \
+           sorted((c.width_nb, c.depth_nb) for c in res.gm.columns)

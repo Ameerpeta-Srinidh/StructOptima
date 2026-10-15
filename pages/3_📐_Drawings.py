@@ -90,6 +90,15 @@ with v_tab0:
                             f"{_sheets[_sel].number}.dxf", "application/dxf", key="dl_dwg_dxf")
         _d3.download_button("🗜️ All sheets (ZIP: PDF + DXF + SVG)", sheets_to_zip(_sheets), "StructOptima_Drawings.zip",
                             "application/zip", key="dl_dwg_zip")
+        try:
+            from src.ifc_exporter import export_ifc
+            if st.session_state.get('_ifc_key') != _key:
+                st.session_state['_ifc_bytes'] = export_ifc(_res.gm, _res.beams, _res.footings, project_name)
+                st.session_state['_ifc_key'] = _key
+            st.download_button("🧊 BIM model (IFC4) — open in any IFC viewer", st.session_state['_ifc_bytes'],
+                               "StructOptima_Model.ifc", "application/x-step", key="dl_ifc")
+        except ImportError:
+            st.caption("IFC export needs `ifcopenshell` (pip install ifcopenshell).")
         st.caption("Sheets: S-01 columns · S-02 footings · S-03 beams & slabs · S-04 sections · S-05 slab "
                    "reinforcement · S-06 footing sections (+ A/B continuation sheets). Marks (C1, B1, F1, S1) match "
                    "the Schedules page. DXF sheets are in paper millimetres (plot 1:1).")

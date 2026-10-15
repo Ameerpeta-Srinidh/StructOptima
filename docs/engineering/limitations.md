@@ -53,4 +53,4 @@
 ## Operational
 
 - The Drawings page writes DXF files into the current working directory each time it renders (overwrites tracked `Beam_Schedule.dxf` and `Foundation_Plan_Professional.dxf` when run from the repository root).
-- `ifcopenshell` is optional and not listed in `requirements.txt`.
+- IFC export places footings directly below the column base (founding level not designed) and uses one beam/slab layout for every storey.
