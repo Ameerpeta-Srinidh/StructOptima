@@ -17,6 +17,7 @@ certified analysis/design or code-compliance tool.
   (2D frames, load cases, combinations) → `fea_solver` → `rebar_detailer` →
   `section_design` (IS 456 section checks); plus `seismic`, `wind_load`,
   `foundation_eng`, `quantifier`, `report_gen`. Ingest: `cad_loader`/`cad_parser`, `bim_loader`.
+  Site drawings: `src/drawings/` (one primitive model rendered to PDF/DXF/SVG; marks shared with schedules).
 - Several modules are test-only or unused (e.g. `member_design`, `validators`,
   `structural_checks`, `auth`) — check `docs/architecture/module-catalogue.md`
   before assuming a module is in the production path.

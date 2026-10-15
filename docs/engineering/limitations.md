@@ -34,6 +34,13 @@
 - Drawings whose `$INSUNITS` disagree with the geometry are detected only when the resulting extent is outside 1–1000 m.
 - IFC: only rectangular extruded profiles; inclined beams skipped; storey heights averaged; one plan beam layout for all storeys.
 
+## Drawings
+
+- The drawing set shows designed sizes and bars only. Laps, curtailment, anchorage, corner torsion steel, PCC and
+  starter-bar details are typical notes, not designed. Beams carry the same bars at supports and mid-span.
+- One typical floor layout is drawn (the design uses one plan beam layout for all storeys).
+- DXF sheets are in paper millimetres (plot 1:1), not real-world coordinates.
+
 ## Quantities and costs
 
 - Estimates with fixed unit rates, allowances and nominal mix proportions; concrete overlaps (beam/slab/column) not deducted; BBS covers one typical floor.

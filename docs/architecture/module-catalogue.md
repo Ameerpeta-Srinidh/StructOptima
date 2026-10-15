@@ -76,7 +76,8 @@ Status key: **P** production · **C** CLI only · **T** tests/demos only · **U*
 | `bbs_module.py`, `bbs_report.py`, `bbs_utils.py` | P | Bar bending schedule (one typical floor) and PDF |
 | `report_gen.py` | P | PDF reports (full, summary, schedule, audit, floor, masonry) |
 | `exporters.py` | P | Excel export |
-| `dxf_exporter.py`, `geometry_exporter.py`, `visualizer.py`, `svg_viewer.py` | P | Drawings and 3D/2D views (not assessed) |
+| `drawings/` (package, 2026-10-16) | P | Site drawing set on A3 sheets: `primitives.py` (paper-mm primitives rendered to SVG, DXF via ezdxf, PDF via ReportLab), `sheet.py` (border, title block, grid bubbles, dimensions, tables, notes, auto plan scale), `marks.py` (C/B/F/S marks for identical members), `sheets.py` (S-01 columns, S-02 footings, S-03 beams & slabs, S-04 sections, S-05 slab reinforcement, S-06 footing sections, continuation sheets). API: `build_drawing_set`, `sheets_to_pdf`, `sheets_to_zip`, `compute_marks` |
+| `dxf_exporter.py`, `geometry_exporter.py`, `visualizer.py`, `svg_viewer.py` | P | Older DXF exports and 3D/2D views (not assessed) |
 | `quantity_takeoff.py` | T | Alternative BOQ module used only by tests/demos |
 
 ## UI / infrastructure / site tools

@@ -47,7 +47,7 @@ plus an inspectable 3D model. Research summary and licences: see the chat of 202
 (That Open Engine MIT + web-ifc MPL-2.0; ezdxf MIT with SVG/PDF backends since 1.1;
 ifcopenshell LGPL; three.js MIT; xeokit AGPL — avoid; Speckle — hosted, avoid).
 
-### Phase 1 — Site drawing set (no new dependency for DXF/SVG)
+### Phase 1 — Site drawing set (no new dependency for DXF/SVG) — DONE 2026-10-16 (RM-27); owner review of printed sheets pending
 
 **New package** `src/drawings/` (keep `dxf_exporter.py` until replaced):
 

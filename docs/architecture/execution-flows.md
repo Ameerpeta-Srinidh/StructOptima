@@ -85,6 +85,13 @@ design-status table (from `design_status/failures/messages` kwargs) before the
 existing sections. Drawings page writes DXF files into the current working
 directory on render (behaviour not changed).
 
+## 6a. Site drawing set (Drawings page, first tab)
+
+`pages/3_📐_Drawings.py` builds `src.drawings.build_drawing_set(res.gm, res.beams, res.footings, project)` once per
+design result (cached in session state), shows the selected sheet as a pan/zoom SVG, and offers the full PDF set,
+the selected sheet as DXF and a ZIP (PDF + DXF + SVG per sheet). Nothing is written to disk. Marks come from
+`compute_marks` and are also shown in the Schedules page tables.
+
 ## 7. Failure / degraded paths inside analysis
 
 | Situation | Behaviour | Where reported |

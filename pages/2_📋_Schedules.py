@@ -25,6 +25,15 @@ st.divider()
 gm = st.session_state.get('gm')
 footings = st.session_state.get('footings', {})
 beams = st.session_state.get('beams', [])
+# Member marks shared with the drawing set (src/drawings/marks.py)
+try:
+    from src.drawings import compute_marks as _compute_marks
+    _marks = _compute_marks(gm, beams, list(footings or [])) if gm is not None else None
+except Exception:
+    _marks = None
+if _marks is None:
+    from src.drawings.marks import Marks as _Marks
+    _marks = _Marks()
 level_0_cols = st.session_state.get('level_0_cols', [])
 fck = st.session_state.get('fck', 25)
 
@@ -100,6 +109,7 @@ if all_levels:
 
             data.append({
                 "ID": col.id,
+                "Mark": _marks.columns.get(col.id, ""),
                 "Size (mm)": f"{width:.0f}x{depth:.0f}",
                 "Load (kN)": f"{load:.1f}",
                 "Conc (m³)": f"{col_conc_vol:.2f}",
@@ -149,6 +159,7 @@ if hasattr(gm, 'beam_schedule') and gm.beam_schedule:
             bm_steel = getattr(b_info, 'weight_kg_per_m', 0.0) * bm_span
             row = {
                 "Beam ID": str(bid),
+                "Mark": _marks.beams.get(bid, ""),
                 "Size (mm)": f"{bm_w:.0f}x{bm_d:.0f}",
                 "Span (m)": f"{bm_span:.2f}",
                 "Conc (m³)": f"{bm_vol:.2f}",
@@ -200,6 +211,7 @@ if hasattr(gm, 'slab_schedule') and gm.slab_schedule:
         s_steel = getattr(s_info, 'weight_kg_per_m2', 0.0) * area
         slab_data.append({
             "Slab ID": str(sid),
+            "Mark": _marks.slabs.get(sid, ""),
             "Thickness (mm)": f"{thk:.0f}",
             "Area (m²)": f"{area:.2f}",
             "Conc (m³)": f"{s_vol:.2f}",

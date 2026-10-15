@@ -35,7 +35,64 @@ engineer_name = st.session_state.get('engineer_name', "STRUCTURAL ENGINEER")
 num_stories = gm.num_stories if gm else 1
 v_mode_str = st.session_state.get('view_mode', "Engineering")
 
-v_tab1, v_tab2, v_tab3 = st.tabs(["3D View", "2D Plan View", "Interactive CAD"])
+v_tab0, v_tab1, v_tab2, v_tab3 = st.tabs(["🗂️ Site Drawings (A3 set)", "3D View", "2D Plan View", "Interactive CAD"])
+
+with v_tab0:
+    _res = st.session_state.get('design_results')
+    if _res is None:
+        st.info("Run the analysis to generate the drawing set.")
+    else:
+        from src.drawings import build_drawing_set, sheets_to_pdf, sheets_to_zip
+
+        _project = {
+            "project": project_name,
+            "engineer": engineer_name,
+            "ref": st.session_state.get('drawing_ref', ''),
+            "date": datetime.date.today().isoformat(),
+            "status_line": f"DESIGN STATUS: {_res.status}",
+        }
+        _key = (id(_res), tuple(sorted(_project.items())))
+        if st.session_state.get('_drawing_set_key') != _key:
+            st.session_state['_drawing_set'] = build_drawing_set(_res.gm, _res.beams, _res.footings, _project)
+            st.session_state['_drawing_set_key'] = _key
+        _sheets = st.session_state['_drawing_set']
+
+        if _res.status != "PASS":
+            st.warning(f"Design status {_res.status}: members needing review are drawn in orange (WARN) / red (FAIL). "
+                       "Drawings are PRELIMINARY - NOT FOR CONSTRUCTION.")
+        _labels = [f"{s.number}  {s.title}" for s in _sheets]
+        _sel = st.selectbox("Sheet", range(len(_sheets)), format_func=lambda i: _labels[i], key="drawing_sheet_sel")
+        _svg = _sheets[_sel].drawing.to_svg()
+        components.html(f"""
+        <div id="wrap" style="width:100%;height:680px;overflow:hidden;border:1px solid #CBD5E1;border-radius:6px;
+             background:#F8FAFC;cursor:grab;position:relative">
+          <div id="pz" style="transform-origin:0 0;width:100%">{_svg.replace('width="420.0mm" height="297.0mm"', 'width="100%"')}</div>
+          <div style="position:absolute;right:8px;top:6px;font:12px sans-serif;color:#475569;background:#fff;
+               padding:2px 6px;border-radius:4px">Scroll to zoom · drag to pan · double-click to reset</div>
+        </div>
+        <script>
+          const w=document.getElementById('wrap'), p=document.getElementById('pz');
+          let s=1,x=0,y=0,drag=false,sx=0,sy=0;
+          const ap=()=>{{p.style.transform=`translate(${{x}}px,${{y}}px) scale(${{s}})`;}};
+          w.addEventListener('wheel',e=>{{e.preventDefault();const r=w.getBoundingClientRect();
+            const mx=e.clientX-r.left,my=e.clientY-r.top,k=e.deltaY<0?1.15:1/1.15;
+            const ns=Math.min(12,Math.max(0.5,s*k));x=mx-(mx-x)*ns/s;y=my-(my-y)*ns/s;s=ns;ap();}},{{passive:false}});
+          w.addEventListener('mousedown',e=>{{drag=true;sx=e.clientX-x;sy=e.clientY-y;w.style.cursor='grabbing';}});
+          window.addEventListener('mouseup',()=>{{drag=false;w.style.cursor='grab';}});
+          window.addEventListener('mousemove',e=>{{if(drag){{x=e.clientX-sx;y=e.clientY-sy;ap();}}}});
+          w.addEventListener('dblclick',()=>{{s=1;x=0;y=0;ap();}});
+        </script>""", height=700)
+
+        _d1, _d2, _d3 = st.columns(3)
+        _d1.download_button("📕 Full drawing set (PDF, A3)", sheets_to_pdf(_sheets), "StructOptima_Drawings.pdf",
+                            "application/pdf", key="dl_dwg_pdf")
+        _d2.download_button(f"📐 {_sheets[_sel].number} (DXF)", _sheets[_sel].drawing.to_dxf_bytes(),
+                            f"{_sheets[_sel].number}.dxf", "application/dxf", key="dl_dwg_dxf")
+        _d3.download_button("🗜️ All sheets (ZIP: PDF + DXF + SVG)", sheets_to_zip(_sheets), "StructOptima_Drawings.zip",
+                            "application/zip", key="dl_dwg_zip")
+        st.caption("Sheets: S-01 columns · S-02 footings · S-03 beams & slabs · S-04 sections · S-05 slab "
+                   "reinforcement · S-06 footing sections (+ A/B continuation sheets). Marks (C1, B1, F1, S1) match "
+                   "the Schedules page. DXF sheets are in paper millimetres (plot 1:1).")
 
 with v_tab1:
     if gm and all_beams:

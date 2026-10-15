@@ -52,6 +52,7 @@ the CLI (`main.py`), with PDF reports, Excel and DXF exports.
 | Staircase flight, isolated square footings with reinforcement | Footing sizing ignores base moments (warning) |
 | SCWB, joint shear, ductile tie spacing from designed members | Advisory; IS 13920 confinement not designed |
 | Design status and issue list shown in UI and PDF | PDFs marked "PRELIMINARY — NOT FOR CONSTRUCTION" |
+| Site drawing set (A3): column, footing, beam & slab layouts, sections, slab reinforcement, footing sections with schedules | PDF, DXF, SVG, ZIP from the Drawings page; laps/curtailment are typical notes |
 | Quantities, cost, carbon, BBS, masonry/plaster/paint estimates | Estimates with fixed rates |
 | Indicative column optimiser | Requires re-analysis before use |
 
@@ -165,7 +166,7 @@ PYTHONDONTWRITEBYTECODE=1 python -m pytest tests -p no:cacheprovider -q
 python -m pytest tests --cov=src --cov-report=term-missing
 ```
 
-Last recorded run (2026-10-16, Python 3.13.7): **494 passed, 3 skipped, 0 failed**.
+Last recorded run (2026-10-16, Python 3.13.7): **504 passed, 3 skipped, 0 failed**.
 Passing tests show the code behaves as tested; they are not proof of
 engineering correctness. Evidence per calculation:
 [docs/verification/verification-matrix.md](docs/verification/verification-matrix.md).

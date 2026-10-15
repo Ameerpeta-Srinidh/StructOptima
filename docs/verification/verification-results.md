@@ -12,7 +12,8 @@ evidence of engineering correctness beyond the stated reference cases.
 |---|---|---|
 | Baseline before changes | `pytest tests -p no:cacheprovider --ignore=tests/test_fea_repro.py` | 413 passed, **2 failed** (`test_beam_placer.py` depth tests expecting L/15 while code uses L/12, L/10 since commit "FIX 8"), 3 skipped |
 | After remediation (final) | `pytest tests -p no:cacheprovider` | **493 passed, 3 skipped, 0 failed** (≈ 22–33 s) |
-| After N13 fix (2026-10-16) | same | **494 passed, 3 skipped, 0 failed** (≈ 63 s; heavier, corrected loads make column design try more bar arrangements) |
+| After N13 fix (2026-10-16) | same | **494 passed, 3 skipped, 0 failed** (≈ 63 s; one run, later runs ≈ 22 s) |
+| After drawing set (2026-10-16) | same | **504 passed, 3 skipped, 0 failed** (≈ 22 s) |
 
 Skipped: `test_beam_placer.py::test_with_auto_framer` (local `complex_villa.dxf` yields no columns), two `test_column_editor.py` tests (no removable column in the layout).
 
@@ -71,6 +72,13 @@ one-way shear).
 | Headless UI (`AppTest`): dashboard + 5 pages after an analysis | no exceptions |
 | DXF sweep: 84 repository DXFs, auto-frame fallback, 2 storeys, 4 iterations | 0 crashes; 2 graceful input errors (empty / circles only); statuses: 55 WARN, 27 FAIL. FAIL causes: "Seismic method" (irregular plans), columns not converged within 4 iterations, 2 unstable frames in one plan, beams in two large plans |
 | Performance: G+7, 12×12 m, zone V | 1.8 s (was 127 s before memoising/vectorising interaction curves) |
+
+## 5a. Drawing set visual review (2026-10-16)
+
+Sheets for an 18 × 12 m G+1 building with a staircase void and a 40 × 30 m G+2 building were rendered to PNG
+(pypdfium2, scratch directory) and reviewed by the developer: grid bubbles, dimension chains, marks, schedules,
+void marking, sections (1:10 / 1:20) and footing sections are legible; fixes applied after review (dimension
+offsets, void cross, slab label overlap, top-bar labels, section scale). **Owner/site-engineer review pending.**
 
 ## 6. Side-effect incident during testing
 
