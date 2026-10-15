@@ -50,8 +50,10 @@ _local/       git-ignored: personal scripts and old outputs moved out of the roo
 - D-16: **automatic column enlargement for drift is approved**. The drift limit values (0.004 h, H/500) are still
   awaiting confirmation against the printed standards.
 - D-07: clean-up approved and done.
-- Commit messages carry no AI co-author lines. This was applied to the whole history at the owner's request, and
-  `main` was force-pushed.
+- Commit messages carry no AI co-author lines from 2026-10-16 on. The owner asked for the line to be removed from the
+  two older commits as well (`fix: remediate audit findings …` and `docs: add manual calculation walkthrough …`).
+  That needs a history rewrite and a force-push, which the tool's permission system blocked. It is **pending** the
+  owner allowing it (see the session notes).
 
 ### Tests run
 - `PYTHONDONTWRITEBYTECODE=1 python -m pytest tests -p no:cacheprovider -q -rs` → **520 passed, 3 skipped, 0 failed**.
