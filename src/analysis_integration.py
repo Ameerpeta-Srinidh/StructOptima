@@ -149,6 +149,14 @@ def _beam_pts(b: StructuralMember):
     return (b.start_point.x, b.start_point.y), (b.end_point.x, b.end_point.y)
 
 
+def web_self_weight_kn_m(bm: StructuralMember, t_slab_m: float, adjacent_extra_kn_m2: float = 0.0) -> float:
+    """Beam web below the occupancy slab, b (D - t) 25, less the half beam width of each adjacent panel designed
+    thicker than that slab (its extra dead load is already counted to the beam centre line, finding N46)."""
+    b = bm.properties.width_mm / 1000.0
+    web = b * max(bm.properties.depth_mm / 1000.0 - t_slab_m, 0.0) * 25.0
+    return max(web - 0.5 * b * adjacent_extra_kn_m2, 0.0)
+
+
 def beam_slab_coefficients(gm: GridManager, beams: List[StructuralMember], return_extra: bool = False):
     """Equivalent-UDL width k (m) per beam such that beam UDL = k x area load.
 
@@ -160,10 +168,14 @@ def beam_slab_coefficients(gm: GridManager, beams: List[StructuralMember], retur
 
     With ``return_extra=True`` also returns {beam id: sum(k x extra dead
     load)} for panels designed thicker than the occupancy slab (finding N13),
-    taken on the same governing side as k.
+    taken on the same governing side as k, and {beam id: sum of the extra
+    dead load (kN/m2) of the panels on that side}: the extra slab is counted
+    to the beam centre line, so b/2 of it per panel lies over the web
+    (finding N46).
     """
     sides_k: Dict[str, Dict[tuple, float]] = {b.id: {} for b in beams}
     sides_ke: Dict[str, Dict[tuple, float]] = {b.id: {} for b in beams}
+    sides_e: Dict[str, Dict[tuple, float]] = {b.id: {} for b in beams}
     panel_extra = gm.panel_extra_dead_kn_m2()
     for p in gm.slab_panels():
         extra = panel_extra.get((p["i"], p["j"]), 0.0)
@@ -192,14 +204,16 @@ def beam_slab_coefficients(gm: GridManager, beams: List[StructuralMember], retur
                 if ov > 0 and ov >= 0.5 * min(side_len, blen):
                     sides_k[bm.id][key] = sides_k[bm.id].get(key, 0.0) + k
                     sides_ke[bm.id][key] = sides_ke[bm.id].get(key, 0.0) + k * extra
+                    sides_e[bm.id][key] = sides_e[bm.id].get(key, 0.0) + extra
     out = {bid: (max(d.values()) if d else 0.0) for bid, d in sides_k.items()}
-    out_extra = {}
+    out_extra, out_over = {}, {}
     for bid, d in sides_k.items():
         if d:
             key = max(d, key=d.get)
             out_extra[bid] = sides_ke[bid].get(key, 0.0)
+            out_over[bid] = sides_e[bid].get(key, 0.0)
         else:
-            out_extra[bid] = 0.0
+            out_extra[bid] = out_over[bid] = 0.0
 
     # cantilever beams (one end beyond the grid extents)
     xs, ys = sorted(gm.x_grid_lines), sorted(gm.y_grid_lines)
@@ -221,7 +235,7 @@ def beam_slab_coefficients(gm: GridManager, beams: List[StructuralMember], retur
             hi = (grid[idx + 1] - grid[idx]) / 2.0 if idx < len(grid) - 1 else 0.0
             out[bm.id] = lo + hi
             out_extra[bm.id] = 0.0
-    return (out, out_extra) if return_extra else out
+    return (out, out_extra, out_over) if return_extra else out
 
 
 def beam_wall_loads(gm: GridManager, beams: List[StructuralMember], messages: List[str]) -> Dict[str, float]:
@@ -317,12 +331,12 @@ def update_structural_analysis(gm: GridManager, beams: List[StructuralMember], f
 
     valid_beams = [b for b in beams if b.end_point is not None
                    and math.hypot(b.end_point.x - b.start_point.x, b.end_point.y - b.start_point.y) > 1e-3]
-    k_slab, k_extra = beam_slab_coefficients(gm, valid_beams, return_extra=True)
+    k_slab, k_extra, k_over = beam_slab_coefficients(gm, valid_beams, return_extra=True)
     wall_line = beam_wall_loads(gm, valid_beams, summary.messages)
 
     def beam_case_loads(bm: StructuralMember, level: int) -> Tuple[float, float]:
         roof = level == N
-        sw = bm.properties.width_mm / 1000.0 * max(bm.properties.depth_mm / 1000.0 - t_slab, 0.0) * 25.0
+        sw = web_self_weight_kn_m(bm, t_slab, k_over.get(bm.id, 0.0))
         wall = wall_line.get(bm.id, 0.0) * (0.33 if roof else 1.0)
         dl = k_slab.get(bm.id, 0.0) * (q["rd"] if roof else q["fd"]) + k_extra.get(bm.id, 0.0) + wall + sw
         ll = k_slab.get(bm.id, 0.0) * (q["rl"] if roof else q["fl"])

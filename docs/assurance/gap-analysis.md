@@ -89,6 +89,16 @@ coded.
 | 3D viewer / walk-through | Implemented (RM-31) |
 | P2–P8 | Open |
 
+## 6a. Progress (2026-10-20)
+
+| Item | State |
+|---|---|
+| §2 Indian Standards / WI-10, WI-11 | Code values compared with the printed standards supplied by the owner (IS 456, 1893, 13920, 875, 1786, NBC Part 4, SP 16): [../verification/standards-check-2026-10-20.md](../verification/standards-check-2026-10-20.md); 30+ corrections (RM-35) |
+| §3 independent verification / WI-12 | SP 16 tables and Examples 1, 2, 3, 6, 9, 10 reproduced; hand checks of the 3D model; reviewer still needed |
+| §4 analysis / WI-6, WI-14 | Response spectrum on a rigid-diaphragm 3D model with design eccentricity, torsional irregularity and modal regularity (RM-36, D-26); flexible diaphragms, P-Δ, effective length (WI-7) still open |
+| §6 lateral system | OMRF not allowed in Zones III–V; IS 13920 grade, steel, column geometry, axial stress, hooks, spacing checked; Ash / capacity shear still open (WI-13) |
+| Durability / fire | Exposure and NBC type of construction inputs; covers, grade and fire ratings per IS 456 / NBC (D-21, D-22) |
+
 ## 7. Work paused by this analysis (superseded)
 
 The browser 3D viewer / walkthrough (visuals phases 3–4, D-15) is user-experience work (mandate priority 8). Its

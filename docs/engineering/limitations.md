@@ -32,7 +32,17 @@
 
 ## Ingest
 
-- DXF: columns are closed LWPOLYLINE / POLYLINE outlines or circles on layers whose name contains a whole word COL, COLS, COLUMN, PILLAR … (annotation words such as IDEN, TEXT, TAG, DIM, HATCH exclude a layer), directly or inside blocks; beams are LINE / polyline centre lines on BEAM / GIRDER layers. Plans in blocks are exploded; unbound xrefs are reported. Grid lines within 150 mm are merged; beam ends within half a column + 150 mm of a column are moved to its centre; drawings are moved to the origin. Circular columns become equal-area squares (warned). Beam sizes are not read (initial 300 × 600). Wall detection by layer keywords with fallbacks that can pick up non-structural lines (warned). Auto-framing assumes drawings in millimetres.
+- DXF (since 2026-10-20, D-28): each layer's role is suggested from its name and from what is drawn on it, and the
+  engineer confirms or corrects it on the Setup page. Columns must still be closed outlines or circles (columns drawn
+  as four separate lines, hatches or blocks of text are not read). On "decide by shape" layers, single-line walls are
+  not recognised (walls need two faces) and a door leaf drawn along a wall face can appear as a short wall. Column
+  sizes written as text (e.g. "C1 300x450") are not read; the drawn outline is used and differences from the design
+  are reported.
+- DXF geometry rules: plans in blocks are exploded; unbound xrefs are reported. Grid lines within 150 mm are merged;
+  beam ends within half a column + 150 mm of a column are moved to its centre; drawings are moved to the origin.
+  Circular columns become equal-area squares (warned). Beam sizes are not read (initial 300 × 600). When no layer is
+  recognised as walls, lines of unrecognised layers are used as walls (warned). Auto-framing assumes drawings in
+  millimetres.
 - Drawings whose `$INSUNITS` disagree with the geometry are detected only when the resulting extent is outside 1–1000 m.
 - IFC: only rectangular extruded profiles; inclined beams skipped; storey heights averaged; one plan beam layout for all storeys.
 
@@ -57,3 +67,7 @@
 - Site Tools results are arithmetic on the design or on data you enter (approved mix, cube results, sensor records, survey); StructOptima does not judge acceptance, damage or repairs.
 - The 3D viewer shows the designed members as boxes (no openings, reinforcement or stairs; no collision in walk-through).
 - IFC export places footings directly below the column base (founding level not designed) and uses one beam/slab layout for every storey.
+- Wall columns (D-29): a column is "in a wall line" only where the model has a wall through its centre (generated
+  perimeter walls, DXF walls, or interior walls when selected). Orientation at wall junctions is balanced by count
+  between x and y, not optimised for torsion; 230 mm columns are weak in bending, so the advisory SCWB check of
+  OMRF frames shows many joints below 1.4.

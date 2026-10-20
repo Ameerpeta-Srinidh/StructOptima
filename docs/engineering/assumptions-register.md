@@ -17,7 +17,8 @@ remain **UNVERIFIED** until reviewed by a qualified engineer.
 | A-FEA-01 | 2D frames on grid lines; storey forces shared by each frame's condensed lateral stiffness (rigid diaphragm in translation, slab links) since 2026-10-20; no torsion | `update_structural_analysis` | Unconservative for torsionally irregular plans |
 | A-FEA-02 | Cracked modifiers 0.70 (columns) / 0.35 (beams) applied to all load cases when enabled (default on) | | |
 | A-FEA-03 | Beam self-weight uses web below slab b·(D − t) | | Slab counted over full panel |
-| A-SEI-01 | Equivalent static method only | `seismic.py` | FAIL wherever IS 1893 7.7.1 requires dynamic analysis (all but regular < 15 m in Zone II) |
+| A-SEI-01 | Response spectrum on a rigid-diaphragm 3D model for every building; floor mass centre and rotational inertia from the slab panels; centre of resistance from frame storey stiffness under the static pattern | `pseudo3d.py` | D-26; flexible diaphragms → WARN |
+| A-SEI-06 | Soft storey when computed storey stiffness is > 10 % below the storey above | `design_pipeline` | D-27 (approved) |
 | A-SEI-02 | With masonry infill the shorter of 0.075h^0.75 and 0.09h/√d (d = larger plan dimension) is used | `calculate_base_shear` | Shorter period → equal or larger Sa |
 | A-SEI-03 | R = 3 (OMRF) default; SMRF R = 5 only on user selection with warning | | Decision D-02 |
 | A-SEI-04 | Importance factor defaults by occupancy (1.0–1.5) | `importance_for_occupancy` | Decision D-03 |
@@ -29,7 +30,8 @@ remain **UNVERIFIED** until reviewed by a qualified engineer.
 | A-BEM-01 | Rectangular beams (no T/L flange action); shear pt = min(top, bottom) | `detail_beam` | Conservative |
 | A-BEM-02 | Basic span/d limits without modification factors produce WARN only | `detail_beam` | |
 | A-COL-01 | Project minimum 8 bars ≥ 16 mm; ties 150 mm at level 0 | `detail_column` | Practice rule retained |
-| A-COL-02 | Project minimum column 300×450; interior > 400 kN → 400×600 (initial sizing) | `optimize_column_sizes` | Practice rule retained |
+| A-COL-02 | Project minimum column 300×450; interior > 400 kN → 400×600 (initial sizing) | `optimize_column_sizes` | Practice rule retained; except D-29 wall columns |
+| A-COL-03 | Residential columns in 230 mm wall lines: 230 × (450-900) mm, Zone II OMRF only; wall line = wall ≥ 200 mm with centre line within 120 mm of the column centre; junction orientation balanced between x and y | `design_pipeline.apply_wall_width_columns` | D-29 |
 | A-SLB-01 | One-way slabs: wl²/8 at span and supports | `detail_slab` | Conservative |
 | A-STR-01 | Stair flight spans going + 2 × 1.2 m landings, simply supported | `detail_staircase` | |
 | A-FND-01 | Area sizing uses P_service × 1.1 (self-weight + backfill) | `design_footing` | |

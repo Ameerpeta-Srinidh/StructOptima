@@ -18,9 +18,10 @@ certified analysis/design or code-compliance tool.
 - All design orchestration goes through `src/design_pipeline.py::run_design`, which
   returns `DesignResults.status` and `failures` — the single source of design status.
 - Core chain: `grid_manager` (model, service-load takedown) → `analysis_integration`
-  (2D frames, load cases, combinations) → `fea_solver` → `rebar_detailer` →
+  (2D frames, load cases, combinations; `pseudo3d` rigid-diaphragm 3D model for the response spectrum and
+  torsion) → `fea_solver` → `rebar_detailer` →
   `section_design` (IS 456 section checks); plus `seismic`, `wind_load`,
-  `foundation_eng`, `quantifier`, `report_gen`. Ingest: `cad_loader`/`cad_parser`, `bim_loader`.
+  `foundation_eng`, `durability` (covers / grade / fire), `quantifier`, `report_gen`. Ingest: `cad_loader`/`cad_parser`, `bim_loader`.
   Site drawings: `src/drawings/` (one primitive model rendered to PDF/DXF/SVG; marks shared with schedules).
   3D viewer: `src/viewer_model.py` + `components/viewer3d` (edit `src/main.js`, run `npm run build`, commit
   `dist/viewer.js` — Streamlit Cloud does not run npm).
@@ -89,6 +90,9 @@ When implementation changes, update the affected documents in the same change:
 `docs/verification/*` (test inventory, verification matrix, results with date),
 `docs/assurance/*` (risk register, known defects, decision log, remediation log).
 Label decisions as PROPOSED unless the user approved them.
+**Formula document (owner instruction 2026-10-20):** after every check or modification, update
+`docs/formulas/StructOptima-Formulas.tex` — a dated entry at the top of the revision history, the affected
+section, `\lastupdated` — then run `docs/formulas/build.sh` and commit the `.tex` and the `.pdf` together.
 
 ## Final response requirements
 

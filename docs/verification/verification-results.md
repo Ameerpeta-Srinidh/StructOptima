@@ -20,6 +20,8 @@ evidence of engineering correctness beyond the stated reference cases.
 | After the UI restructure (2026-10-20) | same | **545 passed, 3 skipped, 0 failed** (≈ 24 s) |
 | After the standards check and DXF / analysis fixes (2026-10-20) | same | **763 passed, 3 skipped, 0 failed** (≈ 30 s) |
 | After the response spectrum analysis (2026-10-20) | same | **774 passed, 3 skipped, 0 failed** (≈ 33 s) |
+| After N46, D-29 wall columns and the beam-width check (2026-10-20) | same | **809 passed, 3 skipped, 0 failed** (≈ 35 s); 92-drawing sweep: 0 crashes |
+| After the DXF layer reading and the worked hand check (2026-10-20) | same | **798 passed, 3 skipped, 0 failed** (≈ 34 s); 92-drawing DXF sweep: same columns, beams and status for every file as before |
 
 Skipped: `test_beam_placer.py::test_with_auto_framer` (local `complex_villa.dxf` yields no columns), two `test_column_editor.py` tests (no removable column in the layout).
 

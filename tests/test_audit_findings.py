@@ -460,17 +460,24 @@ def test_N13_dead_load_uses_designed_slab_thickness():
     assert all(s.thickness_mm == 185 for s in gm.slab_schedule.values())
     # interior beam B_H_3: k = 2 x 4/3 (two square panels)
     b = next(x for x in res.beams if x.id == "B_H_3")
-    web = b.properties.width_mm / 1000 * (b.properties.depth_mm / 1000 - 0.125) * 25
+    # N46: the extra slab runs to the beam centre line, so b/2 x extra per adjacent panel is taken off the web
+    def web_of(x, n_panels):
+        return x.properties.width_mm / 1000 * ((x.properties.depth_mm / 1000 - 0.125) * 25 - n_panels * 0.5 * extra)
+    web = web_of(b, 2)
     k = 8 / 3
     assert b.service_udl_kn_m == pytest.approx(k * (6.125 + extra) + web + k * 2.0, rel=1e-6)
     # interior column C5 at the base: 16 m2 x extra on each of 2 floors more than the 125 mm takedown
     c5 = next(c for c in gm.columns if c.id == "C5_L0")
-    beam_webs = 4 * 0.5 * 4 * web
+    beam_webs = 4 * 0.5 * 4 * web                      # the four beams framing into C5 are interior (2 panels)
     col_sw = 0.3 * 0.45 * 3.5 * 25
     hand_dl = 16 * (4.625 + extra) + beam_webs + col_sw + 16 * (6.125 + extra) + beam_webs + col_sw
     assert c5.load_dl_kn == pytest.approx(hand_dl, rel=1e-6)
     # seismic weight: hand storey weights incl. the extra slab weight (64 m2 per level)
-    webs = sum(x.properties.width_mm / 1000 * (x.properties.depth_mm / 1000 - 0.125) * 25 * 4 for x in res.beams)
+    def n_adj(x):                                       # beams on the interior grid line 4 m carry two panels
+        mid = ((x.start_point.x + x.end_point.x) / 2, (x.start_point.y + x.end_point.y) / 2)
+        on = mid[1] if abs(x.start_point.y - x.end_point.y) < 1e-6 else mid[0]
+        return 2 if abs(on - 4.0) < 1e-6 else 1
+    webs = sum(web_of(x, n_adj(x)) * 4 for x in res.beams)
     walls = sum(w.length_m * w.line_load_kn_m for w in gm.walls)
     cols = 9 * col_sw
     w1 = 64 * (6.125 + extra) + webs + walls + cols + 64 * 2.0 * 0.25

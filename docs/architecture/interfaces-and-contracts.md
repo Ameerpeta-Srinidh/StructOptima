@@ -44,13 +44,27 @@ Added 2026-10-16:
 
 ## Analysis
 
-`update_structural_analysis(gm, beams, fck, use_cracked_sections, fixed_base, lateral) -> AnalysisSummary`
+`CADParser(path, layer_map=None, layer_roles=None)`, `CADLoader(path, layer_roles=None)` (2026-10-20): `layer_roles` maps
+layer name -> "column" / "beam" / "wall" / "mixed" / "ignore" as confirmed by the engineer (layers not listed are
+ignored; no wall guessing); None uses `dxf_layers.analyse_layers`. The loader fills `GridManager.drawn_column_sizes_mm`
+("x,y" -> drawn mm) for explicit columns; `run_design` adds a "Drawing vs design" WARN where the design differs.
+
+`update_structural_analysis(gm, beams, fck, use_cracked_sections, fixed_base, lateral, seismic=None) -> AnalysisSummary`
 - Reads `gm` service intensities (falls back to residential defaults with a message).
 - `lateral`: `LateralLoads(eq_x, eq_y, wl_x, wl_y)` whole-building storey forces at levels 1..N (kN).
 - Writes beam envelopes and column `design_forces`; resets previous values first.
 - `AnalysisSummary` additions (2026-10-16): `storey_drift[case][level] = (drift m, storey height m, column id)` for
   EQX/EQY/WLX/WLY (largest ratio over all columns and frames), `top_displacement[case] = (m, column id)`,
   `columns_one_plane[column id] = missing plane ("XZ"/"YZ")`.
+- `seismic`: `SeismicSpec(method, floors, static_forces, vb_static, ah_of_t, extent_x, extent_y)` (2026-10-20). When given
+  and the floors are restrained in rotation, the EQX / EQY forces on every frame (both planes) come from
+  `pseudo3d.design_direction` (response spectrum, scaling, design eccentricity) and the wind forces are applied at
+  the plan centre of the 3D model; otherwise translation-only sharing of `lateral`.
+- `AnalysisSummary.lateral_shares[case][frame key]` (forces per level on each frame) and
+  `AnalysisSummary.seismic_design` (`"X"` / `"Y"`: `pseudo3d.DirectionResult`; `"modes"`; `"regularity"`;
+  `"model"`).
+- `SeismicAnalysisResult.method_used` and `.dynamic` (periods, modal mass, VB static / dynamic / design, scale
+  factor, torsion ratio, storey forces per direction) are filled by `run_design`.
 
 `FrameSolver2D` contract: gravity UDL positive = global −Y; `solve_cases` returns
 `{}` and sets `status` to `UNSTABLE` / `SINGULAR` / `EMPTY` when the model cannot

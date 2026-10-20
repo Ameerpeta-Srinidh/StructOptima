@@ -210,16 +210,23 @@ class StabilityChecker:
         depth_mm: float,
         cover_mm: float = 40,
         rating: Optional[FireRating] = None,
+        wall_dir: Optional[str] = None,
     ) -> Tuple[bool, bool, str]:
         """
-        Check column fire resistance per IS 456 Fig. 1 (fully exposed) and Table 16A.
-        
+        Check column fire resistance per IS 456 Fig. 1 and Table 16A. Free-standing columns: "fully exposed", least
+        dimension. Columns built into a wall line (``wall_dir`` "x" / "y"): "50 % exposed", the dimension along
+        the wall (Fig. 1 sketch).
+
         Returns:
             (dimension_ok, cover_ok, remarks)
         """
         fr = FIRE_RESISTANCE_TABLE[rating or self.fire_rating]
         min_dim = min(width_mm, depth_mm)
         req_dim = fr.min_column_width_mm
+        if wall_dir in ("x", "y"):
+            from .durability import FIG1_MIN
+            min_dim = width_mm if wall_dir == "x" else depth_mm
+            req_dim = FIG1_MIN[float(fr.fire_rating.value)][3]
         req_cover = fr.min_cover_column_mm
         
         dim_ok = min_dim >= req_dim
@@ -227,7 +234,8 @@ class StabilityChecker:
         
         remarks = []
         if not dim_ok:
-            remarks.append(f"Min width {req_dim}mm required for {fr.fire_rating.value}hr rating (IS 456 Fig. 1)")
+            where = "along the wall, 50 % exposed" if wall_dir in ("x", "y") else "fully exposed"
+            remarks.append(f"Min width {req_dim}mm ({where}) required for {fr.fire_rating.value}hr rating (IS 456 Fig. 1)")
         if not cover_ok:
             remarks.append(f"Min cover {req_cover}mm required for {fr.fire_rating.value}hr rating (IS 456 Table 16A)")
         
@@ -285,6 +293,7 @@ class StabilityChecker:
         height_mm: float,
         cover_mm: float = 40,
         rating: Optional[FireRating] = None,
+        wall_dir: Optional[str] = None,
     ) -> StabilityCheck:
         """Full stability and fire check for a column."""
         rating = rating or self.fire_rating
@@ -296,7 +305,7 @@ class StabilityChecker:
         
         # Fire
         dim_ok, cover_ok, remarks = self.check_fire_resistance_column(
-            width_mm, depth_mm, cover_mm, rating
+            width_mm, depth_mm, cover_mm, rating, wall_dir=wall_dir
         )
         
         return StabilityCheck(
@@ -389,6 +398,7 @@ class StabilityChecker:
                 height_mm,
                 cover_mm=column_cover_mm,  # clear cover used by rebar_detailer
                 rating=self._rating(self.req.column_fire_hours(more_than_one)),
+                wall_dir=getattr(col, "wall_dir", None),
             )
             results.append(check)
             if not (check.is_stable and check.is_fire_safe):

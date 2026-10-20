@@ -1,0 +1,686 @@
+% StructOptima - formulas, decisions and edge cases, as implemented.
+% Compile: docs/formulas/build.sh   (tectonic; or pdflatex twice)
+% RULE: after every check or modification of the code, add a dated entry to the revision history (Section 0)
+% and update the affected section, then recompile and commit the PDF.
+\documentclass[10pt,a4paper]{article}
+\usepackage[margin=18mm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs,longtable,array,tabularx}
+\usepackage[table]{xcolor}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{fancyhdr}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,urlcolor=blue!50!black}
+\setlist{nosep,leftmargin=*}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{4pt}
+\renewcommand{\arraystretch}{1.25}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcommand{\lastupdated}{20 October 2026 (evening)}  % change on every amendment
+\newcommand{\code}[1]{\texttt{\small #1}}
+\newcommand{\status}[1]{\textbf{\small[#1]}}
+\newcommand{\fck}{f_{ck}}
+\newcommand{\fy}{f_{y}}
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{\small StructOptima --- formulas, decisions and edge cases}
+\rhead{\small Last updated \lastupdated}
+\cfoot{\small \thepage}
+
+\title{\textbf{StructOptima}\\[4pt]\large Formulas, decisions and edge cases --- as implemented}
+\author{Srinidh Ameerpeta \& Charan Tej}
+\date{Last updated: \lastupdated}
+
+\begin{document}
+\maketitle
+
+\begin{center}
+\fbox{\parbox{0.92\textwidth}{\small\textbf{Preliminary design aid.} Every value below is what the code computes.
+Code values were compared with the printed standards on 20 October 2026 (evidence:
+\code{docs/verification/standards-check-2026-10-20.md}); that comparison is not an engineer's verification of any
+design. Every output must be checked by a licensed structural engineer before construction.}}
+\end{center}
+
+\tableofcontents
+\newpage
+
+%==================================================================================================================
+\section*{0\quad Revision history}
+\addcontentsline{toc}{section}{0\quad Revision history}
+Newest first. Ids point to the records in \code{docs/assurance/} (N = finding, D = decision, RM = remediation).
+
+\begin{longtable}{L{22mm}L{142mm}}
+\toprule
+\textbf{Date} & \textbf{Change} \\ \midrule \endhead
+20 Oct 2026 (evening) & D-28 and the N46 fix approved by the owner. \textbf{N46 fixed:} the half beam width of each
+adjacent thicker panel is taken off the beam web (beam loads, column takedown, seismic weight; Section 4).
+\textbf{D-29 (owner request):} columns in 230 mm wall lines get a 230 mm side, within the code limits (Section 7.3).
+New check: beam wider than the column it frames into. Appendix A values updated (W, $V_B$, B5, C5, footing).
+Tests 809 passed. \\
+20 Oct 2026 (later) & Appendix A: worked hand check of \code{complex\_house.dxf} (locked by
+\code{test\_hand\_check\_complex\_house.py}); all values agree with the printed formulas. Findings: beams are designed
+for their worst floor (now stated in Section 8); 0.5 kN/m of slab over beams counted twice (N46, conservative, fix
+PROPOSED); drawn column sizes and room labels outside the building were not reported. \textbf{DXF reading (D-28,
+proposed):} layer roles from names and drawn shapes, editable on the Setup page with a plan preview; plinth / lintel
+layers ignored; drawn-vs-designed WARN; labels outside the structure reported (Section~\ref{sec:dxf}). Tests 798
+passed; 92-drawing sweep unchanged. \\
+20 Oct 2026 & D-27 approved by the owner (soft-storey tolerance 10\,\%). All documentation updated for the dynamic
+analysis. This document created. \\
+20 Oct 2026 & \textbf{Dynamic analysis} (RM-36, D-26): response spectrum method (IS 1893 7.7.5) on a rigid-diaphragm 3D
+model with design eccentricity (7.8.2), torsional irregularity (Table 5(i) Amd 2), irregular modes (Table 6(vii)
+Amd 2), soft storey with the 0.2\,\% drift limit; ``Seismic method'' FAIL replaced by WARNs naming what the model
+cannot do. CI installs \code{pypdfium2}. \\
+20 Oct 2026 & \textbf{Standards check} (RM-35, N29--N45) against the printed IS 456, IS 1893 (Part 1):2016 (Amd 1, 2),
+IS 13920:2016 (Amd 1, 2), IS 875 (Parts 1--3), IS 1786, NBC 2016 Part 4 and SP 16: static spectrum (S1), minimum
+$V_B$ (S3), 2016 method rule (S4), OMRF in Zones III--V (S2), soft storey / mass irregularity / floating columns
+(S5--S7), IS 13920 joint factor and breadth, roof SCWB, grade, steel, column geometry and axial stress, hooks, spacing
+(J1--J9), Table 26 case 4 (T1), Table 19 M15 (T2), exposure and fire (D1, F1, F2), office load (L1), wind $k_2$ and
+$h/w\ge 6$ (W1, W2), rigid-diaphragm load sharing (A1), DXF import (X1--X4), audit placeholder (P1), quick reference
+(Q1). Decisions D-21, D-22, D-24, D-25 approved. \\
+20 Oct 2026 & \textbf{UI restructure} (RM-34, D-20): seven pages, inputs kept across pages, out-of-date results
+flagged; display defects N23--N26 (footing punching always ``OK'', header status, slab status, stale results). \\
+16 Oct 2026 & Storey drift (N16), no simulated outputs (N14, N15), status semantics (N17), confirmed site inputs
+(N18), drawing set, IFC export, 3D viewer, repository clean-up (D-07), automatic column growth for drift (D-16). \\
+15 Oct 2026 & Audit and remediation of findings R1--R27, N1--N13: single design pipeline, combinations on 2D frames,
+P--M column design, status aggregation. \\
+\bottomrule
+\end{longtable}
+
+%==================================================================================================================
+\section{Conventions}
+\begin{itemize}
+\item Units: kN, m, s for loads, geometry and analysis; mm for section dimensions; N/mm$^2$ for stresses.
+\item $E_c = 5000\sqrt{\fck}$ N/mm$^2$ (IS 456 6.2.3.1); $E_s = 200$ kN/mm$^2$ (5.6.3); $g = 9.81$ m/s$^2$.
+\item Loads on columns (\code{load\_kn}) are \emph{service} loads; analysis envelopes and design forces are
+\emph{factored}.
+\item Status of every check: \textbf{FAIL} (not acceptable as is), \textbf{WARN} (needs an engineer's review),
+\textbf{PASS} (only the implemented checks passed --- never ``verified''). The building status is the worst item.
+\end{itemize}
+
+%==================================================================================================================
+\section{Inputs, defaults and decisions}
+\subsection{Inputs (Setup page)}
+\begin{longtable}{L{44mm}L{40mm}L{76mm}}
+\toprule \textbf{Input} & \textbf{Default} & \textbf{Notes} \\ \midrule \endhead
+Geometry & manual 18\,m $\times$ 12\,m, 2 storeys $\times$ 3.5\,m & or DXF / IFC (Section~\ref{sec:dxf}) \\
+Occupancy & Residential & imposed loads, Table~\ref{tab:loads} \\
+SBC & \textbf{none --- required} & from the geotechnical report; sizes every footing \\
+Seismic zone / soil & III / II & site confirmation is cleared when any site parameter changes \\
+Structural system & OMRF ($R=3$) & OMRF is a FAIL in Zones III--V (IS 1893 Table 9 Note 1) \\
+Importance factor $I$ & by occupancy & Table 8; 1.2 for $>200$ occupants is the engineer's input \\
+Wind zone / terrain & 2 / 2 & IS 875-3 \\
+Concrete / steel & M25 / Fe415 & \\
+Exposure condition & Moderate (D-21) & IS 456 Table 3 $\Rightarrow$ covers, minimum grade \\
+NBC type of construction & Type 2 (D-22) & NBC 2016 Part 4 Table 1 $\Rightarrow$ fire ratings \\
+Cracked sections & on & off gives a WARN (IS 1893 6.4.3.1) \\
+Fixed bases & on & pinned bases often create a soft ground storey \\
+\bottomrule
+\end{longtable}
+
+\subsection{Decisions}
+\begin{longtable}{L{12mm}L{114mm}L{34mm}}
+\toprule \textbf{Id} & \textbf{Decision} & \textbf{Status} \\ \midrule \endhead
+D-02 & OMRF default; SMRF on user selection with warning & superseded in Zones III--V by Table 9 Note 1 \\
+D-03 & Importance factor defaults by occupancy & proposed (checked against Table 8) \\
+D-04 & Effective length $l_e = 1.0\,l$ (Annex E not implemented) & open --- engineer to decide \\
+D-07 & Repository clean-up & approved 16 Oct \\
+D-16 & Automatic column growth when EQ drift fails & approved 16 Oct \\
+D-20 & UI on Streamlit with seven pages & approved 20 Oct \\
+D-21 & Exposure input, default Moderate; covers $=\max$(Table 16, Table 16A) & approved 20 Oct \\
+D-22 & NBC type of construction input, default Type 2 & approved 20 Oct \\
+D-24 & Office imposed load 4.0 kN/m$^2$ (no separate storage) & approved 20 Oct \\
+D-25 & Lateral sharing by condensed frame stiffness with slab links & approved 20 Oct \\
+D-26 & Response spectrum on a rigid-diaphragm 3D model for every building; what the model cannot represent is a WARN
+with the external check named & approved 20 Oct \\
+D-27 & Soft storey when computed stiffness is $>10\,\%$ below the storey above & approved 20 Oct \\
+D-28 & DXF layer roles from the layer name and the drawn shapes; engineer confirms on Setup; plinth / lintel layers
+ignored by default; drawn-vs-designed columns and labels outside the structure reported & approved 20 Oct \\
+D-29 & Residential columns in 230 mm wall lines: 230 mm side across the wall, within IS 13920 7.1.1 (Zone II OMRF only),
+IS 456 Fig.~1 (50\,\% exposed) and 32.1 (long side $\le900$) & requested by the owner 20 Oct \\
+\bottomrule
+\end{longtable}
+
+%==================================================================================================================
+\section{Geometry}
+\begin{itemize}
+\item \textbf{Bays (manual input):} $n=\max(1,\lceil L/5\rceil)$; if $L/n<3$ reduce $n$ while $L/(n-1)\le 5$; grid
+lines at $iL/n$ (project practice, not a code rule).
+\item \textbf{Tributary area:} $A=(\tfrac12 l_\text{left}+\tfrac12 l_\text{right})(\tfrac12 l_\text{below}+\tfrac12
+l_\text{above})$; staircase void corners lose $\tfrac14$ bay and get 15 kN/m$^2$ $\times$ lost area (80\,\% DL,
+20\,\% LL).
+\item \textbf{Slab panels:} a bay is a panel if it is not a void and has columns at its four corners or its centre is
+enclosed by walls/beams on four sides; discontinuous edges from neighbouring panels.
+\end{itemize}
+
+%==================================================================================================================
+\section{Loads}
+\subsection{Occupancy (IS 875 Parts 1 and 2)}\label{tab:loads}
+\begin{longtable}{L{36mm}rrrrrrr}
+\toprule \textbf{Occupancy} & \textbf{LL} & \textbf{Roof} & \textbf{Corridor} & \textbf{Finish} & \textbf{Partition}
+& \textbf{Services} & $t$ (mm) \\ \midrule \endhead
+Residential & 2.0 & 1.5 & 3.0 & 1.0 & 1.5 & 0.5 & 125 \\
+Commercial (Office) & 4.0 & 1.5 & 4.0 & 1.0 & 1.0 & 1.0 & 150 \\
+Commercial (Retail) & 4.0 & 1.5 & 5.0 & 1.5 & 0.5 & 1.0 & 150 \\
+Institutional & 3.0 & 1.5 & 4.0 & 1.0 & 1.0 & 1.5 & 150 \\
+Assembly Hall & 5.0 & 1.5 & 5.0 & 1.5 & 0.5 & 2.0 & 175 \\
+\bottomrule
+\end{longtable}
+kN/m$^2$. Office 4.0 = IS 875-2 Table 1 v)(b) ``without separate storage'' (2.5 with storage) --- D-24.
+The corridor value is used for the staircase only; corridors and balconies on the floors carry the floor load
+(gap --- IS 875-2 gives them higher values).
+
+\begin{align*}
+q_{DL,\text{floor}} &= 25t + \text{finish} + \text{partition} + \text{services}, &
+q_{DL,\text{roof}} &= 25t + \text{finish} + \text{services}
+\end{align*}
+Panels designed thicker than the occupancy slab add $25(t_\text{designed}-t)$.
+
+\textbf{Walls:} $w = t\,h\,(1-\text{openings})\,\gamma$, $\gamma = 19.2$ (brick; IS 875-1: 18.85, conservative),
+7.5 (AAC), 25 (RCC) kN/m$^3$; $h = h_\text{storey} - 0.125 - 0.400$ m; openings 0.33 default.
+
+\textbf{Column takedown (service, cumulative from the roof):} $DL = A q_{DL} + $ panel extras $+$ cantilever $+$
+walls ($\tfrac12$ to each end column; parapet $0.33\times$ storey wall) $+ \tfrac12$ beam webs $b(D-t)25L$ $+$ column
+self-weight $bDh\cdot25$ $+$ stair; $LL = A q_{LL}+\dots$ Ground-storey walls go to the footing (plinth).
+
+\textbf{Beam UDL from slabs:} two-way ($l_y/l_x\le2$): short-edge beam $k=l_x/3$, long-edge beam
+$k=\frac{l_x}{6}\left(3-(l_x/l_y)^2\right)$; one-way: $l_x/2$ on long edges; $w = kq + $ walls $+$ web, with
+\[
+\text{web}=b(D-t)\,25-\sum_{\text{adjacent panels}}\frac b2\,25\,(t_\text{panel}-t)\qquad(\text{N46, fixed 20 Oct 2026})
+\]
+because the extra thickness of a panel designed thicker than the occupancy slab $t$ is already counted up to the beam
+centre line. The same web is used in the column takedown and the seismic weight.
+
+\subsection{Seismic weight (IS 1893 7.3, 7.4, Table 10)}
+\[
+W_j = A q_{DL} + \text{webs} + \tfrac12(\text{walls}+\text{columns})_\text{below}+\tfrac12(\dots)_\text{above}
++ A\,q_{LL}\,f,\qquad f=\begin{cases}0.25 & q_{LL}\le3\\0.50 & q_{LL}>3\\0 & \text{roof}\end{cases}
+\]
+
+\subsection{Combinations (IS 456 Table 18, IS 1893 6.3.2.1)}
+$1.5(DL+LL)$; $1.2(DL+LL\pm WL)$; $1.5(DL\pm WL)$; $0.9DL\pm1.5WL$; $1.2(DL+LL\pm EL)$; $1.5(DL\pm EL)$;
+$0.9DL\pm1.5EL$, each direction separately (orthogonal frames). Not used: $100+30\,\%$ (6.3.2.2, non-orthogonal
+systems), vertical EQ (6.3.3.1).
+
+%==================================================================================================================
+\section{Structural analysis}
+\subsection{Plane frames}
+Frames on every grid line (XZ at constant $y$, YZ at constant $x$); 6$\times$6 plane frame elements
+($EA/L$, $12EI/L^3$, $6EI/L^2$, $4EI/L$, $2EI/L$). Cracked stiffness (IS 1893 6.4.3.1): $0.70I_g$ columns,
+$0.35I_g$ beams. Nodes of a floor not connected by a beam are tied by axially rigid links ($A=10$ m$^2$,
+$I\approx0$) representing the slab in its plane. Mechanism: free DOF with $K_{ii}<10^{-9}$ $\Rightarrow$ UNSTABLE;
+$\mathrm{cond}>10^{12}$ $\Rightarrow$ SINGULAR; beams then use $wL^2/8$.
+
+\subsection{Condensed lateral stiffness and the 3D model}
+Each frame is solved for a unit horizontal load at each floor: flexibility $\mathbf F_f$, stiffness
+$\mathbf K_f=\mathbf F_f^{-1}$ ($N\times N$). Floor DOFs $(u_x,u_y,\theta)$ about the origin:
+\[
+u_{f,i}=u_{x,i}-y_f\theta_i\ (\text{XZ}),\qquad u_{f,i}=u_{y,i}+x_f\theta_i\ (\text{YZ}),\qquad
+\mathbf K_3=\sum_f \mathbf T_f^{\mathsf T}\mathbf K_f\mathbf T_f .
+\]
+Frame forces under floor loads $\mathbf F$: $\mathbf f_f=\mathbf K_f\mathbf T_f\mathbf K_3^{-1}\mathbf F$. If
+$\mathbf K_3$ is not positive definite (fewer than two frame lines in a direction) the storey forces are shared in
+translation only ($\sum\mathbf K_f\,\mathbf u=\mathbf F$) and a WARN is given.
+
+\textbf{Mass:} per floor $m=W/g$ at the slab-panel centroid $(x_{cm},y_{cm})$, rotational inertia $m r^2$,
+\[
+r^2=\frac{\sum A_p\left[(x_p-x_{cm})^2+(y_p-y_{cm})^2+(a_p^2+b_p^2)/12\right]}{\sum A_p}.
+\]
+
+\subsection{Static seismic forces (IS 1893 6.4.2(a), 7.2, 7.6)}
+\[
+A_h=\frac{Z}{2}\,\frac{I}{R}\,\frac{S_a}{g},\qquad
+\frac{S_a}{g}=\begin{cases}2.5 & 0<T\le T_1\\ N/T & T_1<T\le4\\ c & T>4\end{cases}
+\quad (T_1,N,c)=\begin{cases}(0.40,1.00,0.25)& \text{soil I}\\(0.55,1.36,0.34)&\text{II}\\(0.67,1.67,0.42)&\text{III}\end{cases}
+\]
+$Z = 0.10,0.16,0.24,0.36$ (Zones II--V); $R=3$ (OMRF), 5 (SMRF).
+\[
+T_a=0.075h^{0.75}\ (\text{bare});\quad T_a=\min\!\left(0.075h^{0.75},\ 0.09h/\sqrt d\right)\ (\text{infill, 7.6.2.1}),
+\ d=\text{larger plan dimension}
+\]
+\[
+V_B=\max(A_h,\rho)\,W,\quad \rho=0.7,1.1,1.6,2.4\,\%\ (\text{Table 7}),\qquad
+Q_i=V_B\frac{W_ih_i^2}{\sum W_jh_j^2}\ (7.6.3).
+\]
+
+\subsection{Response spectrum method (IS 1893 7.7.5) --- used for every building (D-26)}
+\begin{align*}
+&\mathbf K_3\boldsymbol\phi=\omega^2\mathbf M\boldsymbol\phi, \qquad
+\Gamma_k=\frac{\boldsymbol\phi_k^{\mathsf T}\mathbf M\mathbf r}{\boldsymbol\phi_k^{\mathsf T}\mathbf M\boldsymbol\phi_k},
+\qquad M_{\text{eff},k}=\frac{(\boldsymbol\phi_k^{\mathsf T}\mathbf M\mathbf r)^2}{\boldsymbol\phi_k^{\mathsf T}\mathbf M\boldsymbol\phi_k}\\
+&A_k=\frac Z2\frac IR\frac{S_a}{g}(T_k)\ \text{with}\ \frac{S_a}{g}=1+15T\ (T<0.10\,\text{s}),\ \text{then as above}
+\ (6.4.2(b))\\
+&\mathbf F_k=\mathbf M\boldsymbol\phi_k\Gamma_kA_kg,\qquad \mathbf U_k=\boldsymbol\phi_k\Gamma_kA_kg/\omega_k^2
+\end{align*}
+All modes are combined; the number needed for 90\,\% of the mass is reported (7.7.5.2). Storey shears of every frame
+and of the building are combined by CQC (7.7.5.3, $\zeta=0.05$):
+\[
+\lambda=\sqrt{\sum_i\sum_j\lambda_i\rho_{ij}\lambda_j},\qquad
+\rho_{ij}=\frac{8\zeta^2(1+\beta)\beta^{1.5}}{(1-\beta^2)^2+4\zeta^2\beta(1+\beta)^2},\ \beta=\omega_j/\omega_i;
+\qquad F_i=V_i-V_{i+1}.
+\]
+Scaling (7.7.3): forces $\times\max(1,\ \bar V_B/V_B^{\text{dyn}})$ per direction, $\bar V_B$ = static base shear
+with $T_a$ (including Table 7). Displacements are taken from the scaled forces (conservative; Amd 2 allows
+unscaled).
+
+\subsection{Torsion --- design eccentricity (IS 1893 7.8.2)}
+$e_s=$ centre of mass $-$ centre of resistance; the centre of resistance at each floor is the stiffness-weighted
+position of the frames, with storey stiffness $k=V/\delta$ of each frame under the static force pattern.
+\[
+e_d=1.5e_s+0.05b\quad\text{or}\quad e_d=e_s-0.05b\quad(\text{more severe}),\qquad b=\text{plan dimension}\perp\text{force}.
+\]
+Static method: force at $x_{cm}/y_{cm}+\Delta$ with $\Delta=0.5e_s+0.05b\,s$ or $-0.05b\,s$, $s=\mathrm{sign}(e_s)$.
+Response spectrum: $e_s$ is in the dynamic model; the additional torsion $F_i\Delta$ is added. Each frame takes the
+more severe case; torsion loads the frames of the other direction too (column axial forces from both planes).
+
+\subsection{Drift (IS 1893 7.11.1.1, IS 456 20.5)}
+Per column of every frame under the unfactored design forces: $\delta/h\le0.004$ (EQ, FAIL; all column stacks grow
+one size and the design repeats --- D-16); wind top sway $\le H/500$ (WARN).
+
+\subsection{Irregularities (IS 1893 Tables 5, 6 with Amendment 2)}
+\begin{longtable}{L{38mm}L{126mm}}
+\toprule \textbf{Check} & \textbf{Rule and result} \\ \midrule \endhead
+Torsional (5(i)) & $\Delta_\text{max}/\Delta_\text{ave}$ of total displacements at the plan ends (static forces with
+$e_d$). $>1.4$ FAIL (revise configuration); 1.2--1.4: FAIL unless the first torsional period is below the first X and Y
+periods, else WARN. \\
+Re-entrant corner (5(ii)) & projection $>15\,\%$ (estimated $\sqrt{\text{bbox}-\text{footprint}}$): WARN --- needs a
+flexible-diaphragm 3D analysis (not in StructOptima). \\
+Openings (5(iii)) & $>50\,\%$: WARN, flexible diaphragm. \\
+Soft storey (6(i)) & storey stiffness $k_i=V_i/\delta_i$ more than 10\,\% below $k_{i+1}$ (D-27): WARN if drift
+$\le0.2\,\%$ in that storey and below (dynamic analysis performed), else FAIL. \\
+Mass (6(ii)) & $W_i>1.5W_{i-1}$: handled by the dynamic analysis. \\
+Floating column (6(vi)) & FAIL (not permitted when part of the lateral system). \\
+Irregular modes (6(vii)) & first three modes $<65\,\%$ mass in a direction: FAIL; Zones IV/V: $|T_{1x}-T_{1y}|<0.1\max$
+: FAIL. \\
+Method (7.7.1) & static method only for regular buildings $<15$ m in Zone II; dynamic analysis is always performed. \\
+Structural system (Table 9 Note 1) & OMRF in Zones III--V: FAIL. \\
+\bottomrule
+\end{longtable}
+
+%==================================================================================================================
+\section{Wind (IS 875 Part 3:2015)}
+$V_z=V_bk_1k_2k_3$, $V_b=33,39,44,47,50,55$ m/s (zones 1--6), $k_1=k_3=1$, $k_2$ from Table 2 (linear
+interpolation; 10 m value below 10 m); $p_z=0.6V_z^2$ N/m$^2$; $K_d=K_a=K_c=1$ (conservative).
+Storey force $F=p_z(C_{pe,ww}+|C_{pe,lw}|)B\,h_\text{trib}$, $C_{pe,ww}=0.8$, $C_{pe,lw}=-0.3/-0.4/-0.5/-0.6$ for
+$h/b\le0.5/1/2/>2$; applied at the plan centre of the 3D model. $h/w\ge6$: FAIL (Table 5 gives up to $+0.95/-1.85$).
+Overturning: stable if $0.9W\,B/2>1.5\sum F z$.
+
+\begin{longtable}{rrrrr}
+\toprule $z$ (m) & TC1 & TC2 & TC3 & TC4 \\ \midrule \endhead
+10 & 1.05 & 1.00 & 0.91 & 0.80 \\ 15 & 1.09 & 1.05 & 0.97 & 0.80 \\ 20 & 1.12 & 1.07 & 1.01 & 0.80 \\
+30 & 1.15 & 1.12 & 1.06 & 0.97 \\ 50 & 1.20 & 1.17 & 1.12 & 1.10 \\ 100 & 1.26 & 1.24 & 1.20 & 1.20 \\
+150 & 1.30 & 1.28 & 1.24 & 1.24 \\ 200 & 1.32 & 1.30 & 1.27 & 1.27 \\ 250 & 1.34 & 1.32 & 1.29 & 1.28 \\
+300 & 1.35 & 1.34 & 1.31 & 1.30 \\ 350 & 1.35 & 1.35 & 1.32 & 1.31 \\ 400 & 1.35 & 1.35 & 1.34 & 1.32 \\
+450 & 1.35 & 1.35 & 1.35 & 1.33 \\ 500 & 1.35 & 1.35 & 1.35 & 1.34 \\ \bottomrule
+\end{longtable}
+
+%==================================================================================================================
+\section{Section design (IS 456:2000)}
+\subsection{Flexure}
+\[
+\frac{x_{u,\max}}{d}=0.53,\ 0.48,\ 0.46\ (\text{Fe250, 415, 500}),\qquad
+M_{u,\lim}=0.36\fck b d^2 k(1-0.42k),\ k=\frac{x_{u,\max}}d
+\]
+\[
+p_t=50\frac{\fck}{\fy}\left(1-\sqrt{1-\frac{4.598R}{\fck}}\right),\ R=\frac{M_u}{bd^2};\qquad
+A_{s,\min}=\frac{0.85bd}{\fy};\ A_{s,\max}=0.04bD.
+\]
+Doubly reinforced ($M_u>M_{u,\lim}$):
+\begin{align*}
+A_{st1}&=\frac{0.36\fck b\,x_{u,\max}}{0.87\fy}, &
+\varepsilon_{sc}&=0.0035\left(1-\frac{d'}{x_{u,\max}}\right),\\
+A_{sc}&=\frac{M_u-M_{u,\lim}}{(f_{sc}-0.446\fck)(d-d')}, &
+A_{st2}&=\frac{A_{sc}(f_{sc}-0.446\fck)}{0.87\fy}.
+\end{align*}
+\begin{itemize}
+\item Concrete: parabola--rectangle, peak $0.446\fck$, $\varepsilon_0=0.002$, $\varepsilon_{cu}=0.0035$.
+\item Cold-worked steel (SP 16 1.4): stress $0.80$, $0.85$, $0.90$, $0.95$, $0.975$, $1.00\,f_{yd}$ at inelastic
+strain $0$, $0.0001$, $0.0003$, $0.0007$, $0.0010$, $0.0020$.
+\end{itemize}
+
+\subsection{Shear (IS 456 40, 26.5.1.5, 26.5.1.6)}
+$\tau_v=V_u/(bd)$; $\tau_v>\tau_{c,\max}\Rightarrow$ FAIL;
+$s=\min\!\left(\frac{0.87f_yA_{sv}d}{(\tau_v-\tau_c)bd},\ \frac{0.87f_yA_{sv}}{0.4b},\ 0.75d,\ 300\right)$,
+$f_y\le415$ for stirrups; $s<75$ mm $\Rightarrow$ FAIL.
+
+\begin{longtable}{rrrrrrr}
+\toprule $p_t$ & M15 & M20 & M25 & M30 & M35 & M40+ \\ \midrule \endhead
+$\le$0.15 & .28 & .28 & .29 & .29 & .29 & .30 \\ 0.25 & .35 & .36 & .36 & .37 & .37 & .38 \\
+0.50 & .46 & .48 & .49 & .50 & .50 & .51 \\ 0.75 & .54 & .56 & .57 & .59 & .59 & .60 \\
+1.00 & .60 & .62 & .64 & .66 & .67 & .68 \\ 1.25 & .64 & .67 & .70 & .71 & .73 & .74 \\
+1.50 & .68 & .72 & .74 & .76 & .78 & .79 \\ 1.75 & .71 & .75 & .78 & .80 & .82 & .84 \\
+2.00 & .71 & .79 & .82 & .84 & .86 & .88 \\ 2.25 & .71 & .81 & .85 & .88 & .90 & .92 \\
+2.50 & .71 & .82 & .88 & .91 & .93 & .95 \\ 2.75 & .71 & .82 & .90 & .94 & .96 & .98 \\
+$\ge$3.00 & .71 & .82 & .92 & .96 & .99 & 1.01 \\ \midrule
+$\tau_{c,\max}$ & 2.5 & 2.8 & 3.1 & 3.5 & 3.7 & 4.0 \\ \bottomrule
+\end{longtable}
+IS 456 Tables 19, 20 (N/mm$^2$), linear interpolation; grades between columns use the lower column.
+
+\subsection{Columns (IS 456 25, 39)}
+\[
+e_\text{min}=\frac{l}{500}+\frac D{30}\ge20\ \text{mm (one axis at a time)},\qquad
+P_{uz}=0.45\fck A_c+0.75\fy A_{sc},
+\]
+\[
+\alpha_n=\begin{cases}1 & P_u/P_{uz}\le0.2\\[2pt] 1+\dfrac{P_u/P_{uz}-0.2}{0.6} & 0.2<P_u/P_{uz}<0.8\\[6pt]
+2 & P_u/P_{uz}\ge0.8\end{cases}
+\]
+\[
+\left(\frac{M_{ux}}{M_{ux1}}\right)^{\alpha_n}+\left(\frac{M_{uy}}{M_{uy1}}\right)^{\alpha_n}\le1,\qquad
+M_a=\frac{P_uD}{2000}\left(\frac{l_e}{D}\right)^2\ \text{for } l_e/D>12\ (k=1),\ l_e=1.0\,l\ (\text{D-04}).
+\]
+$M_{u1}$ from strain-compatibility interaction curves (120 fibres; neutral axis outside the section: 0.002 at
+$3h/7$). Steel 0.8--4\,\% (IS 456 allows 6\,\%); $\ge8$ bars, $\phi\ge16$; ties: pitch $\le\min(b,D,16\phi,300)$,
+150 mm at the ground storey (project rule); $\phi_\text{tie}\ge\max(\phi/4,6)$.
+
+\textbf{Starting sizes:} at least $300\times450$ (project rule), $400\times600$ for interior columns over 400 kN;
+300 mm minimum in Zones III--V (IS 13920 7.1.1). Failing stacks grow one preferred size
+(230, 300, 350, 380, 400, 450, 500, \dots).
+
+\textbf{Columns matching 230 mm walls (D-29, residential, on by default, Setup $\rightarrow$ Materials):}
+\begin{itemize}
+\item only in Zone II with OMRF: IS 13920:2016 1.1.1 makes it mandatory in Zones III--V and 7.1.1 requires
+$\ge\max(300,\ 20d_b)$; SMRF relies on IS 13920 detailing;
+\item only columns standing in a full-brick wall line (wall $\ge200$ mm, centre line within 120 mm of the column centre):
+side across the wall $=230$ mm, side along the wall $L$ from $1.5P\le0.4\fck(0.992A_g)+0.67\fy(0.008A_g)$, rounded up
+to a preferred size, $450\le L\le900$ mm (IS 456 32.1: longer than $4\times230$ is a wall);
+\item where walls meet, the long side goes to the direction with fewer long sides so far (balanced stiffness);
+\item growth: along the wall up to 900 mm; when bending about the 230 side governs
+($M_{uy}/M_{uy1}>M_{ux}/M_{ux1}$ for a wall along $x$) or beyond 900, both sides grow and the column is reported
+``Column wider than wall'';
+\item beams framing into a 230 side are made 230 wide (depth $\le750$); a deeper (300 wide) beam widens the column;
+\item fire: IS 456 Fig.~1 \emph{50\,\% exposed} with the dimension along the wall (2 h: 200 mm); free-standing columns
+\emph{fully exposed} (2 h: 300 mm).
+\end{itemize}
+\textbf{Beam wider than column} (all designs): WARN when a beam is wider than the column side across it.
+
+%==================================================================================================================
+\section{Members}
+\begin{itemize}
+\item \textbf{Beams:} one design per plan beam for the worst floor (every floor shows the same values);
+$d=D-c-8-\phi/2$ ($c$ from exposure/fire); faces designed for sagging/hogging envelopes; FAIL if
+$>4\,\%$ per face or $>2$ layers; depth grows by 50 mm (from $\max(L/12,300)$) while FAIL or $\rho>2.5\,\%$, up to
+1200 mm; width 300 when $D>750$; WARN if $L/d>20$ (simply supported) / 26 (continuous). DXF beams start at
+300$\times$600 (no size in plan drawings).
+\item \textbf{Slabs:} $t=\max\left(\lceil(l_x/26+c')/5\rceil5,\ 125,\ t_\text{occ}\right)$ with $c'=\max(30,c_\text{slab}+10)$;
+two-way: $M=\alpha w l_x^2$ with IS 456 Table 26 (case by discontinuous short / long edges, $l_y/l_x\in[1,2]$);
+one-way ($l_y/l_x>2$): $wl^2/8$; $w=1.5(25t+SDL+LL)$; steel $\ge0.12\,\%$, spacing $\le\min(3d,300)$.
+\item \textbf{Staircase:} dog-legged flight, waist $\ge\max(\text{span}/25,150)$,
+$w=25t\sqrt{R^2+T^2}/T+25R/2+LL+FF$, $M_u=1.5wL^2/8$.
+\item \textbf{Footings:} side $=\sqrt{1.1P/\text{SBC}}\ge1.5$ m ($P\le400$) / 2.0 m; FAIL $>10$ m; thickness from
+300/350 mm in 50 mm steps until punching at $d/2$ ($\tau\le k_s0.25\sqrt{\fck}$, $k_s=0.5+\beta_c\le1$), bending at
+the column face and one-way shear at $d$ pass; $d=t-c-12$, $c\ge50$; steel $\ge0.12\,\%$; WARN if $e=M/P>B/6$ or
+edge pressure $>$ SBC (sizing uses axial load).
+\end{itemize}
+
+\begin{longtable}{c L{45mm} *{8}{r} r r}
+\toprule \textbf{Case} & \textbf{Panel} & 1.0 & 1.1 & 1.2 & 1.3 & 1.4 & 1.5 & 1.75 & 2.0 & $\alpha_y^-$ & $\alpha_y^+$ \\
+\midrule \endhead
+1 & Interior $-$ / $+$ & .032 & .037 & .043 & .047 & .051 & .053 & .060 & .065 & .032 & .024 \\
+ & & .024 & .028 & .032 & .036 & .039 & .041 & .045 & .049 & & \\
+2 & One short edge discont. & .037 & .043 & .048 & .051 & .055 & .057 & .064 & .068 & .037 & .028 \\
+ & & .028 & .032 & .036 & .039 & .041 & .044 & .048 & .052 & & \\
+3 & One long edge discont. & .037 & .044 & .052 & .057 & .063 & .067 & .077 & .085 & .037 & .028 \\
+ & & .028 & .033 & .039 & .044 & .047 & .051 & .059 & .065 & & \\
+4 & Two adjacent edges & .047 & .053 & .060 & .065 & .071 & .075 & .084 & .091 & .047 & .035 \\
+ & & .035 & .040 & .045 & .049 & .053 & .056 & .063 & .069 & & \\
+5 & Two short edges & .045 & .049 & .052 & .056 & .059 & .060 & .065 & .069 & -- & .035 \\
+ & & .035 & .037 & .040 & .043 & .044 & .045 & .049 & .052 & & \\
+6 & Two long edges ($+$ only) & .035 & .043 & .051 & .057 & .063 & .068 & .080 & .088 & .045 & .035 \\
+7 & Three edges, long cont. & .057 & .064 & .071 & .076 & .080 & .084 & .091 & .097 & -- & .043 \\
+ & & .043 & .048 & .053 & .057 & .060 & .064 & .069 & .073 & & \\
+8 & Three edges, short cont. ($+$) & .043 & .051 & .059 & .065 & .071 & .076 & .087 & .096 & .057 & .043 \\
+9 & Four edges ($+$) & .056 & .064 & .072 & .079 & .085 & .089 & .100 & .107 & -- & .056 \\
+\bottomrule
+\end{longtable}
+IS 456 Table 26, short-span coefficients by $l_y/l_x$ (first row negative, second positive) and long-span
+coefficients. Case 4 $\alpha_y^-=0.047$ (corrected 20 Oct 2026, was 0.045).
+
+%==================================================================================================================
+\section{Ductile design checks (IS 13920:2016, Amendments 1 and 2)}
+Applied in Zones III--V and wherever SMRF is selected.
+\begin{longtable}{L{38mm}L{126mm}}
+\toprule \textbf{Clause} & \textbf{Rule} \\ \midrule \endhead
+5.2 & minimum M20; M25 for buildings $>15$ m in Zones III--V (FAIL) \\
+5.3.1 (Amd 2) & elongation $\ge14.5\,\%$, $1.15\le TS/YS\le1.25$, grades 415/500/550 (WARN: use D-grade bars, mill
+certificates; plain Fe 500 has 12\,\%) \\
+7.1 (Amd 2) & factored axial stress under EQ combinations $\le0.40\fck$ (FAIL) \\
+7.1.1, 7.1.2 (Amd 1) & column least dimension $\ge\max(300,\ 20\phi_\text{beam,max})$; $b/D\ge0.4$ (FAIL) \\
+7.2.1, 7.2.1.3 & $\sum M_c\ge1.4\sum M_b$; roof joints checked up to 4 storeys; FAIL for SMRF, WARN for OMRF \\
+9.1.1, 9.1.2 (Amd 2) & $\tau_{jc}=k\sqrt{\fck}$, $k=1.5/1.2/1.0$ for beams on 4/3/other faces;
+$A_{ej}=b_jh_c$, $b_j=\min(b_b,\ b_c+0.5h_c)$ if $b_c<b_b$, else $\min(b_c,\ b_b+0.5h_c)$ (second form not printed in
+full --- UNVERIFIED, conservative); demand $1.25f_y(A_{st,top}+A_{st,bot})$ \\
+6.3.5 (Amd 1) & beam end zone $2d$: $s\le\min(d/4,\ 6\phi,\ 100)$ \\
+7.6.1 & column $l_o=\max(D,\ l/6,\ 450)$, $s\le\min(b/4,\ 6\phi,\ 100)$ (stricter than Amd 1's $6\phi$) \\
+3.5, 6.3.1 (Amd 1, 2) & 135$^\circ$ hook extension $8\phi\ge75$ mm \\
+7.6.1(c) & $A_{sh}$ --- \textbf{not designed} \\
+\bottomrule
+\end{longtable}
+
+%==================================================================================================================
+\section{Durability and fire}
+\begin{longtable}{L{30mm}rrrrr}
+\toprule & Mild & Moderate & Severe & Very severe & Extreme \\ \midrule \endhead
+Cover, Table 16 (mm) & 20 & 30 & 45 & 50 & 75 \\
+Minimum grade, Table 5 & M20 & M25 & M30 & M35 & M40 \\
+Max free w/c & 0.55 & 0.50 & 0.45 & 0.45 & 0.40 \\
+Min cement (kg/m$^3$) & 300 & 300 & 320 & 340 & 360 \\ \bottomrule
+\end{longtable}
+Severe / very severe with M35+: $-5$ mm (Table 16 Note 3).
+
+\begin{longtable}{L{30mm}rrrr}
+\toprule NBC Table 1 (min) & Type 1 & Type 2 & Type 3 & Type 4 \\ \midrule \endhead
+Columns supporting $>1$ floor & 240 & 120 & 120 & 120 \\
+One floor / roof only & 180 & 90 & 60 & 60 \\
+Floors & 120 & 90 & 60 & 60 \\ \bottomrule
+\end{longtable}
+
+\begin{longtable}{rrrrrrrr}
+\toprule Hours & Beam $b$ & Slab $D$ & Column (full) & Beam cover SS/cont & Slab cover SS/cont & Column cover \\
+\midrule \endhead
+0.5 & 200 & 75 & 150 & 20/20 & 20/20 & 40 \\ 1 & 200 & 95 & 200 & 20/20 & 20/20 & 40 \\
+1.5 & 200 & 110 & 250 & 20/20 & 25/20 & 40 \\ 2 & 200 & 125 & 300 & 40/30 & 35/25 & 40 \\
+3 & 240 & 150 & 400 & 60/40 & 45/35 & 40 \\ 4 & 280 & 170 & 450 & 70/50 & 55/45 & 40 \\ \bottomrule
+\end{longtable}
+IS 456 Fig.~1 and Table 16A (mm). Covers used: beams $\max$(Table 16, Table 16A continuous); slabs $\max$(Table 16,
+Table 16A simply supported); columns $\max$(Table 16, 40); footings $\max$(Table 16, 50). Fire or slenderness
+failures are FAIL (column $l/D\le60$; beam $L/b\le\min(60,250b/D)$).
+
+%==================================================================================================================
+\section{DXF import rules and edge cases}\label{sec:dxf}
+\subsection{What each layer holds (since 20 Oct 2026, D-28)}
+Every layer gets a role --- Columns, Beams, Walls, \emph{Decide by shape} or Ignore --- suggested from two kinds of
+evidence and shown on the Setup page with the reason; the engineer can change any role, and a confirmed mapping is
+used exactly as given (layers not listed are ignored).
+\begin{enumerate}
+\item \textbf{Name} (whole words of the layer name): columns COL, COLS, COLM, COLMN, CLMN, COLUMN(S), PILLAR(S),
+STANCHION(S), POST(S); beams BEAM(S), BM, GIRDER(S), JOIST(S); walls WALL(S) (also inside a word), MASONRY, BRICK,
+BLOCKWORK, PARTITION(S). Ignored: annotation (TEXT, TAG, DIM, HATCH, IDEN, NOTE, TITLE, \dots), grid / centre lines
+(GRID, AXIS, CENTRE, CL), doors, windows, furniture, services, stairs. \textbf{Plinth and lintel beams} (PLINTH,
+LINTEL, PB, LB, SUNSHADE, CHAJJA) are ignored by default: they are not floor beams of the frame.
+\item \textbf{What is drawn} (in mm after the units, $u$ m per drawing unit):
+\begin{itemize}
+\item column-sized outline: closed polyline or circle with $150\le\min(a,b)$ and $\max(a,b)\le1500$ mm;
+\item beam-like line: both ends within $\tfrac12\max(a,b)+150$ mm of two different column centres and both centres
+within $\max(\tfrac14\min(a,b),\,50\text{ mm})$ of the line;
+\item grid-like line: passes over column centres (same tolerance) but at least one end is away from a column;
+\item wall pair: two lines within $2^\circ$ of parallel, 75--500 mm apart, overlapping $\ge100$ mm ($\ge500$ mm on
+\emph{decide by shape} layers, so tag leaders and ticks are not walls).
+\end{itemize}
+\end{enumerate}
+\textbf{Suggestion when the name says nothing:} $\ge2$ rectangular column outlines and no other structure
+$\Rightarrow$ Columns; outlines and lines together $\Rightarrow$ Decide by shape; $\ge60\,\%$ of the lines
+beam-like $\Rightarrow$ Beams; $\ge50\,\%$ of the remaining lines in wall pairs $\Rightarrow$ Walls; mostly grid-like
+or text only $\Rightarrow$ Ignore. Circles alone on an unnamed layer are taken as symbols (grid bubbles). If no layer
+is walls or columns, lines of unrecognised layers are taken as walls (warned). \emph{Decide by shape} layers:
+column outlines $\to$ columns, beam-like lines $\to$ beams, wall pairs $\to$ walls, the rest ignored.
+
+\textbf{Confidence} shown: high (name and drawing agree), medium (drawing only), low (name without matching
+geometry, or a guess).
+
+\subsection{Geometry rules}
+\begin{itemize}
+\item Blocks (INSERT) are exploded recursively (depth 8); entities on layer 0 inside a block take the INSERT's layer;
+unbound xrefs and missing blocks are reported.
+\item Columns: sides from the frame of the longest edge (rotated blocks); circle $\Rightarrow$ square of equal area
+($0.886\times$ diameter, WARN); duplicates within $\tfrac14$ of the smaller side counted once (WARN); outlines with a
+side $<150$ mm or $>3$ m on column layers are not columns (WARN).
+\item Units from \$INSUNITS (in, ft, mm, cm, m); unitless or implausible ($<1$ m or $>1000$ m extent)
+$\Rightarrow$ millimetres if coordinates exceed 500 (WARN).
+\item Coordinates moved so the first grid intersection is (0,\,0) (WARN when moved by $>1$ m); column centres within
+150 mm merge into one grid line (WARN with the misalignment).
+\item Beams: LINE and every polyline segment; ends within half a column $+150$ mm of a column centre are moved to it;
+duplicate and zero-length beams dropped; loose ends reported.
+\item Wall thickness: most frequent perpendicular gap 75--500 mm between parallel overlapping lines ($\ge0.1$ m),
+unit-aware; 230 mm if none.
+\item No column found $\Rightarrow$ automatic column placement from walls; nothing usable $\Rightarrow$ clear input
+error.
+\item \textbf{Drawing vs design:} columns drawn at a size other than the designed one give a WARN listing drawn and
+designed sizes (e.g.\ 230$\times$230 drawn, 300$\times$450 designed).
+\item \textbf{Room labels outside the structure:} a room-name text inside the column extent but in no slab panel is
+reported (the area may be missing its columns / beams).
+\end{itemize}
+
+\section{Other edge cases and fallbacks}
+\begin{longtable}{L{56mm}L{108mm}}
+\toprule \textbf{Situation} & \textbf{Behaviour} \\ \midrule \endhead
+No SBC entered & run blocked (no default) \\
+Site parameter changed after confirming & confirmation cleared \\
+Inputs changed after a run & every result page says the results are out of date \\
+Frame cannot be solved & listed (FAIL); its beams use $wL^2/8$ (WARN) \\
+Beam not on a grid line & simply supported fallback (WARN) \\
+Column on a frame line in one direction only & no frame moments in the other (minimum eccentricity, WARN) \\
+Design not converged in 6 iterations & last results shown with a WARN \\
+Zero-load column & nominal footing with a warning \\
+Tension at a column base & footing for $|P|$, uplift not checked (WARN) \\
+Footings overlapping & WARN (combined footing needed) \\
+Column drawn smaller / larger than designed & WARN ``Drawing vs design'' \\
+Room label outside the structure read & note on the Setup page \\
+Layer role changed by the engineer & results marked out of date \\
+Beam deflection without analysis load & not evaluated (no assumed load) \\
+Floors without torsional restraint & translation-only sharing (WARN) \\
+Gross stiffness selected & WARN (6.4.3.1) \\
+BBS & one typical floor and ground-storey columns; default bars when a description cannot be parsed (KD-21) \\
+\bottomrule
+\end{longtable}
+
+%==================================================================================================================
+\section{Not performed (must be checked separately)}
+Flexible diaphragms and diaphragm / collector / chord design; time history, site-specific spectra, soil--structure
+interaction, P--$\Delta$; $100+30\,\%$ and vertical earthquake; pattern live loading; effective length (Annex E);
+IS 13920 confining steel, capacity-design shear, joint reinforcement; development length, laps and curtailment in
+design; beam torsion and deflection beyond basic $L/d$; footing sizing for base moments and settlement; corridor /
+stair / balcony loads; wind $k_3$, $k_4$.
+
+%==================================================================================================================
+\section{Verification evidence}
+\begin{longtable}{L{68mm}L{96mm}}
+\toprule \textbf{Benchmark} & \textbf{Result} \\ \midrule \endhead
+SP 16 Tables C, D ($M_{u,\lim}$) & within 0.8\,\% (IS 456 rounds $x_{u,\max}/d$) \\
+SP 16 Tables A, F (steel stress) & within 0.5\,\% / 1.2\,\% \\
+SP 16 Examples 1, 2, 3 (beams, slab) & 10.02 cm$^2$; 3.8 cm$^2$/m; 18.85 / 7.05 cm$^2$ reproduced \\
+SP 16 Example 6 (column) & capacity within 10\,\% \\
+SP 16 Example 9 (slender column) & $P_{uz}$, $M_a$, $e_\text{min}$ within 1\,\% \\
+SP 16 Example 10 (shear) & $\tau_v=1.07$, $\tau_c=0.55$, 140 mm \\
+3D model, symmetric, $\pm0.05b$ & worse frame $0.525F$; $\Delta_\text{max}/\Delta_\text{ave}=1.05$ \\
+3D model, eccentric stiffness & 50.5 kN on the flexible frame (hand) \\
+Two-storey shear building & $\omega^2=(k/m)(3\mp\sqrt5)/2$ \\
+Portal drift & 3.356 mm vs 3.333 mm by hand \\
+Worked hand check, \code{complex\_house.dxf} & every value of Appendix A reproduced (\code{test\_hand\_check\_complex\_house.py}) \\
+Test suite & 809 passed, 3 skipped (20 Oct 2026); CI green on Python 3.11--3.13 (at 774) \\
+\bottomrule
+\end{longtable}
+
+%==================================================================================================================
+\appendix
+\section{Worked hand check: \texttt{samples/plans/complex\_house.dxf}}\label{app:hand}
+\textbf{Purpose.} Check the site against a calculator on one non-trivial building. The same numbers are locked in
+\code{tests/test\_hand\_check\_complex\_house.py}; if the site changes, that test fails.
+
+\textbf{How to reproduce on the site.} Setup page $\rightarrow$ \emph{CAD drawing (DXF)} $\rightarrow$ upload
+\code{samples/plans/complex\_house.dxf}; auto-framing off; 3 storeys of 3.0 m; Residential; SBC 150; Zone II; soil
+II; SMRF; $I=1.0$; M25; Fe500; exposure Moderate; NBC Type 2; wind zone 3, terrain 2; cracked sections and fixed
+bases on. Run. Each value below is on the page named in brackets.
+
+\subsection*{A.1 Read the drawing (Members, Drawings \& 3D)}
+L-shaped plan 12 m $\times$ 8 m with the 4 m $\times$ 4 m corner at $x=8$--12, $y=4$--8 missing; grid 4 m both
+ways; 11 columns, 15 beams (all $300\times600$ start size). Check: every column of the DXF is shown, nothing in the
+missing corner. \emph{Found during this check (20 Oct): the drawing's columns are $230\times230$ but the design
+starts from $300\times450$ without saying so; the label ``Master Bed'' lies outside the building. Both are now
+reported (Section~\ref{sec:dxf}).} With SMRF the 230 mm wall columns (D-29) do not apply.
+
+\subsection*{A.2 Slab panel S1 (Members $\rightarrow$ Slabs) --- Sections 4.1, 8, Table 26}
+\begin{align*}
+c_\text{slab}&=\max(\text{Table 16 Moderate }30,\ \text{Table 16A 1.5 h SS }25)=30\ \text{mm}\\
+c'&=\max(30,\ c_\text{slab}+10)=40\ \text{mm}\\
+t&=\lceil(4000/26+40)/5\rceil\cdot5=\mathbf{195}\ \text{mm}\\
+w&=1.5\,(25\times0.195+1.0+1.5+0.5+2.0)=\mathbf{14.81}\ \text{kN/m}^2\\
+\text{Case 4 (corner)},\ l_y/l_x=1:\quad M_x^-&=0.047\times14.81\times4^2=\mathbf{11.14},\quad
+M_x^+=0.035\times14.81\times4^2=\mathbf{8.30}\ \text{kN\,m/m}
+\end{align*}
+
+\subsection*{A.3 Seismic weight and base shear (Checks $\rightarrow$ Seismic) --- Sections 4.2, 5.3}
+Per storey: slab area 80 m$^2$; beams 60 m; walls 60 m; columns $9\times(0.30\times0.45)+2\times(0.40\times0.60)$.
+\begin{align*}
+\text{wall}&=0.23\times(3.0-0.125-0.400)\times(1-0.33)\times19.2=7.323\ \text{kN/m}\\
+\text{web}&=0.3\times(0.6-0.125)\times25=3.5625\ \text{kN/m}\\
+\text{overlap}&=20\ \text{panel edges}\times0.15\times1.75\times4=21.0\ \text{kN (N46)}\\
+W_{1,2}&=80(3.125+3.0+1.75)+0.25\times2.0\times80+60(3.5625)-21.0+60(7.323)+127.1=\mathbf{1429.2}\ \text{kN}\\
+W_3\ (\text{roof})&=80(3.125+1.5+1.75)+60(3.5625)-21.0+(0.5+0.33)\,60(7.323)+63.6=\mathbf{1131.0}\ \text{kN}\\
+W&=\mathbf{3989.5}\ \text{kN},\quad T_a=\min(0.075\times9^{0.75},\ 0.09\times9/\sqrt{12})=\mathbf{0.234}\ \text{s}\\
+S_a/g&=2.5,\quad A_h=\tfrac{0.10}{2}\cdot\tfrac{1.0}{5}\cdot2.5=0.025,\quad V_B=0.025\times3989.5=\mathbf{99.7}\ \text{kN}\\
+Q_3&=99.7\times\frac{1131.0\times9^2}{1429.2(3^2+6^2)+1131.0\times9^2}=\mathbf{58.6}\ \text{kN}
+\end{align*}
+Dynamic (cannot be done by hand): check only that \emph{scale factor} $=V_B/V_B^\text{dyn}$
+($99.7/80.0=1.247$ in X) and that the design $V_B$ equals the static 99.7 kN (IS 1893 7.7.3).
+Note: $1.75 = 25\times(0.195-0.125)$ is the thicker designed slab; it runs to the beam centre lines, so the half
+beam width per panel edge is taken off the webs (N46, fixed 20 Oct; before the fix $W_{1,2}=1450.2$, $V_B=101.3$).
+
+\subsection*{A.4 Beam B5, interior, $y=4$, $x=4$--8 (Members $\rightarrow$ Beams) --- Sections 4.1, 7.1, 7.2}
+\begin{align*}
+w_\text{service}&=2\times\tfrac43\times(3.125+3.0+1.75+2.0)+(3.5625-2\times0.15\times1.75)+7.323=\mathbf{36.69}\ \text{kN/m}
+\end{align*}
+The moments come from the frame analysis (not by hand; an independent 2D frame program such as Ftool can be used:
+3-storey frame on $y=4$, spans 4/4/4 m). The site designs each plan beam for its worst floor, so every floor shows
+the same values: $M_u^-=97.84$ kN\,m, $V_u=112.04$ kN. Check the section design from these:
+\begin{align*}
+d&=600-30-8-12/2=556\ \text{mm},\quad R=\frac{97.84\times10^6}{300\times556^2}=1.055\\
+p_t&=50\tfrac{25}{500}\Big(1-\sqrt{1-4.598\times1.055/25}\Big)=0.256\,\%\ \Rightarrow\ A_{st}=\mathbf{426}\ \text{mm}^2
+\ (4\text{-}12 = 452 \text{ provided})\\
+\tau_v&=\frac{112.04\times10^3}{300\times556}=\mathbf{0.672},\quad p_t=\frac{100\times339}{300\times556}=0.203\,\%
+\Rightarrow\tau_c=0.29+0.53\times0.07=\mathbf{0.327}\ \text{N/mm}^2\\
+s&=\min(351,\ 302,\ 417,\ 300)=\mathbf{300}\ \text{mm};\quad \text{end zone }\min(556/4,\ 6\times12,\ 100)=72\rightarrow\mathbf{70}\ \text{mm}
+\end{align*}
+
+\subsection*{A.5 Column C5, ground storey (Members $\rightarrow$ Columns, math log) --- Section 7.3}
+$400\times600$, 10-16 ($A_s=2011$ mm$^2$, 0.84\,\%). Gravity: $P_u=1.5\times705.4=\mathbf{1058}$ kN.
+$P_{uz}=0.45\times25\times(240000-2011)+0.75\times500\times2011=\mathbf{3431}$ kN.
+Governing $0.9DL+1.5EQx$: $P_u=551.0$ kN, $M_x=50.8$ kN\,m (depth 400 mm in X).
+SP 16 \textbf{Chart 49} (Fe500, four sides, $d'/D=56/400\approx0.15$):
+$P_u/(\fck bD)=551.0\times10^3/(25\times600\times400)=0.092$, $p/\fck=0.84/25=0.034$ $\Rightarrow$ read
+$M_u/(\fck bD^2)\approx0.08$, i.e. $M_{ux1}\approx0.08\times25\times600\times400^2=\mathbf{190}$ kN\,m (site 199 with
+its actual bar layout: 198.3). Ratio $50.8/198.3=0.26$ plus the $y$ term $\Rightarrow$ 0.31 $\le1$: PASS.
+
+\subsection*{A.6 Footing under C5 (Members $\rightarrow$ Footings) --- Section 8}
+\begin{align*}
+P&=705.4+58.6\ (\text{plinth wall})=764.0\ \text{kN},\quad B=\sqrt{1.1\times764.0/150}=2.37\rightarrow\mathbf{2.40}\ \text{m}\\
+d&=500-50-12=438,\quad q_u=1146.0/2.40^2=199.0\ \text{kN/m}^2\\
+V_u&=1146.0-199.0\times0.838\times1.038=973\ \text{kN},\quad
+\tau_v=\frac{973\times10^3}{2(838+1038)\times438}=0.59\le1.0\times0.25\sqrt{25}=1.25\ \text{OK}\\
+M_u&=199.0\times1.0^2/2=99.5\ \text{kN\,m/m}\Rightarrow A_{st}=535<0.12\,\%=\mathbf{600}\ \text{mm}^2/\text{m}\ (12@180)
+\end{align*}
+
+\subsection*{A.7 Strong column--weak beam, roof of C1 in X (Checks $\rightarrow$ Joints) --- Section 9}
+Beam B1, 3-12 top ($339$ mm$^2$), $d=600-30-16=554$:
+$x_u=\frac{0.87\times500\times339}{0.36\times25\times300}=54.7$,
+$M_b=0.87\times500\times339\times(554-0.42\times54.7)=\mathbf{78.4}$ kN\,m.
+Column C1 at the roof: one column only, $300\times450$ with 300 in X, 8-16, $P_u=48$ kN: SP 16 Chart 50
+($d'/D=56/300\approx0.20$), $P_u/(\fck bD)=0.014$, $p/\fck=0.048$ $\Rightarrow M_c\approx76.5$ kN\,m.
+$\sum M_c/\sum M_b=76.5/78.4=\mathbf{0.98}<1.4$: \textbf{FAIL} --- correct: IS 13920 7.2.1.3 waives roof joints only
+above 4 storeys. 24 of 66 joints fail in this building; the site reports them but does not enlarge the columns
+(rotate C1 so 450 is along X, enlarge the columns, or detail them as gravity columns per 7.2.1).
+
+\subsection*{A.8 What you cannot check by hand}
+Frame moments (use an independent frame program), modal periods and torsion ratio (3D model; compare with ETABS /
+STAAD), the L-shape flexible-diaphragm check (WARN on the site).
+
+\end{document}

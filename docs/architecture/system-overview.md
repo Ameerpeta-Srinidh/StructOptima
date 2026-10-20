@@ -76,7 +76,7 @@ replaced the screens that always reported success — audit finding R5).
 ## Key characteristics
 
 - Units: kN, m internally for loads/geometry; mm for section dimensions; see [../engineering/units-and-conventions.md](../engineering/units-and-conventions.md).
-- Analysis: linear elastic 2D frames, one per grid line, rigid-diaphragm load sharing by column stiffness.
+- Analysis: linear elastic plane frames, one per grid line, condensed to their lateral stiffness and combined into a rigid-diaphragm 3D model (`src/pseudo3d.py`, 3 DOF per floor) for the seismic response spectrum analysis with torsion and for wind; the frame forces are then applied to each 2D frame for member design.
 - Design: IS 456 limit-state section checks; columns by strain-compatibility P-M interaction with biaxial check.
 - Iteration: up to `DesignInputs.max_iterations` (default 6) analysis/design passes until beam depths and column sizes stop growing.
 - Performance (measured 2026-10-15, Windows, Python 3.13): G+1 18×12 m ≈ 1 s; G+7 12×12 m ≈ 2 s; 84 repository DXFs in 43 s total.

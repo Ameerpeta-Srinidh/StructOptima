@@ -21,6 +21,8 @@ flowchart TD
   dp --> ai[analysis_integration]
   ai --> fea[fea_solver]
   ai --> lc[load_combinations]
+  ai --> p3[pseudo3d]
+  dp --> dur[durability]
   dp --> seis[seismic]
   dp --> wind[wind_load]
   gm --> rd[rebar_detailer] --> sd[section_design]

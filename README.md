@@ -11,10 +11,9 @@
 </p>
 
 > ⚠️ **Engineering safety notice.** StructOptima produces **preliminary** designs.
-> Many calculations have not been independently verified, tabulated code values
-> were transcribed and still need checking against the printed standards, and
-> several analysis effects (torsion, P-Δ, response spectrum, IS 13920 ductile
-> detailing) are not implemented. **Every output must be independently verified by
+> Code values were compared with the printed IS standards (2026-10-20), but no
+> output has been reviewed by an engineer, and several effects (flexible floor
+> diaphragms, P-Δ, IS 13920 confining steel) are not implemented. **Every output must be independently verified by
 > a licensed structural engineer before any use in construction.** See
 > [docs/engineering/limitations.md](docs/engineering/limitations.md).
 
@@ -44,19 +43,20 @@ the CLI (`main.py`), with PDF reports, Excel and DXF exports.
 |---|---|
 | Manual grid, DXF import (explicit columns or auto-framing from walls), IFC import | DXF units from `$INSUNITS` with plausibility check; IFC needs `ifcopenshell` (optional) |
 | Load takedown with dead / live split, walls, beam self-weight, roof loads | Occupancy loads from `src/building_types.py` |
-| 2D plane-frame analysis (direct stiffness), gravity + seismic + wind load cases | Benchmarked against closed-form cases; no torsion |
-| Equivalent static seismic analysis | Height, weight, soil type, importance factor, R (OMRF default) |
-| Static wind loads (IS 875 Part 3) | Simplified Cpe, power-law k2 |
+| Plane-frame analysis (direct stiffness) combined into a rigid-floor 3D model, gravity + seismic + wind load cases | Benchmarked against closed-form cases; flexible floors not modelled |
+| Seismic: response spectrum method (IS 1893 7.7.5) with torsion / design eccentricity (7.8.2), static base shear and Table 7 minimum, irregularity checks per Amendment 2 | Hand-checked; OMRF only in Zone II |
+| Static wind loads (IS 875 Part 3) | k2 from Table 2; simplified (conservative) Cpe; h/w ≥ 6 flagged |
+| Exposure and fire: covers, minimum grade, fire ratings (IS 456 Tables 5, 16, 16A, Fig. 1; NBC Part 4 Table 1) | Inputs on the Setup page |
 | Beam design (sagging, hogging, shear, compression steel) | Rectangular sections |
 | Column design (P-M interaction by strain compatibility, biaxial, minimum eccentricity, slenderness) | Effective length factor 1.0 by default (engineering decision pending) |
-| Two-way / one-way slabs (IS 456 Table 26 coefficients by edge condition) | Coefficient values need verification |
+| Two-way / one-way slabs (IS 456 Table 26 coefficients by edge condition) | Coefficients checked against the printed table |
 | Staircase flight, isolated square footings with reinforcement | Footing sizing ignores base moments (warning) |
 | SCWB, joint shear, ductile tie spacing from designed members | Advisory; IS 13920 confinement not designed |
 | Design status and issue list shown in UI and PDF | PDFs marked "PRELIMINARY — NOT FOR CONSTRUCTION" |
 | Site drawing set (A3): column, footing, beam & slab layouts, sections, slab reinforcement, footing sections with schedules | PDF, DXF, SVG, ZIP from the Drawings page; laps/curtailment are typical notes |
 | BIM model export (IFC4) with design data on every member | Opens in any IFC viewer; founding level not designed |
 | 3D viewer and walk-through of the designed building (orbit, storeys, section cut, status colours, click for member data; works with touch) | Boxes only; no openings or reinforcement |
-| Storey drift check (EQ 0.004 h, wind top sway H/500) | Limit values UNVERIFIED; 2D frames, no torsion |
+| Storey drift check (EQ 0.004 h, wind top sway H/500) | Limits checked; drifts include torsion (rigid floors) |
 | Site tools: BBS cutting plan, approved-mix materials, cube register, formwork, QR member tags, inspection and defect log, measured vibration / strain, as-built survey | Arithmetic on the design and on your data; nothing simulated |
 | Quantities, cost, carbon, BBS, masonry/plaster/paint estimates | Estimates with fixed rates |
 | Indicative column optimiser | Requires re-analysis before use |

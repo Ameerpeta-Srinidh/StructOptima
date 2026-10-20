@@ -1,5 +1,6 @@
 from typing import List, Tuple, Dict, Optional
 import math
+import re
 from .cad_parser import CADParser
 from .grid_manager import GridManager, Column
 from .framing_logic import StructuralMember, Point, MemberProperties
@@ -8,8 +9,8 @@ from .logging_config import get_logger
 logger = get_logger(__name__)
 
 class CADLoader:
-    def __init__(self, dxf_path: str):
-        self.parser = CADParser(dxf_path)
+    def __init__(self, dxf_path: str, layer_roles: Optional[Dict[str, str]] = None):
+        self.parser = CADParser(dxf_path, layer_roles=layer_roles)
         self.parser.load()
         self.placement_warnings = []
         self.load_warnings: List[str] = []
@@ -261,6 +262,8 @@ class CADLoader:
                 col.orientation_deg = rc.get('orientation_deg', 0.0)
             
             gm.columns.append(col)
+            if not auto_frame:
+                gm.drawn_column_sizes_mm[f"{x_m:.3f},{y_m:.3f}"] = (round(w_mm), round(d_mm))
             
         beams = []
         
@@ -356,9 +359,47 @@ class CADLoader:
         if not beams:
             self.load_warnings.append("No beams found in the DXF (no BEAM layer): beams will be generated along "
                                       "all column grid lines.")
+        self.load_warnings.extend(self._labels_outside_structure(gm, beams, ox, oy))
         
         return gm, beams
     
+    ROOM_LABEL = re.compile(r"^(?=(?:.*[A-Za-z]){3})[A-Za-z][A-Za-z0-9 .&/'()-]*$")
+    COLUMN_MARK = re.compile(r"^(C|COL|P)[-_ ]?\d+[A-Z]?$", re.I)
+
+    def _labels_outside_structure(self, gm, beams, ox, oy) -> List[str]:
+        """Room names inside the plan extent but in no slab panel: the area is drawn and named, but no structure
+        was read around it (its columns / beams may be on a layer that was not read)."""
+        from .dxf_layers import entity_text
+        cols = [c for c in gm.columns if c.level == 0]
+        if len(cols) < 3:
+            return []
+        x0, x1 = min(c.x for c in cols), max(c.x for c in cols)
+        y0, y1 = min(c.y for c in cols), max(c.y for c in cols)
+        saved = gm.boundary_segments
+        gm.boundary_segments = [((b.start_point.x, b.start_point.y), (b.end_point.x, b.end_point.y)) for b in beams]
+        try:
+            panels = gm.slab_panels(include_voids=True)
+        finally:
+            gm.boundary_segments = saved
+        out = []
+        for e in self.parser._flat():
+            txt = entity_text(e)
+            if not txt or not self.ROOM_LABEL.match(txt) or self.COLUMN_MARK.match(txt):
+                continue
+            try:
+                p = e.dxf.insert
+            except AttributeError:
+                continue
+            x, y = p.x * self.scale_factor - ox, p.y * self.scale_factor - oy
+            if not (x0 + 0.3 < x < x1 - 0.3 and y0 + 0.3 < y < y1 - 0.3):
+                continue                      # title block, entry notes, labels outside the plan
+            if any(pn["x0"] <= x <= pn["x1"] and pn["y0"] <= y <= pn["y1"] for pn in panels):
+                continue
+            out.append(f"Text '{txt}' at ({x:.2f}, {y:.2f}) m is inside the plan but outside the structure read "
+                       f"from the drawing (no slab panel there). If that area is part of the building, its columns "
+                       f"or beams are on a layer that was not read: check the layer list.")
+        return out
+
     def get_placement_json(self) -> str:
         """Returns JSON string of placement result with columns and warnings."""
         import json

@@ -20,7 +20,8 @@ import math
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-from .analysis_integration import AnalysisSummary, LateralLoads, SeismicSpec, update_structural_analysis
+from .analysis_integration import (AnalysisSummary, LateralLoads, SeismicSpec, beam_slab_coefficients,
+                                   update_structural_analysis, web_self_weight_kn_m)
 from .building_types import get_load_parameters
 from .foundation_eng import Footing, check_footing_overlaps, design_footing
 from .grid_manager import GridManager
@@ -39,7 +40,7 @@ EQ_DRIFT_LIMIT = 0.004
 # (H/500, "should") - checked 2026-10-20.  Serviceability -> WARN, not FAIL.
 WIND_TOP_SWAY_LIMIT = 1.0 / 500.0
 # Soft storey (IS 1893 Table 6(i), Amd 2: "less than the storey above"): drops of the computed storey stiffness
-# up to 10 % are treated as numerical / load-pattern variation (decision D-27, PROPOSED)
+# up to 10 % are treated as numerical / load-pattern variation (decision D-27, approved 2026-10-20)
 SOFT_STOREY_TOLERANCE = 0.10
 
 # Checks that are NOT performed, whatever the status says (gap analysis N17).
@@ -86,6 +87,8 @@ class DesignInputs:
     include_interior_walls: bool = False
     generate_walls_if_missing: bool = True
     align_to_wall: Optional[bool] = None   # None -> residential occupancies
+    # D-29: columns in 230 mm wall lines get a 230 mm side across the wall (Zone II OMRF only); None -> residential
+    column_matches_wall: Optional[bool] = None
     use_fly_ash: bool = False
     exposure: str = "Moderate"              # IS 456 Table 3 (covers Table 16, grade Table 5)
     nbc_construction_type: int = 2          # NBC 2016 Part 4 Table 1 type of construction (fire ratings)
@@ -130,6 +133,131 @@ class DesignResults:
                 "FAIL": "FAIL"}.get(self.status, self.status)
 
 
+WALL_COLUMN_MM = 230.0          # brick wall with plaster; column side across the wall (D-29)
+WALL_COLUMN_MAX_LONG_MM = 900.0  # IS 456 32.1: longer than 4 x thickness (920 mm) is a wall, not a column
+MIN_WALL_FOR_MATCH_MM = 200.0    # full-brick walls (200 mm core, 230 mm finished); half-brick walls do not qualify
+
+
+def _column_wall_dirs(gm: GridManager, x: float, y: float) -> Dict[str, float]:
+    """{"x" / "y": wall length (m)} of full-brick walls whose centre line passes through the column centre."""
+    out: Dict[str, float] = {}
+    for w in gm.walls:
+        if w.thickness_mm < MIN_WALL_FOR_MATCH_MM - 1e-6:
+            continue
+        dx, dy = w.end_x - w.start_x, w.end_y - w.start_y
+        ln = math.hypot(dx, dy)
+        if ln < 1e-6:
+            continue
+        ux, uy = dx / ln, dy / ln
+        along = (x - w.start_x) * ux + (y - w.start_y) * uy
+        off = abs((x - w.start_x) * -uy + (y - w.start_y) * ux)
+        if off <= 0.12 and -0.15 <= along <= ln + 0.15:
+            d = "x" if abs(dx) >= abs(dy) else "y"
+            out[d] = out.get(d, 0.0) + ln
+    return out
+
+
+def apply_wall_width_columns(gm: GridManager, beams, fck: float, fy: float) -> int:
+    """D-29: every column stack standing in a full-brick wall line gets its side across the wall equal to
+    WALL_COLUMN_MM and the other side from the axial demand (0.4 fck Ac + 0.67 fy Asc >= 1.5 P at 0.8 % steel,
+    IS 456 39.3), at least 450 and at most WALL_COLUMN_MAX_LONG_MM. A column on one wall line runs along it;
+    where walls meet (corners, T and cross junctions) the long side goes to the direction that has fewer long sides
+    so far, so that both directions keep similar column stiffness. Free-standing columns are unchanged. Beams that
+    frame into a 230 mm side are made 230 mm wide (if not deeper than 750 mm). Returns the number of stacks set."""
+    stacks: Dict[Tuple[float, float], list] = {}
+    for c in gm.columns:
+        stacks.setdefault((round(c.x, 3), round(c.y, 3)), []).append(c)
+    n = 0
+    t = WALL_COLUMN_MM
+    walls_at = {k: _column_wall_dirs(gm, *k) for k in stacks}
+    count = {"x": sum(1 for d in walls_at.values() if set(d) == {"x"}),
+             "y": sum(1 for d in walls_at.values() if set(d) == {"y"})}
+    choice: Dict[Tuple[float, float], str] = {}
+    for key in sorted(walls_at):
+        dirs = walls_at[key]
+        if len(dirs) == 1:
+            choice[key] = next(iter(dirs))
+        elif dirs:
+            d = min(("x", "y"), key=lambda k: (count[k], -dirs[k], k))
+            choice[key] = d
+            count[d] += 1
+    for (x, y), stack in stacks.items():
+        d = choice.get((x, y))
+        if d is None:
+            continue
+        p_kn = max(c.load_kn for c in stack)
+        ag = 1.5 * p_kn * 1000.0 / (0.4 * fck * 0.992 + 0.67 * fy * 0.008)
+        need = max(450.0, ag / t)
+        long_side = next((float(p) for p in PREFERRED_COLUMN_SIZES if p >= need - 1e-6), need)
+        if long_side > WALL_COLUMN_MAX_LONG_MM:
+            continue
+        for c in stack:
+            c.wall_dir = d
+            c.width_nb, c.depth_nb = (long_side, t) if d == "x" else (t, long_side)
+        n += 1
+    if n:
+        by_xy = {k: v[0] for k, v in stacks.items()}
+        for b in beams:
+            if b.end_point is None or b.properties.depth_mm > 750.0:
+                continue
+            horiz = abs(b.end_point.y - b.start_point.y) < 1e-6
+            ends = [by_xy.get((round(p.x, 3), round(p.y, 3))) for p in (b.start_point, b.end_point)]
+            if any(e is not None and e.wall_dir == ("x" if horiz else "y") for e in ends):
+                b.properties.width_mm = min(b.properties.width_mm, t)
+    return n
+
+
+def _grow_stack(stack, design=None) -> bool:
+    """Grow a column stack one preferred size. Wall columns grow along the wall (keeping the wall width) up to
+    WALL_COLUMN_MAX_LONG_MM; when bending about the thin side governs the interaction (``design``: the column's
+    RebarResult), or the long side is at its limit, both sides grow and the column no longer matches the wall.
+    False if at the limit."""
+    c0 = stack[0]
+    w, d = c0.width_nb, c0.depth_nb
+    if max(w, d) >= 1500:
+        return False
+    thin_governs = False
+    if c0.wall_dir in ("x", "y") and design is not None and design.mux1_knm > 0 and design.muy1_knm > 0:
+        tx, ty = abs(design.mux_design_knm) / design.mux1_knm, abs(design.muy_design_knm) / design.muy1_knm
+        thin_governs = (ty if c0.wall_dir == "x" else tx) > (tx if c0.wall_dir == "x" else ty)
+    if c0.wall_dir in ("x", "y") and not thin_governs:
+        long_side = w if c0.wall_dir == "x" else d
+        nl = _next_pref(long_side)
+        if nl <= WALL_COLUMN_MAX_LONG_MM:
+            for c in stack:
+                if c.wall_dir == "x":
+                    c.width_nb = nl
+                else:
+                    c.depth_nb = nl
+            return True
+    for c in stack:
+        c.wall_dir = None
+    nw, nd = _next_pref(w), _next_pref(d)
+    for c in stack:
+        c.width_nb, c.depth_nb = nw, nd
+    return True
+
+
+def beams_wider_than_columns(gm: GridManager, beams) -> List[Tuple[str, float, str, float]]:
+    """(beam id, beam width, column id, column side across the beam) where a beam is wider than the column it
+    frames into: its outer bars would pass outside the column cage."""
+    cols = {(round(c.x, 3), round(c.y, 3)): c for c in gm.columns if c.level == 0}
+    out = []
+    for b in beams:
+        if b.end_point is None:
+            continue
+        horiz = abs(b.end_point.y - b.start_point.y) < 1e-6
+        for p in (b.start_point, b.end_point):
+            c = cols.get((round(p.x, 3), round(p.y, 3)))
+            if c is None:
+                continue
+            across = c.depth_nb if horiz else c.width_nb
+            if b.properties.width_mm > across + 1.0:
+                out.append((b.id, b.properties.width_mm, c.id, across))
+                break
+    return out
+
+
 def _next_pref(v: float) -> float:
     for p in PREFERRED_COLUMN_SIZES:
         if p > v + 1e-6:
@@ -152,9 +280,10 @@ def storey_seismic_weights(gm: GridManager, beams, ll_factor_fn) -> Tuple[List[f
     # N13: extra dead load of panels designed thicker than the occupancy slab
     pex = gm.panel_extra_dead_kn_m2()
     extra_w = sum((p["x1"] - p["x0"]) * (p["y1"] - p["y0"]) * pex.get((p["i"], p["j"]), 0.0) for p in panels)
-    beam_w = sum(b.properties.width_mm / 1000.0 * max(b.properties.depth_mm / 1000.0 - t, 0.0) * 25.0 *
-                 math.hypot(b.end_point.x - b.start_point.x, b.end_point.y - b.start_point.y)
-                 for b in beams if b.end_point is not None)
+    valid = [b for b in beams if b.end_point is not None]
+    over = beam_slab_coefficients(gm, valid, return_extra=True)[2] if valid else {}
+    beam_w = sum(web_self_weight_kn_m(b, t, over.get(b.id, 0.0)) *
+                 math.hypot(b.end_point.x - b.start_point.x, b.end_point.y - b.start_point.y) for b in valid)
     wall_storey = sum(w.length_m * w.line_load_kn_m for w in gm.walls)
     col_storey = {lvl: sum(c.width_nb * c.depth_nb / 1e6 * (c.z_top - c.z_bottom) * 25.0
                            for c in gm.columns if c.level == lvl) for lvl in range(N)}
@@ -315,6 +444,20 @@ def run_design(gm: GridManager, beams: list, inputs: DesignInputs) -> DesignResu
     gm.optimize_column_sizes(concrete=concrete, fy=fy, wall_thickness_mm=inputs.wall_core_thickness_mm,
                              align_to_wall=is_res if inputs.align_to_wall is None else inputs.align_to_wall,
                              seismic_zone=inputs.seismic_zone)
+    for c in gm.columns:
+        c.wall_dir = None
+    if is_res if inputs.column_matches_wall is None else inputs.column_matches_wall:
+        if inputs.seismic_zone != "II" or ductile:
+            messages.append(f"Columns are at least 300 mm: IS 13920:2016 7.1.1 (minimum column dimension 300 mm) "
+                            f"applies in Zone {inputs.seismic_zone} {'with SMRF' if ductile else ''}".rstrip() +
+                            " (1.1.1: Zones III-V; SMRF relies on its detailing), so columns cannot match 230 mm walls")
+        else:
+            n_wall = apply_wall_width_columns(gm, beams, fck, fy)
+            n_all = len({(round(c.x, 3), round(c.y, 3)) for c in gm.columns})
+            messages.append(f"{n_wall} of {n_all} column positions stand in 230 mm wall lines and have a 230 mm side "
+                            f"across the wall (D-29, Zone II OMRF; fire check IS 456 Fig. 1 '50 % exposed'). "
+                            f"Free-standing columns stay at least 300 x 450 mm. Interior columns get 230 mm only "
+                            f"where the model has interior walls (Masonry tab)")
 
     wind_result = None
     seismic_result = None
@@ -357,12 +500,19 @@ def run_design(gm: GridManager, beams: list, inputs: DesignInputs) -> DesignResu
             failing |= {(round(c.x, 2), round(c.y, 2)) for c in gm.columns}
         for key in failing:
             stack = [c for c in gm.columns if (round(c.x, 2), round(c.y, 2)) == key]
-            w, d = stack[0].width_nb, stack[0].depth_nb
-            if max(w, d) >= 1500:
+            changed = _grow_stack(stack, gm.rebar_schedule.get(stack[0].id)) or changed
+        # D-29: a beam designed wider than a wall column's 230 mm side (deep beams are 300 wide): widen the column
+        for _bid, bw, cid, _across in beams_wider_than_columns(gm, beams):
+            c0 = next(c for c in gm.columns if c.id == cid)
+            if c0.wall_dir is None:
                 continue
-            nw, nd = _next_pref(w), _next_pref(d)
+            stack = [c for c in gm.columns if (round(c.x, 2), round(c.y, 2)) == (round(c0.x, 2), round(c0.y, 2))]
             for c in stack:
-                c.width_nb, c.depth_nb = nw, nd
+                if c.wall_dir == "x":
+                    c.depth_nb = next(float(p) for p in PREFERRED_COLUMN_SIZES if p >= bw)
+                else:
+                    c.width_nb = next(float(p) for p in PREFERRED_COLUMN_SIZES if p >= bw)
+                c.wall_dir = None
             changed = True
         if not changed:
             converged = True
@@ -488,6 +638,28 @@ def run_design(gm: GridManager, beams: list, inputs: DesignInputs) -> DesignResu
     for k, r in gm.staircase_schedule.items():
         if r.status != "PASS":
             add(k, "Staircase", r.status, "; ".join(r.warnings))
+    for bid, bw, cid, across in beams_wider_than_columns(gm, beams):
+        add(bid, "Beam wider than column", "WARN",
+            f"beam {bw:.0f} mm wide frames into {cid.replace('_L0', '')} with a {across:.0f} mm side: the outer beam "
+            f"bars pass outside the column cage - widen the column or narrow the beam")
+    lost = {c.id.replace("_L0", "") for c in gm.columns if c.level == 0 and c.wall_dir is None
+            and min(c.width_nb, c.depth_nb) > WALL_COLUMN_MM and _column_wall_dirs(gm, c.x, c.y)
+            and any(m.startswith(tuple(str(i) for i in range(10))) and "230 mm wall lines" in m for m in messages)}
+    if lost:
+        add(", ".join(sorted(lost)[:6]), "Column wider than wall", "WARN",
+            f"{len(lost)} column(s) in 230 mm wall lines needed more than {WALL_COLUMN_MAX_LONG_MM:.0f} x 230 mm and "
+            f"were enlarged on both sides: they project from the wall")
+    # columns drawn in the DXF at a size other than the one designed: the drawing must be updated before issue
+    changed: Dict[Tuple[Tuple[float, float], Tuple[int, int]], List[str]] = {}
+    for c in gm.columns:
+        drawn = gm.drawn_column_sizes_mm.get(f"{c.x:.3f},{c.y:.3f}") if c.level == 0 else None
+        if drawn and (abs(drawn[0] - c.width_nb) > 1 or abs(drawn[1] - c.depth_nb) > 1):
+            changed.setdefault((drawn, (round(c.width_nb), round(c.depth_nb))), []).append(c.id.replace("_L0", ""))
+    for (drawn, designed), ids in sorted(changed.items(), key=lambda kv: -len(kv[1])):
+        add(", ".join(ids[:6]) + (" ..." if len(ids) > 6 else ""), "Drawing vs design", "WARN",
+            f"{len(ids)} column(s) drawn {drawn[0]:.0f} x {drawn[1]:.0f} mm are designed {designed[0]} x "
+            f"{designed[1]} mm (minimum sizes, wall width or strength: see the column schedule). Update the drawing "
+            f"before issue")
     for ft in footings:
         if ft.status != "PASS":
             add(ft.id, "Footing", ft.status, "; ".join(ft.warnings) or ("bearing" if not ft.bearing_ok else ft.status))

@@ -44,9 +44,11 @@ analysis envelope (factored): `mu_sagging_knm`, `mu_hogging_knm`, `vu_kn`,
 | `SlabRebarResult` | `rebar_detailer.py` | descriptions, `status`, `warnings`, `area_m2`, `lx_m`, `ly_m`, `table26_case`, moments, `factored_load_kn_m2`, `weight_kg_per_m2` |
 | `StaircaseResult` | `rebar_detailer.py` | waist, steel, volumes, `status`, `mu_knm_per_m`, `effective_span_m` |
 | `Footing` | `foundation_eng.py` | size, thickness, `status`, flags (`punching_ok`, `bending_ok`, `one_way_shear_ok`, `bearing_ok`), loads, pressure, `ast_per_m_mm2`, `rebar_desc`, `steel_weight_kg`, `warnings` |
-| `SeismicAnalysisResult` (dataclass) | `seismic.py` | parameters (Z, I, R, Ta, Ah), `base_shear_kn`, storey weights/heights/forces, regularity checks, `analysis_method_check`, `scwb_details`, `joint_details`, `ductile_checks`, `ductile_verification` |
+| `SeismicAnalysisResult` (dataclass) | `seismic.py` | parameters (Z, I, R, Ta, Ah), static `base_shear_kn`, storey weights/heights/static forces, regularity checks, `analysis_method_check`, `system_permitted`, `method_used`, `dynamic` (response spectrum results), `scwb_details`, `joint_details`, `ductile_checks`, `ductile_verification` |
+| `pseudo3d.Frame`, `Floor`, `Mode`, `DirectionResult`, `RegularityOfModes` | `pseudo3d.py` | condensed frame stiffness; floor weight, centre of mass, r²; period, type, modal mass; design forces per frame, scaling, eccentricities, torsion ratio |
+| `durability.DurabilityRequirements` | `durability.py` | covers per member type, minimum grade, w/c, cement, fire hours per element |
 | `WindLoadResult` (dataclass) | `wind_load.py` | pressures per level, `storey_forces_x/y_kn`, base shears, overturning moments, warnings |
-| `AnalysisSummary` (dataclass) | `analysis_integration.py` | frames solved / total, failed frames, combinations, messages, members outside frames, storey drift / top displacement per lateral case, one-direction columns |
+| `AnalysisSummary` (dataclass) | `analysis_integration.py` | frames solved / total, failed frames, combinations, messages, members outside frames, storey drift / top displacement per lateral case, one-direction columns, `lateral_shares`, `seismic_design` |
 | `DefectRecord` (dataclass) | `site_inspection.py` | member, observed defect, location, width / length, inspector, date, notes, optional lat/lon, review status |
 | Viewer scene (dict) | `viewer_model.build_scene` | `storeys` (name, z0, z1), `bbox`, `items` (kind, id, storey, centre `c`, size `s` in m, `yaw`, status, props) |
 | `DesignInputs` / `DesignResults` (dataclasses) | `design_pipeline.py` | See [interfaces-and-contracts.md](interfaces-and-contracts.md) |

@@ -143,3 +143,44 @@ def test_bbs_total_states_its_scope(app):
     at.switch_page("pages/site_tools.py").run()
     captions = " ".join(str(c.value) for c in at.caption)
     assert "one typical floor" in captions
+
+
+def test_dxf_mode_shows_how_the_drawing_is_read(app):
+    at = app
+    with open(os.path.join(ROOT, "samples", "plans", "complex_house.dxf"), "rb") as fh:
+        at.session_state["model_file"] = {"name": "complex_house.dxf", "bytes": fh.read(), "kind": "dxf"}
+    at.radio(key="in_mode").set_value("CAD drawing (DXF)").run()
+    assert not at.exception, [e.message for e in at.exception]
+    assert any("How the drawing is read" in str(m.value) for m in at.markdown)
+    captions = " ".join(str(c.value) for c in at.caption)
+    assert "11 columns" in captions and "15 beams" in captions
+    notes = " ".join(str(m.value) for m in at.markdown)
+    assert "Master Bed" in notes                                  # room label outside the structure
+    _run_analysis(at)
+    res = at.session_state["design_results"]
+    assert any(f["Type"] == "Drawing vs design" for f in res.failures)
+    # a corrected layer role is a design input: the results become out of date
+    at.switch_page("pages/setup.py").run()
+    at.session_state["in_layer_roles"] = {"COLUMNS": "column", "BEAMS": "beam", "WALLS": "ignore"}
+    at.run()
+    assert not at.exception, [e.message for e in at.exception]
+    captions = " ".join(str(c.value) for c in at.caption)
+    assert "0 wall lines" in captions
+    at.switch_page("pages/overview.py").run()
+    assert any("have changed since this design was run" in t for t in _texts(at))
+
+
+def test_wall_width_columns_option(app):
+    at = app
+    at.session_state["in_zone"] = "II"
+    at.run()
+    _run_analysis(at)
+    cols = [c for c in at.session_state["design_results"].gm.columns if c.level == 0]
+    assert any(c.wall_dir and min(c.width_nb, c.depth_nb) == 230 for c in cols)
+    at.switch_page("pages/setup.py").run()
+    at.session_state["in_col_match_wall"] = False
+    at.run()
+    _run_button(at).click().run()
+    assert not at.exception, [e.message for e in at.exception]
+    cols = [c for c in at.session_state["design_results"].gm.columns if c.level == 0]
+    assert all(c.wall_dir is None and min(c.width_nb, c.depth_nb) >= 300 for c in cols)

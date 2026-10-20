@@ -15,7 +15,9 @@ Options reproduce real conventions and drafting habits:
 - ``offset``: survey coordinates (metres, added to every point); ``jitter``: drafting misalignment (m, random,
   seeded); ``duplicate_columns``: every column outline drawn twice; ``beam_style``: "line", "lwpoly" (one polyline
   per grid line), "to_face" (lines stopping at the column faces);
-- ``dxfversion``: "R2018" or "R12".
+- ``dxfversion``: "R2018" or "R12";
+- ``layer_names``: override any layer name of the convention (e.g. ``{"col": "Layer 7"}``, or every key "0" for a
+  drawing with everything on one layer).
 """
 import random
 from typing import Optional
@@ -41,14 +43,16 @@ UNIT = {"mm": (1000.0, 4), "cm": (100.0, 5), "m": (1.0, 6), "none": (1000.0, 0)}
 
 def make_plan(path, *, layers: str = "ncs", units: str = "mm", columns: str = "lwpoly", nest: bool = False,
               offset=(0.0, 0.0), jitter: float = 0.0, duplicate_columns: bool = False, beam_style: str = "line",
-              dxfversion: str = "R2018", extra_column_layers: Optional[list] = None, seed: int = 7) -> str:
+              dxfversion: str = "R2018", extra_column_layers: Optional[list] = None, seed: int = 7,
+              layer_names: Optional[dict] = None) -> str:
     rnd = random.Random(seed)
     f, code = UNIT[units]
-    L = LAYERS[layers]
+    L = dict(LAYERS[layers], **(layer_names or {}))
     doc = ezdxf.new(dxfversion)
     doc.header["$INSUNITS"] = code
     for name in set(L.values()):
-        doc.layers.add(name)
+        if name not in doc.layers:
+            doc.layers.add(name)
 
     def p(x, y):
         return ((x + offset[0]) * f, (y + offset[1]) * f)

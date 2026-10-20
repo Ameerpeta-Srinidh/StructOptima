@@ -53,6 +53,7 @@ def input_defaults() -> Dict[str, Any]:
         "in_date": datetime.date.today(),
         "in_mode": MODES[0],
         "in_auto_frame": False,
+        "in_layer_roles": None,               # DXF layer -> role confirmed by the engineer; None = suggestions
         "in_width": 18.0,
         "in_length": 12.0,
         "in_stories": 2,
@@ -74,6 +75,7 @@ def input_defaults() -> Dict[str, Any]:
         "in_staircase": False,
         "in_cantilevers": [],
         "in_fixed_base": True,
+        "in_col_match_wall": True,            # D-29: 230 mm column side in 230 mm walls (residential, Zone II OMRF)
         "in_cracked": True,
         "in_conc": "M25",
         "in_exposure": "Moderate",
@@ -178,7 +180,7 @@ def _acquire_geometry(s):
         from src.cad_loader import CADLoader
 
         def load(path):
-            loader = CADLoader(path)
+            loader = CADLoader(path, layer_roles=s.get("in_layer_roles"))
             gm, beams = loader.load_grid_manager(auto_frame=s["in_auto_frame"], seismic_zone=s["in_zone"],
                                                  story_height_m=s["in_story_h"], num_stories=s["in_stories"])
             st.session_state['arch_walls'] = loader.get_architectural_walls()
@@ -211,6 +213,42 @@ def _acquire_geometry(s):
     return gm, beams, None
 
 
+def read_dxf(data: bytes, roles: Optional[Dict[str, str]], auto_frame: bool = False) -> Dict[str, Any]:
+    """What StructOptima reads from a DXF with the given layer roles (None: suggestions): the layer table, the
+    columns / beams / walls in metres as the design will use them, the import warnings, or the input error."""
+    from src.cad_loader import CADLoader
+    from src.cad_parser import CADParser
+    from src.dxf_layers import ROLE_LABELS, analyse_layers
+
+    def run(path):
+        out: Dict[str, Any] = {"layers": [], "columns": [], "beams": [], "walls": [], "warnings": [], "error": None}
+        suggested = analyse_layers(CADParser(path))
+        for i in suggested:
+            role = roles.get(i.name, "ignore") if roles is not None else i.role
+            out["layers"].append({
+                "Layer": i.name, "Holds": i.contents(), "Read as": ROLE_LABELS[role],
+                "Why": i.reason if role == i.role else f"set by you (suggested: {ROLE_LABELS[i.role]} - {i.reason})",
+                "Confidence": i.confidence if role == i.role else "set by you", "_suggested": i.role})
+        try:
+            loader = CADLoader(path, layer_roles=roles)
+            gm, beams = loader.load_grid_manager(auto_frame=auto_frame)
+        except ValueError as e:
+            out["error"] = str(e)
+            return out
+        out["columns"] = [(c.x, c.y, c.width_nb, c.depth_nb, c.id) for c in gm.columns if c.level == 0]
+        out["beams"] = [((b.start_point.x, b.start_point.y), (b.end_point.x, b.end_point.y)) for b in beams]
+        out["walls"] = [((w.start_x, w.start_y), (w.end_x, w.end_y)) for w in gm.walls]
+        out["warnings"] = [w if isinstance(w, str) else w.get("message", str(w))
+                           for w in list(loader.placement_warnings) + list(loader.load_warnings)]
+        return out
+    return _with_temp_file(data, ".dxf", run)
+
+
+@st.cache_data(max_entries=8, show_spinner="Reading the drawing...")
+def read_dxf_cached(data: bytes, roles_items: Optional[Tuple[Tuple[str, str], ...]], auto_frame: bool):
+    return read_dxf(data, dict(roles_items) if roles_items is not None else None, auto_frame)
+
+
 def _design_inputs(s, gm) -> DesignInputs:
     from src.wind_load import TerrainCategory, WindZone
     bim = s["in_mode"] == MODES[2]
@@ -225,6 +263,7 @@ def _design_inputs(s, gm) -> DesignInputs:
         wall_core_thickness_mm=200.0 if s["in_wall_type"] == "230" else 100.0, mortar_ratio=int(s["in_mortar"]),
         wall_opening_fraction=s["in_openings"], include_interior_walls=s["in_interior_walls"],
         use_fly_ash=s["in_fly_ash"], project_name=s["in_project_name"], exposure=s["in_exposure"],
+        column_matches_wall=None if s["in_col_match_wall"] else False,
         nbc_construction_type=int(s["in_nbc_type"]))
 
 

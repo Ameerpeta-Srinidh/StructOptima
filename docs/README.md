@@ -90,9 +90,11 @@ verification by a licensed structural engineer.
 
 Full list: [engineering/limitations.md](engineering/limitations.md).
 
-- 2D plane frames along grid lines; **no torsion / accidental eccentricity**, no P-Δ, no response spectrum analysis.
+Every formula, decision and edge case in one dated, typeset document: [formulas/StructOptima-Formulas.pdf](formulas/StructOptima-Formulas.pdf) (source: [formulas/StructOptima-Formulas.tex](formulas/StructOptima-Formulas.tex)).
+
+- Plane frames along grid lines combined into a 3D model with **rigid floors**; response spectrum analysis with torsion (IS 1893 7.7.5, 7.8). No flexible diaphragms (re-entrant corners, large openings → WARN), no P-Δ.
 - IS 13920 ductile detailing is **not** designed (end-zone spacing only); R = 5 (SMRF) is therefore not justified by the tool.
-- Tabulated code values (τc, τc,max, Table 26 coefficients, steel stress–strain, spectra) were transcribed and **need checking against the printed standards**.
+- Tabulated code values were checked against the printed standards on 2026-10-20 ([verification/standards-check-2026-10-20.md](verification/standards-check-2026-10-20.md)); this is not an engineer's sign-off.
 - Column effective length factor is 1.0 by default (engineering decision required, IS 456 Annex E).
 - Footing sizing ignores base moments (flagged as a warning only); no combined footings, piles or rafts.
 - Quantities and costs are estimates with fixed rates and allowances.

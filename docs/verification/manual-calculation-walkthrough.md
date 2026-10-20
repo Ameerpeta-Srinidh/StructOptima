@@ -150,6 +150,9 @@ Program `svc` (max over storeys): B_H_3 26.96 ✔, B_H_1 21.781 ✔.
 
 ## 5. Seismic (equivalent static)
 
+> Since 2026-10-20 the design forces come from the response spectrum method scaled to this static base shear
+> (CAL-SEI-11); the static values below are still computed and are the scaling target (IS 1893 7.7.3).
+
 Source: `design_pipeline.storey_seismic_weights`, `seismic.run_seismic_check`.
 
 ### Storey weights

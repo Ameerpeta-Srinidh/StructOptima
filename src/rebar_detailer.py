@@ -49,6 +49,8 @@ class RebarResult(BaseModel):
     governing_combo: str = ""
     pu_design_kn: float = 0.0
     mux_design_knm: float = 0.0
+    mux1_knm: float = 0.0               # uniaxial capacities at the governing Pu (lever along X / Y)
+    muy1_knm: float = 0.0
     muy_design_knm: float = 0.0
     steel_percent: float = 0.0
     is_slender: bool = False
@@ -312,6 +314,8 @@ class RebarDetailer:
             pu_design_kn=chk.pu_kn,
             mux_design_knm=chk.mux_kNm,
             muy_design_knm=chk.muy_kNm,
+            mux1_knm=chk.mux1_kNm,
+            muy1_knm=chk.muy1_kNm,
             steel_percent=pct,
             is_slender=chk.slender_x or chk.slender_y,
             hinge_zone_mm=hinge_zone,

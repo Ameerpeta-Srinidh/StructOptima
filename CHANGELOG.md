@@ -9,6 +9,91 @@ Each entry states what changed, why, the evidence (tests actually run) and what 
 
 ---
 
+## 2026-10-20 — D-28 and N46 approved; residential columns match 230 mm walls (D-29)
+
+- **D-28 approved** (DXF layer roles).
+- **N46 fixed (D-30, approved):** the beam web self-weight no longer counts the slab strip that a thicker panel
+  already carries to the beam centre line. Applies to beam loads, the column takedown and the seismic weight.
+  Worked example (`complex_house.dxf`): W 4052.5 → 3989.5 kN, VB 101.3 → 99.7 kN, B5 load 37.22 → 36.69 kN/m.
+  The formula document's Appendix A was updated.
+- **D-29 (owner request), residential columns in 230 mm wall lines:** these columns get a 230 mm side across the
+  wall, and the other side (450–900 mm) comes from the load.
+  - Applies only where the codes allow it:
+    - Zone II with OMRF (IS 13920:2016 1.1.1 and 7.1.1 require 300 mm in Zones III–V and for SMRF);
+    - columns standing in a wall line (IS 456 Fig. 1: 300 mm for 2 h when free-standing; 200 mm "50 % exposed"
+      for a column in a wall);
+    - long side at most 900 mm (IS 456 32.1).
+  - Where walls meet, orientations are balanced between x and y.
+  - Growth goes along the wall unless bending about the 230 side governs.
+  - Beams into a 230 side are made 230 wide, and a deep 300 mm beam widens the column.
+  - Setup toggle (Materials & modelling), on by default.
+- **New check for every design (N48):** a beam wider than the column it frames into (WARN).
+- Tests: `test_wall_width_columns.py` (10) and a UI test; corrected hand values in the N13 and hand-check tests.
+  Full suite **809 passed, 3 skipped**. 92-drawing sweep: 0 crashes. Torsional irregularity FAILs appear in 2
+  drawings where the 230 columns make the plan's stiffness uneven.
+
+---
+
+## 2026-10-20 — Worked hand check; DXF drawings read the way each engineer draws them
+
+### Worked hand check (formula document, Appendix A)
+- `samples/plans/complex_house.dxf` (L-shaped G+2, Zone II, SMRF) checked by hand against the printed formulas.
+  Every value agrees:
+  - slab S1;
+  - seismic weights 1450.2 / 1450.2 / 1152.0 kN and VB 101.3 kN;
+  - beam B5 steel and stirrups;
+  - column C5 (SP 16 Chart 49);
+  - footing F-C5;
+  - the SCWB roof joint of C1 (0.98, FAIL).
+- The check is locked in `tests/test_hand_check_complex_house.py`.
+- Findings:
+  - beams are designed once for their worst floor (now documented);
+  - N46: 0.5 kN/m of slab over each beam is counted twice (conservative; fix PROPOSED);
+  - N47: three DXF problems, fixed below.
+
+### DXF reading (D-28, PROPOSED; RM-37)
+- **Layer roles from names and shapes** (new `src/dxf_layers.py`). Each layer's role is suggested from its name
+  (wider vocabulary) and from what is drawn on it:
+  - column-sized outlines;
+  - lines running from column to column;
+  - wall-thickness line pairs;
+  - grid lines.
+
+  Layers named "Layer 7", "STAMBH" or anything else are read correctly, and a drawing with everything on layer 0 is
+  sorted by shape.
+- **Engineer's confirmation on the Setup page:** a table of every layer (what it holds, how it is read, why, and the
+  confidence) with *Read as* editable, plus a plan preview of the columns, beams and walls that will be used. A
+  changed role marks the results out of date.
+- **Plinth / lintel beam layers** are ignored by default; they were read as floor beams before.
+- **New reports:**
+  - columns drawn at another size than designed ("Drawing vs design" WARN);
+  - room labels lying outside the structure that was read.
+- **No change for existing drawings:** all 92 sample drawings give the same columns, beams and status as before.
+- Tests: `test_dxf_layers.py` (16), the Setup-page DXF test; full suite **798 passed, 3 skipped**.
+
+---
+
+## 2026-10-20 — D-27 approved; documentation brought up to date; formula document
+
+- **D-27 approved by the owner:** a soft storey is flagged only when the computed storey stiffness is more than 10 %
+  below the storey above. No code change; `src/design_pipeline.py` comment updated.
+- **New formula document:** `docs/formulas/StructOptima-Formulas.tex`, with the compiled
+  `StructOptima-Formulas.pdf` and `build.sh`. It holds every formula, constant table, decision and edge case as
+  implemented, with a dated revision history. Its tables were compared with the constants in the code.
+  `CLAUDE.md` now requires a dated update and a rebuild after every check or change.
+- **Documentation now describes the 3D rigid-diaphragm model, response spectrum and torsion** instead of
+  "2D frames, no torsion":
+  - README;
+  - docs index, system overview, module catalogue, data models, interfaces, execution flows, dependency map,
+    repository inventory;
+  - calculation catalogue (new CAL-SEI-10 to 14 and CAL-DUR-01/02; stale covers, fire table and statuses
+    corrected), assumptions register (A-SEI-01 rewritten, A-SEI-06 added);
+  - known defects KD-04, KD-18, KD-24; gap analysis progress table; troubleshooting (new FAIL / WARN messages);
+  - user guide, manual walkthrough, benchmark B8.
+- Tests: 774 passed, 3 skipped (unchanged).
+
+---
+
 ## 2026-10-20 — Dynamic analysis (response spectrum on a 3D rigid-diaphragm model)
 
 Owner: "do the dynamic analysis part if we can, otherwise keep it as WARN with more info". Decisions D-26 (approved)

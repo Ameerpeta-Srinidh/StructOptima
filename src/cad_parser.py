@@ -32,14 +32,21 @@ class CADParser:
     """
     Parses DXF files to extract structural geometry.
     """
-    def __init__(self, filepath: str, layer_map: Optional[Dict[str, str]] = None):
+    def __init__(self, filepath: str, layer_map: Optional[Dict[str, str]] = None,
+                 layer_roles: Optional[Dict[str, str]] = None):
         """
         Args:
             filepath: Path to the .dxf file.
             layer_map: Dictionary mapping element types to DXF layer names.
                        Default: {'columns': 'COLUMNS', 'beams': 'BEAMS', 'footings': 'FOOTINGS'}
+            layer_roles: layer name -> "column" / "beam" / "wall" / "mixed" / "ignore" confirmed by the engineer;
+                       layers not listed are ignored. None: roles suggested by ``dxf_layers.analyse_layers``.
         """
         self.filepath = filepath
+        self.layer_roles = dict(layer_roles) if layer_roles is not None else None
+        self._roles_cache: Optional[Dict[str, str]] = None
+        self._mixed_cache = None
+        self.layer_info = []      # dxf_layers.LayerInfo per layer when the roles are suggested
         self.doc = None
         self.msp = None
         self._flat_cache = None
@@ -133,6 +140,51 @@ class CADParser:
                 self.warnings.append(f"Block '{name}' could not be exploded ({ex}): its contents were not read.")
                 continue
             yield from self._explode(virtual, layer, depth + 1)
+
+    def roles(self) -> Dict[str, str]:
+        """Role of every layer: the confirmed mapping, or the suggestion from names and drawn shapes."""
+        if self.layer_roles is not None:
+            return self.layer_roles
+        if self._roles_cache is None:
+            from .dxf_layers import analyse_layers
+            self.layer_info = analyse_layers(self)
+            self._roles_cache = {i.name: i.role for i in self.layer_info}
+        return self._roles_cache
+
+    def role_of(self, layer: str) -> str:
+        return self.roles().get(layer, "ignore")
+
+    def _mixed(self) -> Dict[str, list]:
+        """Entities of "decide by shape" layers sorted by shape: column outlines, beam segments, wall segments
+        (drawing units)."""
+        if self._mixed_cache is not None:
+            return self._mixed_cache
+        out = {"columns": [], "beams": [], "walls": []}
+        mixed = {n for n, r in self.roles().items() if r == "mixed"}
+        if mixed:
+            from .dxf_layers import _Geometry
+            g = _Geometry(self)
+            centres = []
+            for n, d in g.by_layer.items():
+                if n in mixed or self.role_of(n) == "column":
+                    for o in d["outlines"]:
+                        if g.column_sized(o):
+                            centres.append((o["x"], o["y"], 0.5 * max(o["w"], o["d"]), min(o["w"], o["d"])))
+            for n in mixed:
+                d = g.by_layer.get(n)
+                if not d:
+                    continue
+                out["columns"] += [o for o in d["outlines"] if g.column_sized(o)]
+                for o in d["outlines"]:
+                    if not g.column_sized(o):
+                        d["segs"] += list(zip(o["pts"], o["pts"][1:] + o["pts"][:1]))
+                kinds = [g.classify_segment(sg, centres) for sg in d["segs"]]
+                out["beams"] += [sg for sg, k in zip(d["segs"], kinds) if k == "beam"]
+                rest = [sg for sg, k in zip(d["segs"], kinds) if k == "other"]
+                paired, _ = g.paired_segments(rest, min_overlap_mm=500.0)   # guessing: ignore tag leaders, ticks
+                out["walls"] += [rest[i] for i in sorted(paired)]
+        self._mixed_cache = out
+        return out
 
     def _by_type_and_layer(self, dxftype, layer_name):
         """Filter entities directly — avoids ezdxf's query()/pyparsing dependency entirely."""
@@ -262,8 +314,11 @@ class CADParser:
         if not self.msp or not self.doc:
             return []
         found = []
+        for o in self._mixed()["columns"]:
+            w, d, ang, cx, cy = self._rect_dims(o["pts"])
+            found.append({"x": cx, "y": cy, "width": w, "depth": d, "orientation_deg": ang, "shape": "rect"})
         for e in self._flat():
-            if not is_column_layer(e.dxf.get("layer", "0")):
+            if self.role_of(e.dxf.get("layer", "0")) != "column":
                 continue
             t = e.dxftype()
             if t in ("LWPOLYLINE", "POLYLINE"):
@@ -324,8 +379,11 @@ class CADParser:
         beams = []
         if not self.msp or not self.doc:
             return []
+        for a, b in self._mixed()["beams"]:
+            beams.append({"start": (float(a[0]), float(a[1])), "end": (float(b[0]), float(b[1])),
+                          "id": f"B{len(beams) + 1}"})
         for e in self._flat():
-            if not is_beam_layer(e.dxf.get("layer", "0")):
+            if self.role_of(e.dxf.get("layer", "0")) != "beam":
                 continue
             t = e.dxftype()
             segs = []
@@ -356,12 +414,7 @@ class CADParser:
             return []
             
         layer_names = self._all_layer_names()
-        
-        # Keywords for wall layers (broad enough to catch any convention)
-        WALL_KW = ['WALL', 'STRUCT', 'LOAD', 'BEAR', 'MASONRY', 'BRICK',
-                    'OUTLINE', 'BOUNDARY', 'A-WALL', 'S-WALL', 'ARCH']
-        
-        wall_layers = [n for n in layer_names if any(kw in n.upper() for kw in WALL_KW)]
+        wall_layers = [n for n in layer_names if self.role_of(n) == "wall"]
         
         def _get_lines_for_layers(layers_to_check):
             found = []
@@ -378,11 +431,19 @@ class CADParser:
                     if ply.is_closed and len(points) > 2: found.append((points[-1], points[0]))
             return found
 
-        # Tier 1: Explicit keyword-matched layers
-        walls = _get_lines_for_layers(wall_layers)
-        if walls:
+        # Tier 1: layers read as walls (confirmed by the engineer, or suggested from names and shapes), plus the
+        # wall faces of "decide by shape" layers
+        walls = _get_lines_for_layers(wall_layers) + [tuple(map(tuple, w)) for w in self._mixed()["walls"]]
+        guessed = [i.name for i in self.layer_info if i.role == "wall" and i.confidence == "low"]
+        if guessed and walls:
+            self.warnings.append(
+                f"No layer was recognised as walls: {len(walls)} line segments from layers {sorted(guessed)[:8]} were "
+                f"treated as walls. Check the layer list on the Setup page.")
+        if walls or self.layer_roles is not None:
             logger.info("Tier 1 wall extraction: %d segments from %d layers", len(walls), len(wall_layers))
-            return walls
+            return walls          # a confirmed mapping is used as given: no guessing from other layers
+        if any(r in ("column", "mixed") for r in self.roles().values()):
+            return walls          # a frame drawing without walls
         
         # Tier 2: scan the remaining layers, excluding annotation / furniture layers
         candidate = [n for n in layer_names if not any(kw in n.upper() for kw in self.NON_WALL_KW)]

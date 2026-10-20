@@ -17,7 +17,7 @@ the tolerance, and the test that encodes it.
 | B5 | Beam design | SP:16 Tables (singly, doubly) and one continuous-beam worked example | Ast within 2 % | B3, B4 | Equilibrium checks done |
 | B6 | Column P-M, biaxial, slender | SP:16 interaction charts (≥ 3 points per chart for 2 sections), one biaxial and one slender worked example | Capacity within 3 % | B3 | End points and pure bending done |
 | B7 | Seismic inputs | Hand ESA for a regular G+3 building (W, Ta, Sa/g, Vb, Q_i) | Within 1 % | B1, D-02, D-03 | Distribution verified |
-| B8 | Lateral analysis | Reference-program 3D model of a regular building (no torsion) vs 2D frames | Storey shears/drifts within 10 % (document) | B3, B7 | NOT_ASSESSED |
+| B8 | Lateral analysis | Reference-program 3D model (ETABS / STAAD) of a regular and an eccentric building vs the rigid-diaphragm model: periods, modal mass, storey shears, torsion ratio, drifts | Storey shears/drifts within 10 % (document) | B3, B7 | NOT_ASSESSED |
 | B9 | SCWB / joint | Hand joint calculation from provided steel | Ratios within 2 % | B5, B6, B8 | NOT_ASSESSED |
 | B10 | Optimiser | Re-analysis with optimised sizes passes production checks | All members PASS after re-run | B6 | NOT_ASSESSED |
 | B11 | Footing | Worked isolated footing example (bearing, punching, one-way, flexure, steel) | Thickness/steel match | B1 | NOT_ASSESSED |

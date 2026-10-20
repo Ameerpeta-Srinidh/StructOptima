@@ -22,6 +22,7 @@ def _store_upload(kind):
     f = S.get(f"upload_{kind}")
     if f is not None:
         S["model_file"] = {"name": f.name, "bytes": f.getvalue(), "kind": kind}
+        S["in_layer_roles"] = None              # a new drawing starts from the suggestions
         ui_state.on_site_change()
 
 
@@ -44,6 +45,75 @@ def _plan_preview(width, length, cantilevers):
                       yaxis=dict(title="y (m)", showgrid=False, zeroline=False, scaleanchor="x"))
     st.plotly_chart(fig, config={"displayModeBar": False}, key="plan_preview")
     st.caption(f"Starting column grid: {len(cols)} columns. Column sizes and the final layout come from the design.")
+
+
+def _set_roles(roles):
+    S["in_layer_roles"] = roles
+    S["layer_editor_version"] = S.get("layer_editor_version", 0) + 1
+
+
+def _on_layer_edit(key, layers):
+    from src.dxf_layers import ROLE_LABELS
+    by_label = {v: k for k, v in ROLE_LABELS.items()}
+    current = {r["Layer"]: by_label[r["Read as"]] for r in layers}
+    for row, change in S[key].get("edited_rows", {}).items():
+        if "Read as" in change:
+            current[layers[int(row)]["Layer"]] = by_label[change["Read as"]]
+    _set_roles(current)
+
+
+def _dxf_reading(f):
+    """How the drawing is read: one row per layer (the engineer can correct the role) and a plan preview of the
+    columns, beams and walls the design will use."""
+    import plotly.graph_objects as go
+    from src.dxf_layers import ROLE_LABELS
+    roles = S.get("in_layer_roles")
+    data = ui_state.read_dxf_cached(f["bytes"], tuple(sorted(roles.items())) if roles is not None else None,
+                                    bool(S["in_auto_frame"]))
+    st.markdown("**How the drawing is read**")
+    st.caption("Every office names layers differently, so each layer's role is suggested from its name and from what "
+               "is drawn on it. Check the roles and the preview; change *Read as* where it is wrong. "
+               "*Decide by shape*: closed column-sized outlines are columns, lines from column to column are beams, "
+               "line pairs a wall thickness apart are walls.")
+    layers = data["layers"]
+    key = f"layer_editor_{S.get('layer_editor_version', 0)}"
+    import pandas as pd
+    st.data_editor(pd.DataFrame([{k: v for k, v in r.items() if not k.startswith("_")} for r in layers]),
+                   key=key, hide_index=True, width="stretch", on_change=_on_layer_edit, args=(key, layers),
+                   disabled=["Layer", "Holds", "Why", "Confidence"],
+                   column_config={"Read as": st.column_config.SelectboxColumn(
+                       "Read as", options=list(ROLE_LABELS.values()), required=True, width="medium"),
+                       "Why": st.column_config.TextColumn("Why", width="large")})
+    if roles is not None:
+        st.button("Back to the suggested roles", on_click=_set_roles, args=(None,))
+    if data["error"]:
+        st.error(data["error"])
+        return
+    fig = go.Figure()
+    for (x1, y1), (x2, y2) in data["walls"]:
+        fig.add_trace(go.Scatter(x=[x1, x2], y=[y1, y2], mode="lines", line=dict(color="#C8CDD5", width=4),
+                                 hoverinfo="skip", showlegend=False))
+    for (x1, y1), (x2, y2) in data["beams"]:
+        fig.add_trace(go.Scatter(x=[x1, x2], y=[y1, y2], mode="lines", line=dict(color="#E8833A", width=2),
+                                 hoverinfo="skip", showlegend=False))
+    for x, y, w, d, cid in data["columns"]:
+        fig.add_shape(type="rect", x0=x - w / 2000, x1=x + w / 2000, y0=y - d / 2000, y1=y + d / 2000,
+                      fillcolor="#1559C1", line=dict(width=0))
+    fig.add_trace(go.Scatter(x=[c[0] for c in data["columns"]], y=[c[1] for c in data["columns"]], mode="markers",
+                             marker=dict(size=6, color="#1559C1"), showlegend=False,
+                             text=[f"{c[4]}: {c[2]:.0f} x {c[3]:.0f} mm as drawn" for c in data["columns"]],
+                             hovertemplate="%{text}<br>x %{x:.2f} m, y %{y:.2f} m<extra></extra>"))
+    fig.update_layout(height=320, margin=dict(l=10, r=10, t=10, b=10), plot_bgcolor="white",
+                      xaxis=dict(title="x (m)", showgrid=False, zeroline=False),
+                      yaxis=dict(title="y (m)", showgrid=False, zeroline=False, scaleanchor="x"))
+    st.plotly_chart(fig, config={"displayModeBar": False}, key="dxf_preview")
+    st.caption(f"Read: **{len(data['columns'])} columns** (blue, as drawn), **{len(data['beams'])} beams** (orange), "
+               f"**{len(data['walls'])} wall lines** (grey, under the beams where they coincide). The design may enlarge the columns; differences from the "
+               f"drawing are listed in the results.")
+    if data["warnings"]:
+        with st.expander(f"{len(data['warnings'])} note(s) about the drawing", expanded=True):
+            for w in data["warnings"]:
+                st.markdown(f"- {w}")
 
 
 left, right = st.columns([2.3, 1], gap="large")
@@ -69,6 +139,13 @@ with left:
                 st.caption(f"Using **{f['name']}** ({len(f['bytes']) / 1024:.0f} kB). Upload another file to replace it.")
             st.toggle("Place columns automatically from the architecture", key="in_auto_frame",
                       help="Use when the drawing has walls only and no columns.")
+            if f:
+                try:
+                    _dxf_reading(f)
+                except Exception as e:  # preview only; the design run reports real errors
+                    logger.error("DXF preview failed: %s", e)
+                    capture_exception(e)
+                    st.warning(f"The drawing preview could not be shown ({e}). The design run reports the details.")
         elif mode == MODES[2]:
             try:
                 import ifcopenshell  # noqa: F401
@@ -163,6 +240,12 @@ with left:
         b1.toggle("Fixed column bases", key="in_fixed_base", help="Off = pinned bases in the frame analysis.")
         b2.toggle("Cracked sections (0.70 Ig columns, 0.35 Ig beams)", key="in_cracked")
         b1.toggle("Green concrete (fly ash) for quantities and carbon", key="in_fly_ash")
+        b2.toggle("Columns in 230 mm walls: 230 mm side (residential)", key="in_col_match_wall",
+                  help="Columns standing in a 230 mm wall line get their side across the wall equal to the wall, "
+                       "the other side from the load (450-900 mm). Only in Zone II with OMRF: IS 13920:2016 7.1.1 "
+                       "requires 300 mm in Zones III-V and for SMRF. Free-standing columns stay at least 300 x 450. "
+                       "Fire check: IS 456 Fig. 1 '50 % exposed'. Turn on interior walls (Masonry tab) for interior "
+                       "columns that stand in walls.")
         b2.toggle("Show column optimisation (indicative only)", key="in_optimise")
         st.selectbox("Plan / 3D colouring", ["Engineering", "Architectural", "Utilization", "Load Path"],
                      key="in_view_mode")

@@ -49,9 +49,13 @@ sequenceDiagram
 4. Tributary areas (staircase bay optional), first takedown, initial column sizing (`optimize_column_sizes`: axial, project minimum 300×450, seismic minimum 300, stack locking).
 5. **Iteration** (≤ `max_iterations`, default 6):
    1. takedown (`calculate_loads`, DL/LL split, beam webs, walls, column self-weight, stair allowance);
-   2. storey seismic weights → `seismic.run_seismic_check` (Vb, vertical distribution, regularity screening);
+   2. storey seismic weights → `seismic.run_seismic_check` (static VB with Table 7 minimum, vertical distribution,
+      regularity screening, method rule) → `seismic_spec` (floor masses, centre of mass and inertia from the slab
+      panels; response spectrum 6.4.2(b));
    3. wind storey forces (`wind_load.calculate_wind_load`) if a wind zone is given;
-   4. `analysis_integration.update_structural_analysis` → envelopes on beams, combination forces on columns;
+   4. `analysis_integration.update_structural_analysis`: condensed stiffness of every frame → rigid-diaphragm 3D
+      model → response spectrum + design eccentricity per direction (`pseudo3d`) → frame forces → 2D frame solves
+      → envelopes on beams, combination forces on columns;
    5. `detail_beams` (depth grows while FAIL / ρ > 2.5 %), `detail_columns` (all combinations);
    6. failing column stacks grow to the next preferred size; if any EQ storey drift exceeds 0.004 h (from the
       analysis just run) **every** column stack grows one preferred size (D-16); stop when nothing changed.
@@ -61,7 +65,9 @@ sequenceDiagram
 8. Status aggregation → `DesignResults.status`, `failures`, `messages`. Added 2026-10-16: storey-drift rows
    (`drift_checks` → `DesignResults.drift_results`; EQ over limit FAIL, wind top sway over H/500 WARN, missing EQ
    drift WARN), one-direction columns WARN (N19), "Wind not considered" WARN when `wind_zone is None` (N18).
-   Footing base moments are un-factored by each combination's own largest factor (N20).
+   Footing base moments are un-factored by each combination's own largest factor (N20). Added 2026-10-20: durability
+   and fire, IS 13920 checks, structural system, floating columns, soft storey, torsional irregularity, irregular
+   modes, seismic-method WARNs (D-26).
 
 ## 3. CLI (`main.py::main`)
 

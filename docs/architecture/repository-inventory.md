@@ -29,7 +29,7 @@ Status: **P** production, **T** tests/demos only, **U** unused (no importer), **
 | Orchestration | `design_pipeline` P |
 | Geometry / model | `grid_manager` P, `framing_logic` P, `materials` P, `building_types` P, `sections` T, `schema` U, `calculations` T |
 | Ingest | `cad_parser` P, `cad_loader` P, `auto_framer` P, `column_placer` P, `beam_placer` P (via auto_framer), `column_editor` P, `bim_loader` P (needs `ifcopenshell`) |
-| Analysis | `fea_solver` P, `analysis_integration` P, `load_combinations` P, `seismic` P, `wind_load` P, `analysis_config` T |
+| Analysis | `fea_solver` P, `analysis_integration` P, `pseudo3d` P, `load_combinations` P, `seismic` P, `wind_load` P, `durability` P, `analysis_config` T |
 | Design | `section_design` P, `rebar_detailer` P, `foundation_eng` P, `member_design` T (legacy alternative), `slab_generator` T, `anchorage` P (UI tables) |
 | Checks | `audit` P, `stability` P, `safety_warnings` P, `optimizer` P (Checks page), `risk_management` C, `structural_checks` T, `validators` T, `layout_optimizer` T, `layout_scorer` T |
 | Quantities / outputs | `quantifier` P, `wall_calculator` P, `bbs_module` P, `bbs_report` P, `bbs_utils` P, `quantity_takeoff` T, `report_gen` P, `exporters` P, `dxf_exporter` P, `geometry_exporter` P, `visualizer` P, `svg_viewer` P |

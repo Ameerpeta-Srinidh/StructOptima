@@ -28,9 +28,13 @@ Fill in the five tabs on the left. The **Run design** panel on the right lists w
 1. **Building & geometry**: project name, engineer and drawing reference, then the geometry source:
    - *Manual dimensions*: plan width and length, storeys, storey height, optional cantilever balconies and
      staircase void. A plan preview shows the starting column grid;
-   - *CAD drawing (DXF)*: columns as closed polylines on COL layers, beams as lines on BEAM layers. Turn on
-     *Place columns automatically* if the drawing has walls only. The uploaded file is kept until you upload
-     another one;
+   - *CAD drawing (DXF)*: after the upload, **How the drawing is read** lists every layer with what it holds, how
+     it will be read (Columns, Beams, Walls, Decide by shape, Ignore) and why. The roles are suggested from the layer
+     name and from what is drawn (closed column-sized outlines, lines from column to column, wall-thickness line
+     pairs), so layers can be named any way. Check the plan preview below the table and change *Read as* where it
+     is wrong; *Back to the suggested roles* undoes your changes. Notes list room labels that fall outside the
+     structure read. Columns must be closed outlines or circles. Turn on *Place columns automatically* if the
+     drawing has walls only. The uploaded file is kept until you upload another one;
    - *BIM model (IFC)*.
 2. **Occupancy & loads**: the occupancy (the load values it uses are shown) and the wall load used when the model has
    no walls.
@@ -42,6 +46,11 @@ Fill in the five tabs on the left. The **Run design** panel on the right lists w
    and the minimum grade (Table 5); **NBC type of construction** (Part 4 Table 1), which sets the fire rating of
    columns, beams and slabs. The covers and fire ratings used are shown under the inputs. Then fixed or pinned bases, cracked sections, fly-ash concrete,
    column optimisation display, plan colouring.
+   *Columns in 230 mm walls* (on by default, residential): columns standing in a 230 mm wall line get a 230 mm side
+   across the wall so they do not project from it, the other side 450-900 mm from the load. It applies only in
+   Zone II with OMRF (IS 13920 requires 300 mm in Zones III-V and for SMRF; the design says so). Free-standing
+   columns stay at least 300 x 450. Columns that need more than 230 mm are widened and listed as "Column wider than
+   wall"; beams wider than a column are listed as "Beam wider than column".
 5. **Masonry**: wall thickness, mortar, openings, interior walls.
 
 Then, in the Run design panel:
@@ -60,7 +69,7 @@ Then, in the Run design panel:
 | PASS for the implemented checks only — NOT VERIFIED (green) | Every check the tool performs passed. That is **not** a complete design check |
 
 Open **"Checks NOT performed by StructOptima"** under the banner. It lists what must be checked separately:
-- torsion and 3D effects, and response-spectrum analysis;
+- flexible floor diaphragms (L/T-shaped plans, large openings), P-Δ;
 - orthogonal seismic combination;
 - pattern live loading;
 - P-Δ and effective length;
@@ -97,12 +106,12 @@ One tab per topic:
   - Earthquake drift above 0.004 × storey height is a FAIL. The design automatically enlarges the columns to try
     to meet it.
   - Wind top sway above height / 500 is a WARN.
-  - Both limits are as commonly cited and still need confirmation against the printed standards.
-  - Drift does not include torsion.
+  - Both limits were checked against the printed standards (IS 1893 7.11.1.1, IS 456 20.5).
+  - Drift includes torsion from the 3D rigid-floor model.
 - **Stability & fire**: fire rating, slenderness and minimum dimensions;
 - **Joints & plan**: plan irregularity warnings, the mass – stiffness offset screen, deep beams, joint shear and
-  the stiffness modifiers. The offset screen is not the IS 1893 torsional irregularity check: torsion is not
-  analysed;
+  the stiffness modifiers. The offset screen is only indicative; the IS 1893 torsional irregularity check (Δmax / Δave)
+  is in the status list and on the Seismic tab;
 - **Load combinations**: the combinations applied and the overall overturning check;
 - **Deflection (L/d)**: basic span / depth ratios, without modification factors;
 - **Optimisation**: only when turned on in Setup. It is indicative only.
@@ -217,7 +226,7 @@ project specification and the engineer's instructions govern.
 
 ## 8. Limits to remember
 
-- 2D frames only: no torsion. Irregular plans need an independent 3D analysis.
-- Equivalent static seismic method only. Where it is not permitted the design FAILs ("Seismic method").
+- Rigid floors only: L/T-shaped plans and large openings need an independent flexible-diaphragm 3D analysis (WARN).
+- Response spectrum analysis on the rigid-floor 3D model; no time history, no P-Δ.
 - Laps, anchorage and curtailment are typical notes on the drawings, not designed.
 - Full list: [engineering/limitations.md](engineering/limitations.md). Changes: [../CHANGELOG.md](../CHANGELOG.md).

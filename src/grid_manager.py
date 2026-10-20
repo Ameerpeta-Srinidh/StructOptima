@@ -1,6 +1,6 @@
 import math
 import re
-from typing import List, Literal, Tuple, Optional, Any
+from typing import Dict, List, Literal, Tuple, Optional, Any
 from pydantic import BaseModel, PositiveFloat
 
 from .materials import Concrete
@@ -25,6 +25,9 @@ class Column(BaseModel):
     is_floating: bool = False
     reinforcement_rule: str = "IS_456_Standard"
     orientation_deg: float = 0.0
+    # "x" / "y": the column stands in a wall line along that axis with its side across the wall equal to the wall
+    # (IS 456 Fig. 1 "50 % exposed"); None: free-standing (D-29)
+    wall_dir: Optional[str] = None
     # SERVICE load split from calculate_loads (load_kn = load_dl_kn + load_ll_kn)
     load_dl_kn: float = 0.0
     load_ll_kn: float = 0.0
@@ -129,6 +132,8 @@ class GridManager(BaseModel):
     # Plan line segments ((x1, y1), (x2, y2)) in m bounding the floor (walls and
     # beams); used to decide whether a bay lies inside the building.
     boundary_segments: List[Tuple[Tuple[float, float], Tuple[float, float]]] = []
+    # column sizes as drawn in the DXF, mm, keyed "x,y" (m, 3 decimals): reported when the design differs
+    drawn_column_sizes_mm: Dict[str, Tuple[float, float]] = {}
     
     def _estimate_initial_column_size(self, col_type: str, trib_area_est: float) -> tuple:
         """Estimate column size based on story count, position, and IS 456 Cl 39.3.
@@ -433,15 +438,17 @@ class GridManager(BaseModel):
 
     def _beam_self_weight_map(self, beams: Optional[List[Any]]) -> dict:
         """Half of each framing beam's web self-weight lumped to each end
-        column, {(x, y): kN} per floor.  Web depth = D - slab thickness."""
+        column, {(x, y): kN} per floor.  Web depth = D - slab thickness, less the half beam width of each adjacent
+        panel designed thicker than that slab (already in the tributary slab load, finding N46)."""
+        from .analysis_integration import beam_slab_coefficients, web_self_weight_kn_m   # (circular at import time)
         out = {}
         t = self.slab_thickness_mm / 1000.0
         if beams:
-            for b in beams:
-                if b.end_point is None:
-                    continue
+            valid = [b for b in beams if b.end_point is not None]
+            over = beam_slab_coefficients(self, valid, return_extra=True)[2] if valid else {}
+            for b in valid:
                 L = math.hypot(b.end_point.x - b.start_point.x, b.end_point.y - b.start_point.y)
-                sw = b.properties.width_mm / 1000.0 * max(b.properties.depth_mm / 1000.0 - t, 0.0) * 25.0 * L
+                sw = web_self_weight_kn_m(b, t, over.get(b.id, 0.0)) * L
                 for p in (b.start_point, b.end_point):
                     c = min(self.columns, key=lambda c: math.hypot(c.x - p.x, c.y - p.y)) if self.columns else None
                     if c is not None and math.hypot(c.x - p.x, c.y - p.y) < 0.3:
