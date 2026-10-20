@@ -56,7 +56,8 @@ def test_staircase_void_excluded_from_slabs_but_not_regularity(res):
     gm = res.gm
     assert gm.void_bays
     assert len(gm.slab_panels()) == len(gm.slab_panels(include_voids=True)) - len(gm.void_bays)
-    assert not any(f["Type"] == "Seismic method" for f in res.failures)
+    # a stair void is not a plan irregularity (the Zone III method failure itself is IS 1893 7.7.1)
+    assert not any(f["Type"] == "Seismic method" and "irregular" in f["Issue"] for f in res.failures)
 
 
 @pytest.mark.parametrize("zone,occupancy", [("II", "Residential"), ("IV", "Assembly Hall"), ("V", "Commercial (Office)")])

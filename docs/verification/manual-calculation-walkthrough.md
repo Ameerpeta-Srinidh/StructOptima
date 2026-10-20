@@ -58,15 +58,15 @@ Result for this building: design status **WARN** (six advisory items — see §1
 
 | Output | Page |
 |---|---|
-| Column service load, bars, ties, P-M ratio, status | Schedules → Column schedule (per level) |
-| Column calculation log (Pu, Mx, My, Mux1, Muy1, ratio) | Schedules → "math log" selector |
-| Beam size, bars, stirrups, Mu+ / Mu−, Vu | Schedules → Beam schedule |
-| Slab thickness, bars | Schedules → Slab schedule |
-| Footing size | Schedules → Column schedule (Footing Size) / Reports |
-| Seismic Z, Ah, Ta, Vb, storey weights and forces | Analysis → Seismic section (storey-force table) |
-| Wind speed, base shear | Analysis → Wind section |
-| Failures / warnings | Dashboard banner; Analysis → Design Failures |
-| Quantities | Dashboard metrics; Reports |
+| Column service load, bars, ties, P-M ratio, status | Members → Columns |
+| Column calculation log (Pu, Mx, My, Mux1, Muy1, ratio) | Members → Calculation log |
+| Beam size, bars, stirrups, Mu+ / Mu−, Vu | Members → Beams |
+| Slab thickness, bars | Members → Slabs |
+| Footing size | Members → Footings / Reports |
+| Seismic Z, Ah, Ta, Vb, storey weights and forces | Checks → Seismic (storey-force table) |
+| Wind speed, base shear | Checks → Wind |
+| Failures / warnings | Overview banner and issue list; Checks → Issues |
+| Quantities | Overview → Quantities; Reports |
 
 ---
 
@@ -276,7 +276,7 @@ Bottom steel (sagging 28.53 kNm) works the same way → 271 mm² → 3-12 (339 m
 ## 9. Column design — C5_L0 (300 × 450, 8-16)
 
 Source: `rebar_detailer.detail_column`, `section_design.check_column`. The column log
-on the Schedules page shows every value below.
+on the Members page (Calculation log) shows every value below.
 
 | Step | Formula | Value |
 |---|---|---|
@@ -373,10 +373,10 @@ Follow the same order; each step uses outputs of the previous ones.
 1. **Intensities** (§1) from your occupancy, plus 25 × (designed − occupancy slab thickness); check against IS 875.
 2. **Walls** (§2): t × h × (1 − openings) × γ.
 3. **Takedown** (§3) for one corner, one edge and one interior column, top to bottom.
-   Compare with the Schedules page "Load (kN)" (service load).
+   Compare with the Members page "Service load (kN)".
 4. **Beam loads** (§4) for one edge and one interior beam (k = lx/3 or (lx/6)(3 − (lx/ly)²)).
 5. **Seismic** (§5): storey weights → Ta → Sa/g → Ah → Vb → storey forces. Compare with the
-   Analysis page table.
+   Checks page (Seismic tab) table.
 6. **Wind** (§6) for the bottom storey.
 7. **Frame** (§7): statics check (hog avg + sag = wL²/8) for one beam; optionally model
    one frame in a 2D program with the §7b table recipe.

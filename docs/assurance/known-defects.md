@@ -1,6 +1,6 @@
 # Known Defects and Open Issues
 
-**As of:** 2026-10-16. Current behaviour that is known to be wrong, incomplete or
+**As of:** 2026-10-20. Current behaviour that is known to be wrong, incomplete or
 risky after the 2026-10 remediation. For engineering simplifications see
 [../engineering/limitations.md](../engineering/limitations.md); for the full
 history see [risk-register.md](risk-register.md).
@@ -22,8 +22,17 @@ history see [risk-register.md](risk-register.md).
 | KD-13 | Legacy docs (now in `docs/legacy/`: `api_reference.md`, `user_guide.md`, `installation.md`, `engineering_basis.md`, `risk_management.md`) partly describe pre-2026-10 behaviour | L | Known | Banners added; rewrite pending |
 | KD-14 | `member_design.py` (test-only) column capacity ignores axial load (CAL-LEG-01) | L | CONFIRMED_DEFECT | Do not use outside tests |
 | KD-15 | CI has not been observed running the 2026-10 changes | M | NOT_ASSESSED | Push to a branch and check CI |
-| KD-16 | Torsional-irregularity indicator on the Analysis page uses a CoM–CoR offset > 5 % heuristic, not the IS 1893 displacement-based definition | M | UNVERIFIED | Engineer review |
+| KD-16 | Mass – stiffness offset screen (Checks → Joints & plan) uses a CoM–CoR offset > 5 % heuristic, not the IS 1893 displacement-based definition. Since 2026-10-20 it is labelled a screen and no longer shows a green "no torsional irregularity" result | M | UNVERIFIED | Engineer review; replace with the IS 1893 check once a 3D analysis exists |
 | KD-17 | (Closed in code 2026-10-16) Slab dead load used the occupancy slab thickness while slabs were designed thicker (N13) | — | UNVERIFIED (fix implemented, see RM-26) | Engineer review of the per-panel load rule |
 | KD-18 | Storey drift limits (0.004 h EQ, H/500 wind) and automatic column growth for drift are implemented with UNVERIFIED limit values; drifts exclude torsion (2D frames) | H | UNVERIFIED (D-16) | Engineer to confirm the limits against IS 1893 / IS 456; external 3D check for irregular plans |
 | KD-19 | A column lying on a frame line in one direction only gets no frame moments in the other direction (now WARN, N19) | M | Known | Add beams / frames on that line or check the column separately |
 | KD-20 | 3D viewer: geometry is boxes from the design (no openings, reinforcement or stairs); walk-through has no collision; footings drawn directly below the column base | L | Known (by scope) | Use the drawing set for construction details |
+| KD-21 | BBS: default bars, spacings and slab panel size used when a member description cannot be parsed (N27). The BBS covers one typical floor and the ground-storey columns; footings, upper columns and staircases are not in it | M | Known (scope now stated in the UI) | Replace the fallbacks by an explicit "not scheduled" entry (needs approval); extend the BBS to all floors and footings |
+| KD-22 | `pypdfium2` is a test-only dependency (N28) | L | Resolved in CI 2026-10-20 | Installed by `.github/workflows/ci.yml` and `docs/development/setup.md` |
+| KD-23 | Dynamic (response-spectrum) analysis is not implemented, but IS 1893:2016 7.7.1 requires it for every building except regular buildings under 15 m in Zone II. Such designs therefore FAIL on "Seismic method" | H | Open (by scope) | 3D modal / response-spectrum engine (high-rise phase) |
+| KD-24 | IS 13920 confining steel (Ash) and capacity-design shear, IS 1893 100 % + 30 % and vertical earthquake, accidental torsion | H | Open | Listed in "checks not performed" |
+| KD-25 | Joint effective breadth for bc ≥ bb: the printed copy of IS 13920 9.1.2(a) does not show it in full; the mirror form min[bc; bb + 0.5 hc] is used | M | UNVERIFIED | Confirm from another print / BIS |
+| KD-26 | DXF beams get an initial 300 × 600 mm section (plan drawings carry no beam size); width is kept, depth is designed | L | Known | Enter beam widths from the architectural drawing (future input) |
+| KD-27 | Circular columns are designed as squares of equal area (warning shown) | M | Known | Design circular columns separately |
+| KD-28 | Imposed loads on corridors, stairs and balconies, wind k3 / k4, cantilever lateral stability limits not modelled | M | Open | See standards register GAP rows |
+

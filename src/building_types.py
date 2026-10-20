@@ -102,10 +102,12 @@ COMMERCIAL_OFFICE = LoadParameters(
     building_type=BuildingType.COMMERCIAL_OFFICE,
     description="Commercial Office Buildings",
     
-    # IS 875 Part 2, Clause 3.1.2 - Office Buildings
-    live_load_floor_kn_m2=3.0,         # Office spaces
+    # IS 875 (Part 2):1987 Table 1 v): rooms for general use 2.5 kN/m2 WITH separate storage, 4.0 kN/m2
+    # WITHOUT separate storage. 4.0 is used because storage cannot be assumed (was 3.0, which is not a Table 1
+    # value - corrected 2026-10-20). Light partitions: 3.1.2.
+    live_load_floor_kn_m2=4.0,         # Office rooms without separate storage
     live_load_corridor_kn_m2=4.0,      # Corridors, lobbies
-    live_load_balcony_kn_m2=3.0,       # Balconies
+    live_load_balcony_kn_m2=4.0,       # Balconies: as the rooms served, minimum 4.0
     live_load_roof_kn_m2=1.5,          # Accessible roof
     
     # Dead loads

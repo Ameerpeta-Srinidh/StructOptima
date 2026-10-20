@@ -1,40 +1,45 @@
 # Execution Flows
 
-**As of:** 2026-10-16. References are `file::symbol`.
+**As of:** 2026-10-20. References are `file::symbol`.
 
-## 1. Streamlit dashboard (`app.py`)
+## 1. Streamlit app (`app.py` + `pages/`)
 
 ```mermaid
 sequenceDiagram
   participant U as User
-  participant A as app.py
-  participant G as _acquire_geometry
+  participant A as app.py (every rerun)
+  participant Su as pages/setup.py
+  participant St as ui_state
   participant P as design_pipeline.run_design
   participant S as st.session_state
-  U->>A: enter SBC, confirm site parameters, accept disclaimer, press Run Analysis
-  A->>G: input mode (Manual / DXF / IFC)
-  G-->>A: GridManager + plan beams (+ loader warnings)
-  A->>P: DesignInputs(from sidebar)
-  P-->>A: DesignResults(status, failures, ...)
-  A->>S: store results under legacy keys + design_status / design_failures
-  A-->>U: status banner, metrics, column editor
-  U->>A: column editor confirm
-  A->>S: gm.columns replaced, needs_redesign = True
-  A->>P: re-run with stored beams
+  A->>St: init_inputs, keep_inputs (in_* keys survive page switches)
+  A->>St: ensure_design (re-run after a column-editor change)
+  A-->>U: top navigation + project header (status, out-of-date badge)
+  U->>Su: enter inputs, SBC, confirm site parameters, accept statement, press Run design
+  Su->>St: run_design_from_inputs()
+  St->>St: _acquire_geometry (Manual / DXF / IFC)
+  St->>P: DesignInputs(from in_* keys)
+  P-->>St: DesignResults(status, failures, ...)
+  St->>S: legacy keys + design_results + design_fingerprint
+  Su-->>U: switch to pages/overview.py
+  U->>A: column editor confirm (Overview)
+  A->>P: ensure_design: re-run with the stored model and DesignInputs
 ```
 
-- **Run Analysis** is disabled until the SBC is entered (no default), the site-parameter confirmation
-  (`site_params_checkbox`) and the disclaimer are ticked (2026-10-16, N18).
+- **Run design** is disabled until the SBC is entered (no default), the site-parameter confirmation
+  (`in_site_confirmed`) and the verification statement (`in_disclaimer`) are ticked (N18). Changing a site
+  parameter, the occupancy or the geometry source clears the site confirmation (`ui_state.on_site_change`).
+- `input_fingerprint()` is stored with the results; when the current inputs differ, the header shows
+  "Inputs changed — results out of date" and every result page a warning (`ui_state.results_state`). The design
+  runs only when **Run design** is pressed or after a column-editor change.
 - The status banner reads "PASS for the implemented checks only — NOT VERIFIED" for PASS and is followed by an
   expander listing `DesignResults.checks_not_performed` (N17).
-- The design runs only when **Run Analysis** is pressed, when no results exist,
-  or after a column-editor change (`needs_redesign`). Sidebar changes without
-  pressing the button keep the cached results (by design).
-- DXF: the uploaded file is written to a temporary file (deleted in `finally`),
-  magic bytes are checked first (`app.py::_acquire_geometry`).
+- DXF / IFC: the uploaded bytes are kept in `model_file`, written to a temporary file for loading (deleted in
+  `finally`); header bytes are checked first (`ui_state._acquire_geometry`). Fixable input problems raise
+  `ui_state.InputError` and are shown as messages.
 - IFC: requires `ifcopenshell`; storeys and storey height come from the IFC.
-- Errors in loading or design are logged, sent to Sentry if enabled, shown with
-  `st.error` and the script stops (`st.stop()`).
+- Errors in loading or design are logged, sent to Sentry if enabled and shown with `st.error`.
+- Reports and DXF files are generated when the download button is clicked (callable `data`), not on page load.
 
 ## 2. Design pipeline (`src/design_pipeline.py::run_design`)
 
@@ -73,7 +78,7 @@ current directory.
 3. Units: `$INSUNITS` (in, ft, mm, cm, m). If the declared unit gives an extent outside 1–1000 m, or the header is unitless, the size heuristic is used (|coord| > 500 ⇒ mm) and a warning is added.
 4. Grid lines from unique column coordinates; columns snapped; beams scaled/snapped.
 5. Walls: `extract_walls_normalized` (Tier 1 keyword layers → Tier 2 remaining layers excluding annotation/furniture keywords → Tier 3 all model-space lines), thickness detection, clear height = storey − 0.125 − 0.400 m.
-6. Warnings in `CADLoader.load_warnings` (units, Tier-2/3 wall use, missing beams, auto-frame unit assumption) are displayed by `app.py` / logged by `main.py`.
+6. Warnings in `CADLoader.load_warnings` (units, Tier-2/3 wall use, missing beams, auto-frame unit assumption) are displayed on the Overview (run notes) / logged by `main.py`.
 
 Failure paths: no geometry ⇒ `ValueError` (shown to the user); empty DXF / circles only ⇒ same (verified in the 2026-10 sweep).
 
@@ -95,10 +100,10 @@ directory on render (behaviour not changed).
 
 ## 6a. Site drawing set (Drawings page, first tab)
 
-`pages/3_📐_Drawings.py` builds `src.drawings.build_drawing_set(res.gm, res.beams, res.footings, project)` once per
+`pages/drawings.py` builds `src.drawings.build_drawing_set(res.gm, res.beams, res.footings, project)` once per
 design result (cached in session state), shows the selected sheet as a pan/zoom SVG, and offers the full PDF set,
 the selected sheet as DXF and a ZIP (PDF + DXF + SVG per sheet). Nothing is written to disk. Marks come from
-`compute_marks` and are also shown in the Schedules page tables.
+`compute_marks` and are also shown in the Members page tables.
 
 ## 6b. 3D viewer (Drawings page, "3D View" tab)
 
@@ -107,10 +112,10 @@ floor, walls per storey, footings) with mark, size, bars, status → `viewer_htm
 `components/viewer3d/dist/viewer.js` and the scene → `components.html`. Cached per design result. The older GLB
 view (`geometry_exporter`) is behind a checkbox. Nothing is written to disk.
 
-## 6c. Site Tools (`pages/5_🔧_Site_Tools.py`)
+## 6c. Site tools (`pages/site_tools.py`)
 
 BBS tab: `project_bbs` tables and `site_calculators.optimise_cutting` over every BBS entry. Calculators: approved mix
-stored in `st.session_state['approved_mix']` (used by the dashboard, pour planner and PDF report section 20), cube
+stored in `st.session_state['approved_mix']` (used by the Overview, pour planner and PDF report section 20), cube
 register, pour planner, formwork from the model. BIM & Handover: `documentation.calculation_summary(res)`, COBie
 from the design, QR tags (`site_monitoring.member_info` → `qr_text` → `qr_png`), inspection checklist CSV and
 defect log (`st.session_state['defect_log']`), uploaded accelerometer / strain CSVs, as-built survey CSV.

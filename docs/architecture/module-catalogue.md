@@ -7,9 +7,12 @@ Status key: **P** production · **C** CLI only · **T** tests/demos only · **U*
 
 | Module | Status | Responsibility | Public interface | Callers |
 |---|---|---|---|---|
-| `app.py` | P | Sidebar inputs → `DesignInputs`; geometry acquisition (`_acquire_geometry`); runs `run_design` when "Run Analysis" is pressed or the column editor changed the layout (`needs_redesign`); writes session state; status banner; column editor | Streamlit script | Streamlit |
+| `app.py` | P | Streamlit entry point: page registry and top navigation, `ui_state.keep_inputs`, `ui_state.ensure_design` (column-editor re-design), project header | Streamlit script | Streamlit |
+| `pages/setup.py` | P | Project inputs in five tabs, plan preview, run panel with missing-input list; calls `ui_state.run_design_from_inputs` | Streamlit page | `app.py` |
+| `pages/overview.py` | P | Status banner, checks not performed, issue list, 3D viewer, quantities, column editor | Streamlit page | `app.py` |
+| `pages/checks.py`, `members.py`, `drawings.py`, `reports.py`, `site_tools.py` | P | Checks by topic; member schedules; drawing sheets / 3D / plan / CAD / DXF; reports generated on download; site tools | Streamlit pages | `app.py` |
 | `main.py` | P | CLI wrapper around `run_design`, logs status / failures / BlackBox risk prompts, writes PDF | `build_parser()`, `main(argv)` → exit code 0/1/2 | user, `tests/test_pipeline_e2e.py` |
-| `src/design_pipeline.py` | P | End-to-end design: loads, iteration of analysis+design, slabs, stair, footings, joint checks, BOM, BBS, audit, stability, warnings, status aggregation | `DesignInputs`, `DesignResults`, `run_design(gm, beams, inputs)` (L136), `storey_seismic_weights()` (L99) | `app.py`, `main.py`, tests |
+| `src/design_pipeline.py` | P | End-to-end design: loads, iteration of analysis+design, slabs, stair, footings, joint checks, BOM, BBS, audit, stability, warnings, status aggregation | `DesignInputs`, `DesignResults`, `run_design(gm, beams, inputs)` (L136), `storey_seismic_weights()` (L99) | `ui_state.py`, `main.py`, tests |
 
 ## Model and geometry
 
@@ -61,9 +64,10 @@ Status key: **P** production · **C** CLI only · **T** tests/demos only · **U*
 | Module | Status | Responsibility |
 |---|---|---|
 | `audit.py` | P | Post-design consistency re-check: factored axial vs Cl 39.3-form capacity, bearing with user SBC, punching, short-term beam deflection |
-| `stability.py` | P | Column / beam slenderness limits, fire-resistance dimension/cover table |
+| `stability.py` | P | Column / beam slenderness limits; fire check per member (rating from `durability`, IS 456 Fig. 1 / Table 16A) |
+| `durability.py` | P | IS 456 Tables 3, 5, 16, 16A, Fig. 1 and NBC Part 4 Table 1: covers, minimum grade and fire ratings for an exposure and type of construction |
 | `safety_warnings.py` | P | Plan irregularity screen; joint checks only from design data; cracked-section note |
-| `optimizer.py` | P (Analysis page) | Indicative column optimisation using the production column check |
+| `optimizer.py` | P (Checks page) | Indicative column optimisation using the production column check |
 | `risk_management.py` | C | "Black Box" engineering-judgement prompts (CLI) |
 | `structural_checks.py`, `validators.py`, `layout_optimizer.py`, `layout_scorer.py` | T | Not used by production |
 
@@ -85,7 +89,9 @@ Status key: **P** production · **C** CLI only · **T** tests/demos only · **U*
 
 | Module | Status | Notes |
 |---|---|---|
-| `ui_components.py` | P | CSS, headers, member search (uses `get_beam_result`) |
+| `ui_components.py` | P | Project header (status from `ui_tables.design_status_summary`), status badges and table colouring, `require_results` / `stale_notice`, member search (uses `get_beam_result`), IS 456 quick reference (UNVERIFIED) |
+| `ui_state.py` | P | `in_*` input defaults and persistence across pages, `input_fingerprint` / `results_state`, `missing_inputs`, geometry acquisition, `run_design_from_inputs`, `ensure_design` |
+| `ui_tables.py` | P | Pure row builders for the issue list and the column, beam, slab and footing schedules; `BBS_SCOPE` text (tests: `test_ui_tables.py`) |
 | `logging_config.py` | P | `get_logger` is console-only unless `STRUCTOPTIMA_LOG_FILE` is set; `setup_logging()` adds a rotating file handler (CLI) |
 | `monitoring.py` | P | Sentry wrappers, active only with `SENTRY_DSN` |
 | `auth.py` | U | Password helpers, not imported |

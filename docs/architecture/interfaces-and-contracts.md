@@ -23,12 +23,14 @@ envelopes). No files are written.
 
 `DesignInputs` (defaults): `num_stories=2`, `story_height_m=3.5`,
 `building_type_name="Residential"`, `wall_load_kn_m=12` (only without walls),
-`sbc_kn_m2=200` (library default only — the dashboard requires the user to enter it), `conc_grade="M25"`, `fy=415`, `seismic_zone="III"`,
+`sbc_kn_m2=200` (library default only — the Setup page requires the user to enter it), `conc_grade="M25"`, `fy=415`, `seismic_zone="III"`,
 `soil_type="II"`, `structural_system="OMRF"`, `importance_factor=None` (occupancy
 default), `wind_zone=None` (no wind), `terrain_category=None` (category 2),
 `wind_opening_percentage=10`, `use_cracked_sections=True`, `fixed_base=True`,
-`add_staircase=False`, masonry settings, `align_to_wall=None`,
-`max_iterations=6`, `le_factor=1.0`.
+`add_staircase=False`, masonry settings, `align_to_wall=None`, `exposure="Moderate"` (IS 456 Table 3; sets covers
+and minimum grade), `nbc_construction_type=2` (NBC Part 4 Table 1; sets fire ratings), `max_iterations=6`,
+`le_factor=1.0`. The design writes the covers to `gm.beam_cover_mm / slab_cover_mm / column_cover_mm /
+footing_cover_mm`, which detailing, joint checks, BBS and drawings use.
 
 `DesignResults.status`: worst of the `failures` statuses; at least `WARN` if not converged.
 
@@ -58,7 +60,7 @@ be solved; `moment_at` sign = sagging positive for horizontal members.
 
 Every `RebarResult`, `BeamRebarResult`, `SlabRebarResult`, `StaircaseResult`
 and `Footing` carries `status` ∈ {PASS, WARN, FAIL} and `warnings`. Consumers must
-use these fields (the Analysis page, PDF and dashboard do); they must not
+use these fields (the Overview, Checks page, schedules, header and PDF do); they must not
 re-derive pass/fail from other quantities.
 
 ## Ingest contracts
@@ -69,7 +71,7 @@ re-derive pass/fail from other quantities.
 ## Logging, caching, configuration
 
 - `get_logger(name)`: console handler on the `src` logger; file output only if `STRUCTOPTIMA_LOG_FILE` is set or an entry point calls `setup_logging()` (CLI). `LOG_LEVEL` env var sets the level.
-- Streamlit caching: Analysis page `run_optimization` keyed by an explicit fingerprint of columns and their design forces (R22). `section_design._curve_cached` memoises interaction curves (LRU, 4096 entries, keyed by geometry, bars, fck, fy).
+- Streamlit caching: Checks page `run_optimization` keyed by an explicit fingerprint of columns and their design forces (R22). `section_design._curve_cached` memoises interaction curves (LRU, 4096 entries, keyed by geometry, bars, fck, fy).
 - Environment variables: `SENTRY_DSN` (monitoring), `LOG_LEVEL`, `STRUCTOPTIMA_LOG_FILE`.
 
 ## Error behaviour

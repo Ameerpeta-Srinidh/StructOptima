@@ -452,7 +452,8 @@ def test_N13_dead_load_uses_designed_slab_thickness():
     (lx/26 + 30), the occupancy slab is 125 mm. Hand reference: the extra
     25 x (0.185 - 0.125) = 1.5 kN/m2 must reach beams, columns and seismic weight."""
     gm, beams = _grid(stories=2, w=8, l=8)
-    res = run_design(gm, beams, DesignInputs(num_stories=2, seismic_zone="III"))
+    # Mild exposure + NBC type 3 -> 20 mm slab cover (Table 16 / 16A), the cover the hand reference assumes
+    res = run_design(gm, beams, DesignInputs(num_stories=2, seismic_zone="III", exposure="Mild", nbc_construction_type=3))
     gm = res.gm
     extra = 25 * (0.185 - 0.125)
     assert all(s.thickness_mm == 185 for s in gm.slab_schedule.values())

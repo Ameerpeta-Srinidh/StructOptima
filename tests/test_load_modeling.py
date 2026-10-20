@@ -300,8 +300,9 @@ class TestIrregularityCheck:
         assert method_check.required_method == AnalysisMethod.RESPONSE_SPECTRUM
     
     def test_static_allowed_for_regular_low_rise(self):
-        """Test static analysis allowed for regular low-rise."""
-        checker = SeismicDesignChecker(zone=SeismicZone.ZONE_III)
+        """Static analysis allowed for a regular building lower than 15 m in Zone II only
+        (IS 1893 (Part 1):2016 7.7.1; the Zone III case of the old test followed the 2002 edition)."""
+        checker = SeismicDesignChecker(zone=SeismicZone.ZONE_II)
         
         irregularities = []  # No irregularities
         

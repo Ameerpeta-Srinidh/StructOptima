@@ -12,8 +12,9 @@ certified analysis/design program (see [../engineering/limitations.md](../engine
 
 | Component | Entry | Role |
 |---|---|---|
-| Streamlit dashboard | `app.py` | Sidebar inputs, geometry acquisition (manual / DXF / IFC), calls the design pipeline, shows status, metrics and the column editor |
-| Streamlit pages | `pages/1_📊_Analysis.py` … `pages/5_🔧_Site_Tools.py` | Read `st.session_state` written by `app.py`; display analysis results, schedules, drawings, reports and site tools |
+| Streamlit entry point | `app.py` | Top navigation (`st.navigation`), keeps inputs across pages, re-design after a column-editor change, project header with the design status |
+| Streamlit pages | `pages/setup.py`, `overview.py`, `checks.py`, `members.py`, `drawings.py`, `reports.py`, `site_tools.py` | Setup collects the inputs and runs the design; the others read `st.session_state` and display status, issues, checks, schedules, drawings, reports and site tools (since 2026-10-20) |
+| UI state and tables | `src/ui_state.py`, `src/ui_tables.py`, `src/ui_components.py` | Input defaults and persistence, input fingerprint (out-of-date results), geometry acquisition and the run; schedule / issue rows from the design results; shared header, badges and table styling |
 | CLI | `main.py` | Same pipeline for a rectangular grid or a DXF, writes a PDF report, logs status; exit code 1 when the design status is FAIL |
 | Design pipeline | `src/design_pipeline.py::run_design` | Single orchestration of loads → analysis → design → checks → quantities (since 2026-10) |
 | Libraries | `src/*.py` | Geometry, loads, FEA, section design, detailing, seismic, wind, quantities, reports |
@@ -67,8 +68,9 @@ flowchart LR
 `DesignResults.failures` (list of `{Member, Type, Status, Issue}`), aggregated
 from every member result, the audit re-check, frame-analysis failures, SCWB /
 joint checks, the seismic-method screen and footing overlaps
-(`src/design_pipeline.py`, "status aggregation" block). The dashboard banner,
-the Analysis page failure screen and the PDF report all read this list (this
+(`src/design_pipeline.py`, "status aggregation" block). The project header,
+the Overview banner and issue list, the Checks page failure screen, the
+schedule status columns (via `ui_tables`) and the PDF report all read this list (this
 replaced the screens that always reported success — audit finding R5).
 
 ## Key characteristics

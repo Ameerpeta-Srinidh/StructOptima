@@ -16,6 +16,9 @@ evidence of engineering correctness beyond the stated reference cases.
 | After drawing set (2026-10-16) | same | **504 passed, 3 skipped, 0 failed** (≈ 22 s) |
 | After IFC export (2026-10-16) | same | **505 passed, 3 skipped, 0 failed** (≈ 23 s) |
 | After drift, site tools, status and 3D viewer (2026-10-16) | same | **520 passed, 3 skipped, 0 failed** (≈ 42 s) |
+| Linux migration (2026-10-20, Ubuntu, Python 3.12.15 venv, streamlit 1.53.0) | same | **520 passed, 3 skipped** after installing `pypdfium2` (needed by `test_drawings.py::test_outputs_are_consistent`, not in `requirements.txt`; without it that test fails with ModuleNotFoundError) |
+| After the UI restructure (2026-10-20) | same | **545 passed, 3 skipped, 0 failed** (≈ 24 s) |
+| After the standards check and DXF / analysis fixes (2026-10-20) | same | **763 passed, 3 skipped, 0 failed** (≈ 30 s) |
 
 Skipped: `test_beam_placer.py::test_with_auto_framer` (local `complex_villa.dxf` yields no columns), two `test_column_editor.py` tests (no removable column in the layout).
 
@@ -71,7 +74,7 @@ one-way shear).
 |---|---|
 | CLI `main.py --width 18 --length 12 --stories 3 --zone III` (scratch dir) | exit 0, PDF 72 kB |
 | CLI with `samples/sample_design.dxf` | exit 0, PDF 32 kB, warning: `$INSUNITS` implausible → millimetres inferred |
-| Headless UI (`AppTest`): dashboard + 5 pages after an analysis | no exceptions |
+| Headless UI (`AppTest`): every page after an analysis, and every result page without one (2026-10-20 layout) | no exceptions |
 | DXF sweep: 84 repository DXFs, auto-frame fallback, 2 storeys, 4 iterations | 0 crashes; 2 graceful input errors (empty / circles only); statuses: 55 WARN, 27 FAIL. FAIL causes: "Seismic method" (irregular plans), columns not converged within 4 iterations, 2 unstable frames in one plan, beams in two large plans |
 | Performance: G+7, 12×12 m, zone V | 1.8 s (was 127 s before memoising/vectorising interaction curves) |
 
@@ -87,6 +90,40 @@ offsets, void cross, slab label overlap, top-bar labels, section scale). **Owner
 - Portal drift: hand 100 / 30 000 = 3.333 mm; model 3.356 mm (+0.7 %, beam flexibility and axial shortening).
 - Sample buildings before column growth for drift: 18 × 12 m G+1 zone III max EQ drift 0.00178 (PASS); 20 × 15 m G+3 zone IV 0.00462 (FAIL); 30 × 20 m G+5 zone V 0.00441 (FAIL). After growth: 0.00379 and 0.00370 (both still FAIL overall on the existing "Seismic method" check).
 - 3D viewer rendered in headless Chrome (SwiftShader) for an 18 × 12 m G+2 building with a stair void: orbit, status colouring with storey isolation, and walk-through with the on-screen pad reviewed by the developer. **Owner review on a site tablet / phone pending.**
+
+## 5c. UI review (2026-10-20)
+
+- Every page captured with Playwright / headless Chromium at 1440 px (desktop) and 820 px (tablet portrait) for an
+  18 × 12 m G+1 building, zone III, SBC 200 kN/m², before and after the restructure (images in the git-ignored
+  `_local/ui-audit/`).
+- Defects found by the review and fixed with regression tests: N23 (footing punching column always "OK", steel
+  from 80 kg/m³), N24 (header showed the audit count in green while the design status was WARN), N25 (no slab
+  status column). See the risk register.
+- Checked after the fixes: header and banner agree (WARN · 36 items); issue text readable at both widths; full A3
+  sheet visible in the sheet viewer; quantity tiles readable at tablet width.
+- **Owner review on a site tablet still pending.**
+
+## 5d. Standards check, benchmarks and DXF sweep (2026-10-20)
+
+- Code values compared with the printed standards: [standards-check-2026-10-20.md](standards-check-2026-10-20.md).
+- SP 16 benchmarks (Tables A, C, D, F; Examples 1, 2, 3, 6, 9, 10): all reproduced within the stated tolerances
+  (`tests/test_sp16_benchmarks.py`).
+- Realistic buildings (G+1 house Zone III; G+3 apartment on soft soil in Zone IV; G+4 office; G+2 school in Zone V;
+  a single-storey shop; G+9 in Zone V; SBC 75 kN/m²; a 48 × 6 m plan; a 6 m storey):
+  - Ta, Ah and VB equal the values recomputed from the clauses;
+  - storey forces follow W h²;
+  - seismic weight is 10.6–14.9 kN/m², concrete 0.31–0.52 m³/m² and steel 54–75 kg/m³;
+  - footing loads are consistent with W (`tests/test_realistic_buildings.py`, 54 checks).
+- DXF sweep, all 92 sample drawings, 2 storeys, Zone II, 3 iterations:
+  - 0 crashes, and 2 clean input errors (an empty drawing and one with only circles);
+  - before the lateral-sharing fix (A1): 48 FAIL, 42 WARN, with storey drift failing in 40 drawings;
+  - after: 26 FAIL, 64 WARN. The remaining FAILs are member capacities (with only 3 design iterations) and
+    re-entrant plans needing dynamic analysis.
+- DXF convention corpus (`tests/dxf_conventions.py`, 23 cases): NCS, long NCS and Indian layer names; mm / cm / m /
+  unitless; LWPOLYLINE, POLYLINE, block, rotated-block and circle columns; R12; a plan bound in a block; duplicates;
+  ±12 mm misalignment; survey coordinates; polyline and face-to-face beams; look-alike layers; wall thickness; empty
+  drawing; a full design from a block-column drawing. Before the parser fixes, 19 of the 23 failed (the plain NCS
+  drawing gave 40 columns instead of 20).
 
 ## 6. Side-effect incident during testing
 

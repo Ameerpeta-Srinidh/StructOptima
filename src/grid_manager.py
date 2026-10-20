@@ -112,6 +112,12 @@ class GridManager(BaseModel):
     fck: float = 25.0
     fy: float = 415.0
     slab_thickness_mm: float = 125.0
+    # Nominal covers (mm) used by the detailing; set from the exposure condition and fire rating by the design
+    # pipeline (src/durability.py: IS 456 Tables 16 and 16A, 26.4.2.1, 26.4.2.2)
+    beam_cover_mm: float = 25.0
+    slab_cover_mm: float = 20.0
+    column_cover_mm: float = 40.0
+    footing_cover_mm: float = 50.0
     dead_load_kn_m2: float = 0.0          # floor dead load incl. slab self-weight (service)
     live_load_kn_m2: float = 0.0          # floor live load (service)
     roof_dead_kn_m2: float = 0.0
@@ -930,11 +936,12 @@ class GridManager(BaseModel):
 
     def panel_slab_thickness_mm(self, panel: dict) -> float:
         """Designed slab thickness for a panel (single rule, finding N13):
-        t = max(ceil((lx/26 + 30) / 5) x 5, 125, occupancy slab thickness) mm.
-        lx/26 is the basic span/effective-depth ratio, +30 mm for cover and
-        half a bar (project rule, unchanged)."""
+        t = max(ceil((lx/26 + c) / 5) x 5, 125, occupancy slab thickness) mm.
+        lx/26 is the basic span/effective-depth ratio; c = max(30, slab cover + 10) mm for cover and
+        half a bar (project rule; c follows the exposure cover since 2026-10-20)."""
         d_min = panel["lx"] * 1000.0 / 26.0
-        return max(math.ceil((d_min + 30.0) / 5.0) * 5.0, 125.0, self.slab_thickness_mm)
+        c = max(30.0, self.slab_cover_mm + 10.0)
+        return max(math.ceil((d_min + c) / 5.0) * 5.0, 125.0, self.slab_thickness_mm)
 
     def panel_extra_dead_kn_m2(self) -> dict:
         """{(i, j): extra dead load kN/m2} = 25 x (designed - occupancy thickness).
@@ -991,7 +998,7 @@ class GridManager(BaseModel):
                     res = RebarDetailer.detail_beam(
                         b.properties.width_mm, b.properties.depth_mm, length_m, fck=fck, fy=fy,
                         mu_sagging_knm=b.mu_sagging_knm, mu_hogging_knm=b.mu_hogging_knm, vu_kn=b.vu_kn,
-                        ductile=ductile, governing_combo=b.governing_combo)
+                        ductile=ductile, governing_combo=b.governing_combo, clear_cover_mm=self.beam_cover_mm)
                     if is_fallback:
                         res.warnings.append(f"Analysis fallback ({b.analysis_status}): simply supported moments on both faces")
                         if res.status == "PASS":
@@ -1004,7 +1011,8 @@ class GridManager(BaseModel):
                     res = RebarDetailer.detail_beam(
                         b.properties.width_mm, b.properties.depth_mm, length_m, fck=fck, fy=fy,
                         mu_sagging_knm=wu * length_m ** 2 / 8.0, mu_hogging_knm=wu * length_m ** 2 / 8.0,
-                        vu_kn=wu * length_m / 2.0, ductile=ductile, governing_combo="simplified 1.5(DL+LL)")
+                        vu_kn=wu * length_m / 2.0, ductile=ductile, governing_combo="simplified 1.5(DL+LL)",
+                        clear_cover_mm=self.beam_cover_mm)
                     res.warnings.append("No frame analysis result: simplified tributary UDL used (wL^2/8 both faces)")
                     if res.status == "PASS":
                         res.status = "WARN"
@@ -1035,7 +1043,7 @@ class GridManager(BaseModel):
             wu = 1.5 * (25.0 * thk / 1000.0 + sdl + ll)
             res = RebarDetailer.detail_slab(p["x1"] - p["x0"], p["y1"] - p["y0"], slab_thk_mm=thk, fck=fck, fy=fy,
                                            factored_load_kn_m2=wu, disc_short_edges=p["disc_short"],
-                                           disc_long_edges=p["disc_long"])
+                                           disc_long_edges=p["disc_long"], clear_cover_mm=self.slab_cover_mm)
             self.slab_schedule[f"S{count}"] = res
 
     def detail_columns(self, concrete: Concrete, fy: float = 415.0, ductile: bool = False, le_factor: float = 1.0):
@@ -1049,7 +1057,7 @@ class GridManager(BaseModel):
             res = RebarDetailer.detail_column(
                 b_mm=col.width_nb, d_mm=col.depth_nb, pu_kn=combos[0][1], concrete=concrete, level=col.level,
                 fy=fy, combos=combos, unsupported_length_m=max(col.z_top - col.z_bottom, 0.1) or self.story_height_m,
-                le_factor=le_factor, ductile=ductile, column_id=col.id)
+                le_factor=le_factor, ductile=ductile, column_id=col.id, clear_cover_mm=self.column_cover_mm)
             if not col.design_forces:
                 res.warnings.append("No frame analysis result: axial load with minimum eccentricity only")
                 if res.status == "PASS":

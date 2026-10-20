@@ -51,7 +51,8 @@ def _col_dims(c) -> Tuple[float, float]:
 
 def _general_notes(gm, extra: Optional[List[str]] = None) -> List[str]:
     out = ["All dimensions in mm, levels in m, unless noted. Do not scale from this drawing.",
-           f"Concrete M{gm.fck:.0f}, reinforcement Fe{gm.fy:.0f}. Clear cover: columns 40, beams 25, slabs 20, footings 50.",
+           f"Concrete M{gm.fck:.0f}, reinforcement Fe{gm.fy:.0f}. Clear cover: columns {gm.column_cover_mm:.0f}, beams {gm.beam_cover_mm:.0f}, "
+           f"slabs {gm.slab_cover_mm:.0f}, footings {gm.footing_cover_mm:.0f} mm.",
            "Members tagged WARN/FAIL (orange/red) need engineering review or redesign - see the design status list.",
            "Laps, curtailment and anchorage are NOT designed by StructOptima: detail per IS 456 / SP 34 (typical).",
            "Preliminary design aid output. Independent verification by a licensed structural engineer is required."]

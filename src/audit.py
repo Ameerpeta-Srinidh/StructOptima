@@ -96,7 +96,7 @@ class StructuralAuditor:
                 notes=f"(P {service:.1f} kN x 1.1) / {area:.2f} m2 = {pressure:.1f} vs SBC {self.sbc:.0f} kN/m2"))
 
             pu = ft.factored_load_kn or 1.5 * service
-            d = ft.thickness_mm - 50.0 - 12.0
+            d = ft.thickness_mm - getattr(self.grid_mgr, "footing_cover_mm", 50.0) - 12.0
             a1, a2 = col.width_nb + d, col.depth_nb + d
             qu = pu * 1000.0 / (ft.length_m * ft.width_m * 1e6)
             vu = pu * 1000.0 - qu * a1 * a2
@@ -123,7 +123,9 @@ class StructuralAuditor:
                 continue
             b_mm, d_mm = beam.properties.width_mm, beam.properties.depth_mm
             ieff = 0.5 * b_mm * d_mm ** 3 / 12.0
-            w = beam.service_udl_kn_m or (20.0 + b_mm * d_mm / 1e6 * 25.0)
+            w = beam.service_udl_kn_m
+            if not w:   # no service load from the analysis: not evaluated (no assumed load)
+                continue
             delta = 5 * w * l_mm ** 4 / (384 * ec * ieff)
             limit = l_mm / 250.0
             self.audit_log.append(AuditResult(

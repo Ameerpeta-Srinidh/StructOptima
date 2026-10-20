@@ -11,11 +11,12 @@
 
 - Independent 2D plane frames along grid lines; beams off grid lines are designed as simply supported (warning).
 - No torsion, accidental eccentricity, diaphragm flexibility, P-Δ or second-order analysis.
-- Storey drift is computed per column from the 2D frames (since 2026-10-16); without torsion it under-estimates drift at the flexible edge of irregular plans. Limit values are UNVERIFIED.
-- Equivalent static seismic method only; buildings that exceed the cited regularity/height limits are reported as FAIL ("Seismic method"), not analysed by response spectrum.
+- Storey drift is computed per column from the 2D frames (since 2026-10-16); without torsion it under-estimates drift at the flexible edge of irregular plans. Limits checked against IS 1893 7.11.1.1 and IS 456 20.5 (2026-10-20).
+- Storey forces are shared between parallel frames as for a rigid floor in translation (each frame's condensed lateral stiffness; slab links tie the column tops a beam does not connect) since 2026-10-20.
+- Equivalent static seismic method only. IS 1893:2016 7.7.1 permits it only for regular buildings lower than 15 m in Zone II; every other building is reported as FAIL ("Seismic method") because the required dynamic analysis is not available (KD-23).
 - No orthogonal seismic combination, vertical seismic or pattern live loading.
 - Column gravity axial load from tributary areas (not from frame continuity).
-- Static wind only; dynamic/gust effects are flagged for tall/slender buildings but not computed; Kd, Ka, Kc, k4 taken as 1.0.
+- Static wind only; dynamic/gust effects are flagged for tall/slender buildings but not computed; Kd, Ka, Kc taken as 1.0 (conservative); k3 and k4 taken as 1.0 (sloping sites and cyclone-prone coasts need them); h/w ≥ 6 is a FAIL.
 - Linear elastic with uniform cracked-section modifiers.
 
 ## Design
@@ -25,13 +26,13 @@
 - Column effective length factor 1.0 by default (no Annex E calculation).
 - Beams are rectangular (no flange action); deflection checked by basic span/d ratios only (no modification factors, no long-term calculation in design; the audit uses an approximate short-term deflection).
 - No curtailment, development length or lap checks in member design (tables exist in `anchorage.py`; BBS uses its own rules).
-- Slabs: Table 26 coefficients (values transcribed, to be verified); no corner torsion steel; one-way slabs use wl²/8 everywhere.
+- Slabs: Table 26 coefficients (checked against the printed table 2026-10-20); no corner torsion steel; one-way slabs use wl²/8 everywhere.
 - Staircase: single typical flight with a fixed geometry assumption.
 - Footings: square isolated pads only; base moments not used for sizing (warning only); no combined footings, rafts, piles, uplift resistance or settlement.
 
 ## Ingest
 
-- DXF: columns must be closed LWPOLYLINEs on layers containing COL/PILLAR/STANCHION; beams LINEs on BEAM layers; wall detection by layer keywords with fallbacks that can pick up non-structural lines (warned). Auto-framing assumes drawings in millimetres.
+- DXF: columns are closed LWPOLYLINE / POLYLINE outlines or circles on layers whose name contains a whole word COL, COLS, COLUMN, PILLAR … (annotation words such as IDEN, TEXT, TAG, DIM, HATCH exclude a layer), directly or inside blocks; beams are LINE / polyline centre lines on BEAM / GIRDER layers. Plans in blocks are exploded; unbound xrefs are reported. Grid lines within 150 mm are merged; beam ends within half a column + 150 mm of a column are moved to its centre; drawings are moved to the origin. Circular columns become equal-area squares (warned). Beam sizes are not read (initial 300 × 600). Wall detection by layer keywords with fallbacks that can pick up non-structural lines (warned). Auto-framing assumes drawings in millimetres.
 - Drawings whose `$INSUNITS` disagree with the geometry are detected only when the resulting extent is outside 1–1000 m.
 - IFC: only rectangular extruded profiles; inclined beams skipped; storey heights averaged; one plan beam layout for all storeys.
 

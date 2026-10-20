@@ -66,6 +66,14 @@ ZONE_FACTORS = {
     SeismicZone.ZONE_V: 0.36,
 }
 
+# IS 1893 (Part 1):2016 Table 7 - minimum design lateral force (VB)min = rho W (7.2.2; checked 2026-10-20)
+MIN_BASE_SHEAR_FRACTION = {
+    SeismicZone.ZONE_II: 0.007,
+    SeismicZone.ZONE_III: 0.011,
+    SeismicZone.ZONE_IV: 0.016,
+    SeismicZone.ZONE_V: 0.024,
+}
+
 # IS 1893:2016 Table 9 - Response Reduction Factors
 RESPONSE_REDUCTION = {
     StructuralSystem.ORDINARY_MOMENT_FRAME: 3.0,
@@ -244,6 +252,7 @@ class SeismicAnalysisResult:
     has_floating_columns: bool = False
     is_regular: bool = True
     static_analysis_allowed: bool = True
+    system_permitted: bool = True             # IS 1893 Table 9 Note 1 (OMRF not allowed in Zones III-V)
     
     # Storey forces (equivalent static vertical distribution)
     height_m: float = 0.0
@@ -314,7 +323,7 @@ class SeismicDesignChecker:
         if self.zone in [SeismicZone.ZONE_III, SeismicZone.ZONE_IV, SeismicZone.ZONE_V]:
             ductile_required = True
             scwb_required = True
-            min_grade = 25  # IS 13920 requirement
+            # minimum grade depends on height (IS 13920 5.2) - set in run_full_analysis
         
         return SeismicParameters(
             zone=self.zone,
@@ -334,9 +343,12 @@ class SeismicDesignChecker:
     # (transcribed - verify): soil type -> (plateau end T, numerator, floor)
     SPECTRUM = {"I": (0.40, 1.00, 0.25), "II": (0.55, 1.36, 0.34), "III": (0.67, 1.67, 0.42)}
 
-    def get_spectral_acceleration(self, Ta: float, soil_type: Optional[str] = None) -> float:
+    def get_spectral_acceleration(self, Ta: float, soil_type: Optional[str] = None, method: str = "static") -> float:
+        """Sa/g, IS 1893 (Part 1):2016 6.4.2: (a) equivalent static method - 2.5 from T = 0 to the end of the
+        plateau; (b) response spectrum method - rising branch 1 + 15 T below 0.10 s (finding S1: the static
+        method used to take the rising branch, under-estimating Vb for stiff buildings)."""
         t_end, num, floor = self.SPECTRUM.get(str(soil_type or self.soil_type or "II").upper(), self.SPECTRUM["II"])
-        if Ta < 0.10:
+        if method == "response_spectrum" and Ta < 0.10:
             return 1.0 + 15.0 * Ta
         if Ta <= t_end:
             return 2.5
@@ -372,8 +384,11 @@ class SeismicDesignChecker:
         
         self.params.design_acceleration = (Z / 2) * (I / R) * sa_g
         
-        # 4. Base Shear
-        return self.params.design_acceleration * building_weight_kn
+        # 4. Base shear, not less than (VB)min = rho W (7.2.2, Table 7; finding S3)
+        vb = self.params.design_acceleration * building_weight_kn
+        vb_min = MIN_BASE_SHEAR_FRACTION[self.zone] * building_weight_kn
+        self.minimum_base_shear_governs = vb_min > vb
+        return max(vb, vb_min)
     
     def check_strong_column_weak_beam(
         self,
@@ -669,7 +684,7 @@ class SeismicDesignChecker:
             ))
         
         # 3. Soft Storey Check (IS 1893 Table 6, Item 1)
-        # Irregular if storey stiffness < 70% of storey above
+        # Irregular if storey stiffness < that of the storey above (Table 6(i), Amendment 2)
         if storey_stiffnesses and len(storey_stiffnesses) > 1:
             for i in range(len(storey_stiffnesses) - 1):
                 k_current = storey_stiffnesses[i]
@@ -677,7 +692,7 @@ class SeismicDesignChecker:
                 
                 if k_above > 0:
                     ratio = (k_current / k_above) * 100
-                    is_irregular = ratio < 70.0  # IS 1893:2016 Table 6
+                    is_irregular = ratio < 100.0  # IS 1893:2016 Table 6(i) as amended (Amd 2)
                     severity = "Severe" if ratio < 40 else ("Moderate" if is_irregular else "None")
                     
                     if is_irregular:
@@ -686,7 +701,7 @@ class SeismicDesignChecker:
                             is_irregular=True,
                             severity=severity,
                             value=ratio,
-                            limit=70.0,
+                            limit=100.0,
                             recommendation=f"Storey {i}: Increase stiffness or use 3D analysis"
                         ))
         
@@ -720,9 +735,9 @@ class SeismicDesignChecker:
         """
         Determine required analysis method based on irregularities and building size.
         
-        IS 1893 Cl. 7.7: Static analysis allowed only for:
-        - Regular buildings up to 40m height in Zone II/III
-        - Regular buildings up to 12m height in Zone IV/V
+        IS 1893 (Part 1):2016 7.6 and 7.7.1: the equivalent static method applies only to regular buildings
+        lower than 15 m in Seismic Zone II; linear dynamic analysis is required for all other buildings
+        (finding S4: the previous limits, 40 m in Zones II/III and 12 m in IV/V, were from the 2002 edition).
         
         Args:
             irregularities: List of irregularity check results
@@ -734,30 +749,25 @@ class SeismicDesignChecker:
         """
         irregular_types = [ir.irregularity_type for ir in irregularities if ir.is_irregular]
         
-        # Height limits for static analysis
-        if self.zone in [SeismicZone.ZONE_IV, SeismicZone.ZONE_V]:
-            height_limit = 12.0
-        else:
-            height_limit = 40.0
-        
-        # Check if static is allowed
         static_allowed = True
         reasons = []
-        
+        if self.zone != SeismicZone.ZONE_II:
+            static_allowed = False
+            reasons.append(f"Zone {self.zone.value}")
+        if building_height_m >= 15.0:
+            static_allowed = False
+            reasons.append(f"height {building_height_m:.1f} m (not lower than 15 m)")
         if irregular_types:
             static_allowed = False
-            reasons.append(f"Irregularities: {', '.join([ir.value for ir in irregular_types])}")
-        
-        if building_height_m > height_limit:
-            static_allowed = False
-            reasons.append(f"Height {building_height_m:.1f}m > {height_limit}m limit for Zone {self.zone.value}")
-        
+            reasons.append(f"irregular: {', '.join(ir.value for ir in irregular_types)}")
+
         if static_allowed:
             required_method = AnalysisMethod.EQUIVALENT_STATIC
-            reason = "Static analysis permitted per IS 1893 Cl. 7.7"
+            reason = "Equivalent static method permitted: regular building lower than 15 m in Zone II (IS 1893 7.7.1)"
         else:
             required_method = AnalysisMethod.RESPONSE_SPECTRUM
-            reason = "; ".join(reasons) + " - Response Spectrum Analysis required"
+            reason = ("Dynamic analysis required by IS 1893 (Part 1):2016 7.7.1 (" + "; ".join(reasons) + "). The "
+                      "equivalent static method is permitted only for regular buildings lower than 15 m in Zone II")
         
         return AnalysisMethodCheck(
             required_method=required_method,
@@ -797,6 +807,7 @@ class SeismicDesignChecker:
 
         floating = self.detect_floating_columns(columns, beams)
         warnings: List[str] = []
+        self.params.min_concrete_grade = min_concrete_grade(self.zone, height_m)
         if self.fck < self.params.min_concrete_grade:
             warnings.append(f"Concrete grade M{int(self.fck)} below minimum M{self.params.min_concrete_grade} "
                             f"for Zone {self.zone.value}")
@@ -806,9 +817,14 @@ class SeismicDesignChecker:
             warnings.append("R = 5 (SMRF) assumes full IS 13920 ductile detailing. StructOptima provides end-zone "
                             "tie/stirrup spacing only (confining steel Ash and capacity-design shear are NOT checked) - "
                             "an engineer must verify IS 13920 compliance before relying on R = 5.")
-        elif self.zone != SeismicZone.ZONE_II:
-            warnings.append(f"Ordinary moment frame (R = 3) selected in Zone {self.zone.value}: verify that this "
-                            f"system is permitted for the zone and building per IS 1893 (Part 1) Table 9.")
+        system_permitted = not (self.structural_system == StructuralSystem.ORDINARY_MOMENT_FRAME
+                                and self.zone != SeismicZone.ZONE_II)
+        if not system_permitted:
+            warnings.append(f"Ordinary moment frame (OMRF) is not allowed in Zone {self.zone.value}: RC structures in "
+                            f"Zones III, IV and V shall be ductile (IS 1893 (Part 1):2016 Table 9, Note 1).")
+        if getattr(self, "minimum_base_shear_governs", False):
+            warnings.append(f"Minimum design lateral force governs: VB = {MIN_BASE_SHEAR_FRACTION[self.zone]:.1%} of W "
+                            f"(IS 1893 7.2.2, Table 7).")
 
         irregularities: List[IrregularityCheck] = []
         if plan_width_m > 0 and plan_length_m > 0 and plan_area_m2 is not None:
@@ -817,6 +833,10 @@ class SeismicDesignChecker:
                 proj = math.sqrt(max(bbox - plan_area_m2, 0.0))
                 irregularities = self.check_irregularities(plan_width_m, plan_length_m,
                                                            re_entrant_x_m=proj, re_entrant_y_m=proj)
+        # Table 6(ii): seismic weight of a floor > 150 % of the floor below (roof excluded: no floor above it
+        # carries the comparison the other way; finding S6)
+        if storey_weights_kn and len(storey_weights_kn) > 1:
+            irregularities += self.check_irregularities(1.0, 1.0, storey_masses=list(storey_weights_kn))
         method = self.check_analysis_method(irregularities, len(storey_heights_m or []) or 1, height_m)
         if not method.static_allowed:
             warnings.append("Equivalent static method NOT permitted: " + method.reason +
@@ -832,12 +852,36 @@ class SeismicDesignChecker:
             has_floating_columns=len(floating) > 0,
             is_regular=not any(i.is_irregular for i in irregularities),
             static_analysis_allowed=method.static_allowed,
+            system_permitted=system_permitted,
             height_m=height_m,
             storey_weights_kn=list(storey_weights_kn or []),
             storey_heights_m=list(storey_heights_m or []),
             storey_forces_kn=forces,
             warnings=warnings,
         )
+
+
+def joint_confinement_factor(faces_with_beams: int) -> float:
+    """IS 13920:2016 9.1.1 (Amendment 2): tau_jc = 1.5 sqrt(fck) for joints confined by beams on all four faces,
+    1.2 sqrt(fck) on three faces, 1.0 sqrt(fck) for other joints (two opposite faces included; finding J1)."""
+    return 1.5 if faces_with_beams >= 4 else (1.2 if faces_with_beams == 3 else 1.0)
+
+
+def joint_effective_breadth(bb: float, bc: float, hc: float) -> float:
+    """Effective breadth bj of a beam-column joint, IS 13920:2016 9.1.2(a) (Amendment 2).
+
+    bc < bb: min[bb; bc + 0.5 hc] as printed. bc >= bb: the printed copy does not show this case in full; the
+    mirror form min[bc; bb + 0.5 hc] is used (UNVERIFIED; more conservative than the previous bb + hc, finding J2).
+    """
+    if bc < bb:
+        return min(bb, bc + 0.5 * hc)
+    return min(bc, bb + 0.5 * hc)
+
+
+def min_concrete_grade(zone: str, height_m: float) -> int:
+    """IS 13920:2016 5.2: M20, but M25 for buildings more than 15 m in height in Zones III, IV and V (J4)."""
+    z = zone.value if isinstance(zone, SeismicZone) else str(zone)
+    return 25 if (z != "II" and height_m > 15.0) else 20
 
 
 def _beam_capacity_knm(ast_mm2: float, b: float, d: float, fck: float, fy: float) -> float:
@@ -858,12 +902,12 @@ def evaluate_joint_checks(gm, beams, fck: float, fy: float, result: SeismicAnaly
       compatibility) of the columns below and above the joint at the smallest
       factored axial load among their combinations.  Mb = beam capacities
       from provided steel for the worse sway sense (hogging on one side,
-      sagging on the other).  Not evaluated at the roof level.
+      sagging on the other).  Roof joints are checked in buildings of up to 4 storeys and waived above that
+      (IS 13920 7.2.1.3; finding J3).
     * Joint shear: demand 1.25 fy (Ast_top + Ast_bot) of the framing beams with
       no deduction for column shear (conservative); capacity
-      k sqrt(fck) Aj, k = 1.5 / 1.2 / 1.0 for beams on 4 faces / 3 faces or
-      two opposite faces / other, Aj = hc x min(bc, bb + hc).
-      Coefficients and Aj definition must be verified against IS 13920:2016.
+      k sqrt(fck) Aj, k by ``joint_confinement_factor`` (9.1.1, Amd 2), Aj = bj x hc with bj by
+      ``joint_effective_breadth`` (9.1.2(a), Amd 2).  Checked against the printed standard 2026-10-20.
     * Ductility: provided end-zone tie spacing vs min(b/4, 6 db, 100 mm);
       confining steel area (Ash) is NOT checked.
     """
@@ -907,21 +951,21 @@ def evaluate_joint_checks(gm, beams, fck: float, fy: float, result: SeismicAnaly
 
     scwb, joints = [], []
     for (x, y), stack in cols_by_loc.items():
-        for lvl in range(1, gm.num_stories):
+        top = gm.num_stories if gm.num_stories <= 4 else gm.num_stories - 1   # 7.2.1.3 roof waiver
+        for lvl in range(1, top + 1):
             below, above = stack.get(lvl - 1), stack.get(lvl)
             if below is None:
                 continue
             framing = {ax: beams_at(x, y, ax) for ax in ("x", "y")}
             n_faces = sum(len(v) for v in framing.values())
-            opposite = any(len({s for _, s in framing[ax]}) == 2 for ax in ("x", "y"))
-            k = 1.5 if n_faces >= 4 else (1.2 if (n_faces == 3 or (n_faces == 2 and opposite)) else 1.0)
+            k = joint_confinement_factor(n_faces)
             for ax in ("x", "y"):
                 caps = []
                 for bm, side in framing[ax]:
                     r = gm.get_beam_result(bm.id)
                     if r is None or not getattr(r, "width_mm", 0):
                         continue
-                    d = r.depth_mm - 25.0 - 8.0 - 8.0
+                    d = r.depth_mm - getattr(gm, "beam_cover_mm", 25.0) - 8.0 - 8.0
                     caps.append((side, _beam_capacity_knm(r.ast_top_prov_mm2, r.width_mm, d, fck, fy),
                                  _beam_capacity_knm(r.ast_bottom_prov_mm2, r.width_mm, d, fck, fy), r))
                 if not caps:
@@ -942,7 +986,7 @@ def evaluate_joint_checks(gm, beams, fck: float, fy: float, result: SeismicAnaly
                 hc = below.width_nb if ax == "x" else below.depth_nb
                 bc = below.depth_nb if ax == "x" else below.width_nb
                 bb = max(r.width_mm for _, _, _, r in caps)
-                aj = hc * min(bc, bb + hc)
+                aj = hc * joint_effective_breadth(bb, bc, hc)
                 cap = k * math.sqrt(fck) * aj / 1000.0
                 joints.append({"joint": jid, "level": lvl, "direction": ax.upper(), "confinement_factor": k,
                                "Vj_demand_kN": vj, "Vj_capacity_kN": cap,
@@ -972,6 +1016,25 @@ def evaluate_joint_checks(gm, beams, fck: float, fy: float, result: SeismicAnaly
     result.all_ductile_pass = all(c.is_compliant for c in checks) if checks else True
     result.ductile_verification = "PARTIAL_SPACING_ONLY" if checks else "NOT_REQUIRED"
     return result
+
+
+def check_soft_storeys(storey_stiffnesses: List[float]) -> List["SoftStorey"]:
+    """IS 1893 (Part 1):2016 Table 6(i) as amended (Amendment 2, 2020): a soft storey is a storey whose lateral
+    stiffness is less than that of the storey above. ``storey_stiffnesses`` from the ground storey (index 0) up;
+    finding S5 (the previous 70 % limit was from the 2002 edition)."""
+    out = []
+    for i in range(len(storey_stiffnesses) - 1):
+        k, k_above = storey_stiffnesses[i], storey_stiffnesses[i + 1]
+        if k_above > 0 and k < k_above * (1.0 - 1e-9):
+            out.append(SoftStorey(storey=i, stiffness=k, stiffness_above=k_above))
+    return out
+
+
+@dataclass
+class SoftStorey:
+    storey: int                 # 0 = ground storey
+    stiffness: float
+    stiffness_above: float
 
 
 def run_seismic_check(

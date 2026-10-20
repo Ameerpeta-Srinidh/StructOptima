@@ -141,12 +141,18 @@ class TestStructuralAuditor:
         """Test beam deflection audit."""
         gm, beams, footings = setup_structure
         
+        # without a service load from the analysis the deflection screen is not evaluated (no assumed load)
         auditor = StructuralAuditor(gm, beams, footings)
         auditor.audit_beams()
-        
-        # Should have deflection checks
+        assert not [r for r in auditor.audit_log if "Deflection" in r.check_name]
+
+        for b in beams:
+            b.service_udl_kn_m = 18.0
+        auditor = StructuralAuditor(gm, beams, footings)
+        auditor.audit_beams()
         beam_audits = [r for r in auditor.audit_log if "Deflection" in r.check_name]
         assert len(beam_audits) > 0
+        assert all("w = 18.0 kN/m" in r.notes for r in beam_audits)
 
     def test_math_breakdown_populated(self, setup_structure):
         """Test that math breakdown is populated for sample columns."""

@@ -1,9 +1,18 @@
 [theme]
-primaryColor = "#1565C0"
+base = "light"
+primaryColor = "#1559C1"
 backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F5F7FA"
-textColor = "#1A1A2E"
-font = "sans serif"
+secondaryBackgroundColor = "#F4F6FA"
+textColor = "#101828"
+borderColor = "#E4E7EC"
+showWidgetBorder = true
+baseRadius = "0.5rem"
+font = "Inter:https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+codeFont = "'JetBrains Mono':https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap"
+baseFontSize = 15
+
+[client]
+toolbarMode = "minimal"
 
 [server]
 maxUploadSize = 50

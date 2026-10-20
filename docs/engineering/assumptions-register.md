@@ -14,15 +14,15 @@ remain **UNVERIFIED** until reviewed by a qualified engineer.
 | A-LOD-04 | Moment-equivalent triangular/trapezoidal UDLs for beams | `beam_slab_coefficients` | Over-estimates end shear (conservative) |
 | A-LOD-05 | Walls not on a beam go to the nearest parallel beam within 3 m | `beam_wall_loads` | |
 | A-LOD-06 | Column gravity axial from tributary takedown, not from the frames | `update_structural_analysis` | Ignores continuity redistribution |
-| A-FEA-01 | 2D frames on grid lines, rigid diaphragm, share by Σ12EI/h³, no torsion | `update_structural_analysis` | Unconservative for torsionally irregular plans |
+| A-FEA-01 | 2D frames on grid lines; storey forces shared by each frame's condensed lateral stiffness (rigid diaphragm in translation, slab links) since 2026-10-20; no torsion | `update_structural_analysis` | Unconservative for torsionally irregular plans |
 | A-FEA-02 | Cracked modifiers 0.70 (columns) / 0.35 (beams) applied to all load cases when enabled (default on) | | |
 | A-FEA-03 | Beam self-weight uses web below slab b·(D − t) | | Slab counted over full panel |
-| A-SEI-01 | Equivalent static method only | `seismic.py` | Flagged FAIL when the code-cited limits are exceeded |
+| A-SEI-01 | Equivalent static method only | `seismic.py` | FAIL wherever IS 1893 7.7.1 requires dynamic analysis (all but regular < 15 m in Zone II) |
 | A-SEI-02 | With masonry infill the shorter of 0.075h^0.75 and 0.09h/√d (d = larger plan dimension) is used | `calculate_base_shear` | Shorter period → equal or larger Sa |
 | A-SEI-03 | R = 3 (OMRF) default; SMRF R = 5 only on user selection with warning | | Decision D-02 |
 | A-SEI-04 | Importance factor defaults by occupancy (1.0–1.5) | `importance_for_occupancy` | Decision D-03 |
 | A-SEI-05 | Re-entrant projection estimated as √(bbox − footprint) | `run_full_analysis` | Crude screen |
-| A-WND-01 | k1 = k3 = 1, Kd = Ka = Kc = k4 = 1; power-law k2; simplified Cpe | `wind_load.py` | Kd/Ka/Kc = 1 is conservative; others unverified |
+| A-WND-01 | k1 = k3 = 1, Kd = Ka = Kc = k4 = 1; k2 from IS 875-3 Table 2; simplified Cpe | `wind_load.py` | Kd/Ka/Kc = 1 and the Cpe used are conservative for h/w < 6; k3 / k4 must be set by the engineer on slopes / cyclonic coasts |
 | A-SEC-01 | Clear spacing ≥ max(φ, 25 mm) (20 mm aggregate) | `choose_bars`, `detail_column` | |
 | A-SEC-02 | Slenderness additional moment reduction factor k = 1 | `check_column` | Conservative |
 | A-SEC-03 | Effective length = 1.0 × unsupported (storey) length | `detail_columns(le_factor=1.0)` | **Engineering decision needed** (D-04); may be unconservative for sway frames |
@@ -37,3 +37,6 @@ remain **UNVERIFIED** until reviewed by a qualified engineer.
 | A-QTY-01 | 4 % steel wastage; 80 kg/m³ footing steel when not designed; 100 kg/m³ stair steel | `quantifier` | |
 | A-QTY-02 | Fixed unit rates (INR) and carbon factors | `quantifier` | |
 | A-QTY-03 | Nominal cement contents per grade | `quantifier` | Not a mix design |
+| A-DUR-01 | Exposure default Moderate; covers = max(Table 16, Table 16A); beams with the continuous fire cover, slabs with the simply supported one | `durability.requirements` | D-21 |
+| A-DUR-02 | Fire ratings from NBC Part 4 Table 1 for the chosen type of construction (default Type 2); columns below the top storey "support more than one floor"; columns fully exposed (Fig. 1) | `durability`, `stability` | D-22 |
+

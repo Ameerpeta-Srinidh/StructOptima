@@ -9,6 +9,99 @@ Each entry states what changed, why, the evidence (tests actually run) and what 
 
 ---
 
+## 2026-10-20 — Check against the printed standards, DXF import and analysis fixes
+
+Owner instruction: "check whatever you need to check and change whatever is wrong". The code's values were compared
+with the printed IS 456, IS 1893, IS 13920, IS 875, IS 1786, NBC Part 4 and SP 16. Evidence for every item is in
+`docs/verification/standards-check-2026-10-20.md`; findings N29–N45, RM-35, decisions D-21–D-25.
+
+### Main changes
+- **Seismic:** the static method now uses the IS 1893:2016 rule (7.7.1) instead of the 2002 limits, so most designs
+  now FAIL "Seismic method" until a dynamic analysis exists. Other changes:
+  - no 1 + 15T rising branch in the static spectrum (VB was up to 16 % low);
+  - minimum VB from Table 7;
+  - OMRF not allowed in Zones III–V;
+  - soft storey, mass irregularity and floating-column checks per Amendment 2.
+- **IS 13920 (Amendments 1 and 2):**
+  - joint factor and effective breadth;
+  - roof strong column – weak beam waiver only above 4 storeys;
+  - minimum grade by height, and the reinforcement elongation requirement;
+  - column size ≥ 300 mm and ≥ 20 × the largest beam bar, aspect ratio ≥ 0.4, axial stress ≤ 0.40 fck;
+  - hooks 8d ≥ 75 mm; end-zone spacing 6d.
+- **IS 456:**
+  - Table 26 case 4 coefficient 0.047;
+  - M15 row of Table 19;
+  - new **exposure** input: covers from Table 16/16A used through the whole design, minimum grade from Table 5;
+  - fire per NBC Part 4 Table 1, with a new **type of construction** input;
+  - fire and slenderness failures now reach the status list.
+- **IS 875:** office imposed load 4.0 kN/m²; wind k2 from the printed Table 2; slender buildings (h/w ≥ 6) FAIL.
+- **Analysis:** storey forces are shared between frames as for a rigid floor, with slab links. This removes false
+  drift FAILs and unconservative forces in stiffer frames.
+- **DXF import:** rewritten. It now handles NCS and Indian layer names, blocks, POLYLINE and circular columns, plans
+  inside blocks, misalignment, survey coordinates, beams drawn to column faces, duplicates and units. Leaders are no
+  longer read as columns.
+
+### Tests run
+- `PYTHONDONTWRITEBYTECODE=1 python -m pytest tests -p no:cacheprovider -q`: **763 passed, 3 skipped**.
+- DXF sweep of the 92 sample drawings: 0 crashes.
+
+---
+
+## 2026-10-20 — UI restructure and display defects
+
+Requested by the owner: "work on the UI … give a seamless experience to the engineer". Decision D-20 (layout
+PROPOSED pending owner review), remediation RM-34. No engineering formula, load, combination or cited value changed.
+
+### Why
+A review of every screen (screenshots at desktop and tablet width, before and after, in `_local/ui-audit/`) found:
+- layout problems: about 30 inputs packed into a narrow sidebar that the other pages did not show; an empty main
+  page before a run; the failure list at the bottom of a long page; duplicate navigation; reports and DXFs
+  regenerated on every page load;
+- display defects:
+  - **N23** — the footing schedule always showed punching shear "OK", because it read an attribute that does not
+    exist, and its steel figure was volume × 80 kg/m³ instead of the designed steel;
+  - **N24** — the header showed "111/111 pass" in green while the design status was WARN;
+  - **N25** — the slab schedule had no status column;
+  - **N26** — after an input change the old results stayed on screen with no notice.
+
+### Changes
+- **Navigation:** a top bar with Setup · Overview · Checks · Members · Drawings & 3D · Reports · Site tools. The page
+  files were renamed without emoji (`pages/checks.py` etc., git history kept).
+- **Setup:** all inputs in five tabs on the main page, with a plan preview. A run panel lists exactly what is
+  missing. Inputs are kept when you switch pages (`src/ui_state.py`). Changing a site parameter clears the site
+  confirmation.
+- **Out-of-date results:** an input fingerprint is stored with each run. The header and every result page say when
+  the inputs have changed since.
+- **Overview:** status banner, checks not performed, a filterable issue list (FAIL first), 3D model, quantities and
+  the column editor.
+- **Checks:** one tab per topic, with the failure report first. The mass–stiffness offset screen no longer shows a
+  green "no torsional irregularity"; it is labelled a screen (KD-16).
+- **Members:** column, beam, slab and footing schedules with coloured status columns. The rows come from
+  `src/ui_tables.py`, which reads only the design results: the footing table shows bearing, punching, one-way shear
+  and bending separately, plus the designed steel. Members sort naturally (C2 before C10).
+- **Drawings & 3D:** only the selected view is generated. The A3 sheet fits the viewer, and pinch-zoom works on
+  tablets. Downloads are built on click.
+- **Reports:** generated on click. The ZIP package includes `_NOT_INCLUDED.txt` naming any part that failed (it
+  was silently skipped before).
+- **Site tools:** the BBS total is labelled with its scope (one typical floor).
+- **Theme:** Inter font, borders and radius in `.streamlit/config.toml`; most hand-written CSS removed.
+- **Standards:** `docs/engineering/standards-to-obtain.md` lists the IS codes and high-rise inputs to obtain (PDFs go
+  in the git-ignored `_local/standards/`).
+
+### Tests run
+- `PYTHONDONTWRITEBYTECODE=1 python -m pytest tests -p no:cacheprovider -q -rs`: **545 passed, 3 skipped, 0 failed**
+  (Ubuntu, Python 3.12.15, streamlit 1.53.0, with `pypdfium2` installed). The 3 skips are the same layout-dependent
+  ones as before.
+- New: `tests/test_ui_tables.py` (14) and a rewritten `tests/test_streamlit_app.py` (21).
+
+### Still open
+- Owner review on a site tablet.
+- N27 / KD-21: the BBS falls back to default bars and panel size when a description cannot be parsed (engineering
+  change, needs approval).
+- N28 / KD-22: `pypdfium2` is missing from `requirements.txt`.
+
+---
+
 ## 2026-10-16 — Repository clean-up and owner decisions
 
 Commit: `chore: organise the repository; record owner decisions`. Approved by the owner (D-07): "clean the whole

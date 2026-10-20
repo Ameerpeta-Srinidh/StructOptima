@@ -57,6 +57,7 @@ verification by a licensed structural engineer.
 - [units-and-conventions.md](engineering/units-and-conventions.md)
 - [assumptions-register.md](engineering/assumptions-register.md)
 - [standards-register.md](engineering/standards-register.md)
+- [standards-to-obtain.md](engineering/standards-to-obtain.md) — IS codes and high-rise inputs the owner must provide
 - [limitations.md](engineering/limitations.md)
 
 **Verification**

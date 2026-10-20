@@ -17,7 +17,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
-ES_MPA = 200000.0   # modulus of elasticity of reinforcing steel (IS 456 Cl 5.6.3 as cited) - UNVERIFIED
+ES_MPA = 200000.0   # modulus of elasticity of reinforcing steel, IS 456 Cl 5.6.3 (SP 16 1.4)
 
 
 # ----------------------------------------------------------------- parsing --

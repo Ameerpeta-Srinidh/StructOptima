@@ -7,12 +7,14 @@ Production = reachable from `app.py`/`pages/` or `main.py` through imports **and
 
 | File | Tracked | Kind | Notes |
 |---|---|---|---|
-| `app.py` | Yes | Streamlit main page | Rewritten 2026-10 to call `run_design` |
-| `pages/1_📊_Analysis.py` | Yes | Streamlit page | Seismic/wind/stability/combinations/optimiser/failure screen |
-| `pages/2_📋_Schedules.py` | Yes | Streamlit page | Column / beam / slab schedules, math logs |
-| `pages/3_📐_Drawings.py` | Yes | Streamlit page | A3 drawing set (PDF/DXF/SVG/ZIP), IFC4 download, 3D viewer / walk-through, 2D plan, interactive CAD. DXF exports go to a temporary directory (N10, fixed 2026-10-15) |
-| `pages/4_📄_Reports.py` | Yes | Streamlit page | PDF / Excel / BBS / ZIP downloads |
-| `pages/5_🔧_Site_Tools.py` | Yes | Streamlit page | BBS + cutting plan, approved-mix calculators, cube register, checklists, calculation summary, COBie, QR tags, inspection / defect log, measured vibration & strain, as-built survey (rewritten 2026-10-16; nothing simulated) |
+| `app.py` | Yes | Streamlit entry point | Navigation, input persistence, project header (restructured 2026-10-20) |
+| `pages/setup.py` | Yes | Streamlit page | Inputs and the design run (new 2026-10-20; replaces the sidebar of the old dashboard) |
+| `pages/overview.py` | Yes | Streamlit page | Status, issues, 3D viewer, quantities, column editor (new 2026-10-20) |
+| `pages/checks.py` | Yes | Streamlit page | Failure screen, seismic/wind/drift/stability/joints/combinations/L/d/optimiser tabs (was `1_📊_Analysis.py`) |
+| `pages/members.py` | Yes | Streamlit page | Column / beam / slab / footing schedules, calculation logs, masonry takeoff (was `2_📋_Schedules.py`) |
+| `pages/drawings.py` | Yes | Streamlit page | (was `3_📐_Drawings.py`) A3 drawing set (PDF/DXF/SVG/ZIP), IFC4 download, 3D viewer / walk-through, 2D plan, interactive CAD. DXF exports go to a temporary directory (N10, fixed 2026-10-15) |
+| `pages/reports.py` | Yes | Streamlit page | PDF / Excel / BBS / ZIP downloads, generated on click (was `4_📄_Reports.py`) |
+| `pages/site_tools.py` | Yes | Streamlit page | (was `5_🔧_Site_Tools.py`) BBS + cutting plan, approved-mix calculators, cube register, checklists, calculation summary, COBie, QR tags, inspection / defect log, measured vibration & strain, as-built survey (rewritten 2026-10-16; nothing simulated) |
 | `components/viewer3d/` | Yes | JS source + committed bundle | `src/main.js` (three.js viewer), `dist/viewer.js` (built by `npm run build`, committed), `package.json` / `package-lock.json`; `node_modules/` ignored |
 | `CHANGELOG.md` | Yes | Docs | Every 2026-10 change, why, tests run, open items |
 | `docs/user-guide.md` | Yes | Docs | Current user guide (supersedes `docs/legacy/user_guide.md`) |
@@ -29,9 +31,9 @@ Status: **P** production, **T** tests/demos only, **U** unused (no importer), **
 | Ingest | `cad_parser` P, `cad_loader` P, `auto_framer` P, `column_placer` P, `beam_placer` P (via auto_framer), `column_editor` P, `bim_loader` P (needs `ifcopenshell`) |
 | Analysis | `fea_solver` P, `analysis_integration` P, `load_combinations` P, `seismic` P, `wind_load` P, `analysis_config` T |
 | Design | `section_design` P, `rebar_detailer` P, `foundation_eng` P, `member_design` T (legacy alternative), `slab_generator` T, `anchorage` P (UI tables) |
-| Checks | `audit` P, `stability` P, `safety_warnings` P, `optimizer` P (Analysis page), `risk_management` C, `structural_checks` T, `validators` T, `layout_optimizer` T, `layout_scorer` T |
+| Checks | `audit` P, `stability` P, `safety_warnings` P, `optimizer` P (Checks page), `risk_management` C, `structural_checks` T, `validators` T, `layout_optimizer` T, `layout_scorer` T |
 | Quantities / outputs | `quantifier` P, `wall_calculator` P, `bbs_module` P, `bbs_report` P, `bbs_utils` P, `quantity_takeoff` T, `report_gen` P, `exporters` P, `dxf_exporter` P, `geometry_exporter` P, `visualizer` P, `svg_viewer` P |
-| UI / infra | `ui_components` P, `logging_config` P, `monitoring` P, `auth` U |
+| UI / infra | `ui_components` P, `ui_state` P, `ui_tables` P, `logging_config` P, `monitoring` P, `auth` U |
 | Site / misc | `site_calculators` P, `site_guide` P, `site_inspection` P, `site_monitoring` P, `shm_module` T, `bim_interop` P, `documentation` P |
 | Drawings / BIM / 3D | `drawings/` package P, `ifc_exporter` P, `viewer_model` P |
 
@@ -39,7 +41,7 @@ Status: **P** production, **T** tests/demos only, **U** unused (no importer), **
 
 See [../verification/test-inventory.md](../verification/test-inventory.md). New in 2026-10:
 `test_fea_benchmarks.py`, `test_section_design.py`, `test_audit_findings.py`,
-`test_pipeline_e2e.py`, `test_streamlit_app.py`, `ifc_fixture.py` (helper);
+`test_pipeline_e2e.py`, `test_streamlit_app.py`, `test_ui_tables.py`, `ifc_fixture.py` (helper);
 rewritten: `test_fea_repro.py`; updated: `test_beam_placer.py`.
 
 ## Configuration and deployment
@@ -55,7 +57,7 @@ rewritten: `test_fea_repro.py`; updated: `test_beam_placer.py`.
 ## Repository layout (after the 2026-10-16 clean-up)
 
 ```
-app.py, main.py            Streamlit dashboard and CLI
+app.py, main.py            Streamlit entry point and CLI
 pages/                     Streamlit pages
 src/                       Engineering, ingest, output and UI modules
 components/viewer3d/       3D viewer source + committed bundle

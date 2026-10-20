@@ -18,11 +18,30 @@ class CADLoader:
         self.placement_result = None # Stored for Column Editor use
         self.scale_factor = 1.0
         
+    @staticmethod
+    def _cluster(values: List[float], tol: float = 0.15) -> Tuple[List[float], float]:
+        """Group sorted coordinates whose neighbours are within ``tol`` m; returns (cluster means rounded to mm,
+        largest distance of a value from its cluster mean)."""
+        out, spread, group = [], 0.0, []
+        for v in sorted(values):
+            if group and v - group[-1] > tol:
+                m = sum(group) / len(group)
+                out.append(round(m, 3))
+                spread = max(spread, max(abs(g - m) for g in group))
+                group = []
+            group.append(v)
+        if group:
+            m = sum(group) / len(group)
+            out.append(round(m, 3))
+            spread = max(spread, max(abs(g - m) for g in group))
+        return out, spread
+
     def _snap_to_grid(self, val: float, grid: List[float], tol: float = 0.1) -> float:
-        for g in grid:
-            if abs(val - g) < tol:
-                return g
-        return val
+        """Nearest grid coordinate within ``tol``, else the value itself."""
+        if not grid:
+            return val
+        g = min(grid, key=lambda v: abs(v - val))
+        return g if abs(val - g) < tol else val
 
     def load_grid_manager(
         self, 
@@ -166,9 +185,39 @@ class CADLoader:
             self.load_warnings.append("Auto-frame column placement assumes a drawing in millimetres; results for other "
                                       "units are unreliable.")
         
-        unique_x = sorted(list(set([round(x * self.scale_factor, 2) for x in xs])))
-        unique_y = sorted(list(set([round(y * self.scale_factor, 2) for y in ys])))
-        
+        # Explicit column outlines are in drawing units: convert, then drop shapes that cannot be columns
+        if not auto_frame:
+            kept, odd = [], []
+            for rc in raw_cols:
+                w, d = rc['width'] * self.scale_factor, rc['depth'] * self.scale_factor
+                (kept if 0.15 <= min(w, d) and max(w, d) <= 3.0 else odd).append(rc)
+            if odd:
+                self.load_warnings.append(
+                    f"{len(odd)} closed outline(s) on column layers are smaller than 150 mm or larger than 3 m and "
+                    f"were not used as columns (e.g. {odd[0]['width'] * self.scale_factor * 1000:.0f} x "
+                    f"{odd[0]['depth'] * self.scale_factor * 1000:.0f} mm).")
+            if not kept:
+                raise ValueError("No columns of plausible size (150 mm to 3 m) found on the column layers. "
+                                 "Check the drawing units.")
+            raw_cols = kept
+
+        # Grid lines: cluster column centres that are within 150 mm (drafting misalignment) onto one line, then move
+        # the drawing so that the first grid intersection is the origin (survey / sheet coordinates)
+        gx, spread_x = self._cluster([rc['x'] * self.scale_factor for rc in raw_cols])
+        gy, spread_y = self._cluster([rc['y'] * self.scale_factor for rc in raw_cols])
+        ox, oy = gx[0], gy[0]
+        self.origin_m = (ox, oy)
+        if math.hypot(ox, oy) > 1.0:
+            self.load_warnings.append(f"Drawing coordinates were moved to the origin by ({-ox:.3f}, {-oy:.3f}) m "
+                                      f"(the first grid intersection is now 0, 0).")
+        unique_x = [round(v - ox, 3) for v in gx]
+        unique_y = [round(v - oy, 3) for v in gy]
+        spread = max(spread_x, spread_y)
+        if spread > 0.005:
+            self.load_warnings.append(f"Columns up to {spread * 1000:.0f} mm off a common grid line were aligned to "
+                                      f"the grid (lines within 150 mm merged). Check the drawing if this is "
+                                      f"not drafting tolerance.")
+
         width_m = unique_x[-1] - unique_x[0] if unique_x else 0
         length_m = unique_y[-1] - unique_y[0] if unique_y else 0
         
@@ -178,16 +227,16 @@ class CADLoader:
         
         gm.columns = []
         for rc in raw_cols:
-            x_m = rc['x'] * self.scale_factor
-            y_m = rc['y'] * self.scale_factor
+            x_m = rc['x'] * self.scale_factor - ox
+            y_m = rc['y'] * self.scale_factor - oy
             
-            x_m = self._snap_to_grid(x_m, unique_x)
-            y_m = self._snap_to_grid(y_m, unique_y)
+            x_m = self._snap_to_grid(x_m, unique_x, tol=0.15)
+            y_m = self._snap_to_grid(y_m, unique_y, tol=0.15)
             
             w_mm = rc.get('width', 300)
             d_mm = rc.get('depth', 300)
 
-            if not auto_frame and units_known:
+            if not auto_frame:
                 # explicit column outlines are in drawing units
                 w_mm *= self.scale_factor * 1000.0
                 d_mm *= self.scale_factor * 1000.0
@@ -217,8 +266,8 @@ class CADLoader:
         
         if auto_frame and 'raw_beams_struct' in locals():
              for sb in raw_beams_struct:
-                 p1 = Point(x=sb.start_point.x * self.scale_factor, y=sb.start_point.y * self.scale_factor)
-                 p2 = Point(x=sb.end_point.x * self.scale_factor, y=sb.end_point.y * self.scale_factor)
+                 p1 = Point(x=sb.start_point.x * self.scale_factor - ox, y=sb.start_point.y * self.scale_factor - oy)
+                 p2 = Point(x=sb.end_point.x * self.scale_factor - ox, y=sb.end_point.y * self.scale_factor - oy)
                  
                  p1.x = self._snap_to_grid(p1.x, unique_x)
                  p1.y = self._snap_to_grid(p1.y, unique_y)
@@ -233,12 +282,28 @@ class CADLoader:
                     properties=sb.properties
                  ))
         else:
+            # beam ends drawn at the column face (or slightly off) are moved to the column centre
+            centres = [(c.x, c.y, max(c.width_nb, c.depth_nb) / 2000.0) for c in gm.columns]
+
+            def snap(px, py):
+                best = min(centres, key=lambda c: math.hypot(px - c[0], py - c[1]))
+                if math.hypot(px - best[0], py - best[1]) <= best[2] + 0.15:
+                    return best[0], best[1], True
+                return px, py, False
+
+            loose, seen = 0, set()
             for rb in raw_beams:
                 start = rb['start']
                 end = rb['end']
-                
-                p1 = Point(x=start[0]*self.scale_factor, y=start[1]*self.scale_factor)
-                p2 = Point(x=end[0]*self.scale_factor, y=end[1]*self.scale_factor)
+                sx, sy, ok1 = snap(start[0] * self.scale_factor - ox, start[1] * self.scale_factor - oy)
+                ex, ey, ok2 = snap(end[0] * self.scale_factor - ox, end[1] * self.scale_factor - oy)
+                loose += (not ok1) + (not ok2)
+                key = tuple(sorted([(round(sx, 3), round(sy, 3)), (round(ex, 3), round(ey, 3))]))
+                if key[0] == key[1] or key in seen:
+                    continue
+                seen.add(key)
+                p1 = Point(x=sx, y=sy)
+                p2 = Point(x=ex, y=ey)
                 
                 beams.append(StructuralMember(
                     id=rb['id'],
@@ -248,25 +313,25 @@ class CADLoader:
                     properties=MemberProperties(width_mm=300, depth_mm=600)
                 ))
             
+            if loose:
+                self.load_warnings.append(f"{loose} beam end(s) in the drawing do not reach a column (beam-on-beam "
+                                          f"or drafting gap): check the framing.")
+
         # ── Extract Walls from DXF and create Wall objects ──
         if self.parser:
             from .grid_manager import Wall
             raw_arch_walls = self.parser.extract_walls_normalized()
             raw_walls_for_thickness = self.parser.extract_walls()
-            detected_thickness_mm = self.parser.detect_wall_thickness(raw_walls_for_thickness)
-            wall_thickness = detected_thickness_mm if detected_thickness_mm else 230.0
-            # Convert to meters if in mm scale
-            if self.scale_factor < 1.0:
-                wall_thickness = wall_thickness  # Already in mm
+            wall_thickness = self.parser.detect_wall_thickness(raw_walls_for_thickness, unit_m=self.scale_factor)
             
             # Clear height = storey - slab (125) - beam (400): same rule as GridManager.generate_walls
             wall_height = max(gm.story_height_m - 0.125 - 0.400, 0.5)
             
             for wi, wl in enumerate(raw_arch_walls):
-                sx = wl[0][0] * self.scale_factor
-                sy = wl[0][1] * self.scale_factor
-                ex = wl[1][0] * self.scale_factor
-                ey = wl[1][1] * self.scale_factor
+                sx = wl[0][0] * self.scale_factor - ox
+                sy = wl[0][1] * self.scale_factor - oy
+                ex = wl[1][0] * self.scale_factor - ox
+                ey = wl[1][1] * self.scale_factor - oy
                 
                 wall_len = math.hypot(ex - sx, ey - sy)
                 if wall_len < 0.3:  # Skip very short segments (< 300mm)

@@ -40,7 +40,7 @@ Evidence levels: **0** none · **1** executes · **2** structural assertions · 
 | CAL-QTY-01/02 | Concrete / steel | `test_R13_*`, `test_estimation_refinements.py` | 4 (beam steel sum) | VERIFIED_FOR_CASES (aggregation) | Manual take-off comparison |
 | CAL-BBS-01 | BBS | `test_R13_bbs_contains_beams_with_designed_bars`, `test_bbs_module.py` | 3 | UNVERIFIED | — |
 | Ingest | DXF units / walls / IFC | `test_R14_*`, `test_R17_*`, `test_cad_parser.py`, `test_pipeline_e2e.py` | 3 | VERIFIED_FOR_CASES (synthetic DXF/IFC) | Real-world IFC exports |
-| UI | Dashboard and pages | `test_streamlit_app.py` | 1 (renders without exception) | UNVERIFIED | Visual / content review |
+| UI | All pages; inputs kept across pages; out-of-date results flagged; site confirmation cleared on change; schedule rows from design results | `test_streamlit_app.py`, `test_ui_tables.py` | 2 (renders; row contents equal the design results) | UNVERIFIED | Owner review on a site tablet |
 
 | CAL-FEA-06 | Storey drift | `tests/test_drift.py` | 4 (closed-form portal) | VERIFIED_FOR_CASES (portal); limits UNVERIFIED | Multi-storey comparison with a reference program; printed IS 1893 limit |
 | CAL-SITE-01 | Site arithmetic (materials, pour, formwork, cubes, cutting plan, spectrum, strain, survey) | `tests/test_site_tools.py` | 4 (hand values) | VERIFIED_FOR_CASES | — |

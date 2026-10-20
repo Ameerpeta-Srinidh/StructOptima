@@ -30,6 +30,8 @@ EPS_C0 = 0.002      # strain at peak of parabola / uniform compression
 
 # IS 456 Table 19 (design shear strength of concrete, tau_c N/mm^2) by fck.
 TAU_C_TABLES: Dict[int, List[Tuple[float, float]]] = {
+    15: [(0.15, 0.28), (0.25, 0.35), (0.50, 0.46), (0.75, 0.54), (1.00, 0.60), (1.25, 0.64),
+         (1.50, 0.68), (1.75, 0.71), (2.00, 0.71), (2.25, 0.71), (2.50, 0.71), (2.75, 0.71), (3.00, 0.71)],
     20: [(0.15, 0.28), (0.25, 0.36), (0.50, 0.48), (0.75, 0.56), (1.00, 0.62), (1.25, 0.67),
          (1.50, 0.72), (1.75, 0.75), (2.00, 0.79), (2.25, 0.81), (2.50, 0.82), (2.75, 0.82), (3.00, 0.82)],
     25: [(0.15, 0.29), (0.25, 0.36), (0.50, 0.49), (0.75, 0.57), (1.00, 0.64), (1.25, 0.70),
@@ -43,7 +45,7 @@ TAU_C_TABLES: Dict[int, List[Tuple[float, float]]] = {
 }
 
 # IS 456 Table 20 (maximum shear stress tau_c,max N/mm^2) by fck.
-TAU_C_MAX = {20: 2.8, 25: 3.1, 30: 3.5, 35: 3.7, 40: 4.0}
+TAU_C_MAX = {15: 2.5, 20: 2.8, 25: 3.1, 30: 3.5, 35: 3.7, 40: 4.0}
 
 # Design stress-strain points for cold-worked bars (IS 456 Fig. 23A / SP:16
 # Table A): (stress as a fraction of 0.87 fy, inelastic strain).

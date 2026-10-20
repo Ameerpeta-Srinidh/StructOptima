@@ -32,19 +32,23 @@ logger = get_logger(__name__)
 PREFERRED_COLUMN_SIZES = [230, 300, 350, 380, 400, 450, 500, 550, 600, 650, 700, 750, 800, 900, 1000]
 
 # Storey drift limit under the design lateral force with partial safety factor
-# 1.0: IS 1893 (Part 1):2016 Cl 7.11.1.1 as commonly cited (0.004 h) - UNVERIFIED
+# 1.0: IS 1893 (Part 1):2016 Cl 7.11.1.1 (0.004 h) - checked against the printed standard 2026-10-20
 # against the printed standard (docs/engineering/standards-register.md).
 EQ_DRIFT_LIMIT = 0.004
 # Lateral sway at the top under transient wind load: IS 456:2000 Cl 20.5 as
-# commonly cited (H/500) - UNVERIFIED.  Serviceability -> WARN, not FAIL.
+# (H/500, "should") - checked 2026-10-20.  Serviceability -> WARN, not FAIL.
 WIND_TOP_SWAY_LIMIT = 1.0 / 500.0
 
 # Checks that are NOT performed, whatever the status says (gap analysis N17).
 # Shown with every result so PASS cannot be read as complete engineering validation.
 CHECKS_NOT_PERFORMED = [
-    "3D analysis: torsion, accidental eccentricity and diaphragm flexibility (independent 2D frames only)",
-    "Response-spectrum / dynamic analysis (equivalent static method only)",
-    "Orthogonal seismic combination (100 % + 30 %) and vertical seismic action",
+    "3D analysis: torsion, accidental eccentricity and diaphragm flexibility (2D frames sharing storey forces as for "
+    "a rigid diaphragm in translation only)",
+    "Response-spectrum / dynamic analysis - required by IS 1893 7.7.1 for every building except regular buildings "
+    "lower than 15 m in Zone II (equivalent static method only)",
+    "Orthogonal seismic combination (100 % + 30 %, IS 1893 6.3.2.2) and vertical seismic action (6.3.3.1, Amd 2)",
+    "Imposed loads on corridors, stairs and balconies (IS 875-2 Table 1: 3.0 / 4.0 kN/m2) - one floor load is used",
+    "Wind topography factor k3 and cyclonic importance factor k4 (IS 875-3 6.3.3, 6.3.4) - taken as 1.0",
     "Pattern (chequerboard) live loading",
     "P-Delta / second-order analysis; column effective length is taken as 1.0 x storey height",
     "IS 13920 ductile detailing design (confining steel, capacity-design shear, joint reinforcement)",
@@ -81,6 +85,8 @@ class DesignInputs:
     generate_walls_if_missing: bool = True
     align_to_wall: Optional[bool] = None   # None -> residential occupancies
     use_fly_ash: bool = False
+    exposure: str = "Moderate"              # IS 456 Table 3 (covers Table 16, grade Table 5)
+    nbc_construction_type: int = 2          # NBC 2016 Part 4 Table 1 type of construction (fire ratings)
     max_iterations: int = 6
     le_factor: float = 1.0
     project_name: str = "Project"
@@ -196,13 +202,44 @@ def drift_checks(storey_drift: Dict[str, Dict[int, Tuple[float, float, str]]],
     return rows
 
 
+def is13920_column_geometry(columns, largest_beam_bar_mm: int) -> List[Tuple[str, str]]:
+    """IS 13920:2016 7.1.1 (minimum dimension not less than 20 x the largest beam bar diameter or 300 mm) and
+    7.1.2 as amended (Amd 1: smaller / larger dimension not less than 0.4). ``columns``: (id, b_mm, D_mm)."""
+    out = []
+    need = max(300.0, 20.0 * largest_beam_bar_mm)
+    for cid, b, d in columns:
+        issues = []
+        if min(b, d) < need - 1e-6:
+            basis = "300 mm" if need == 300.0 else f"20 x {largest_beam_bar_mm} mm beam bar = {need:.0f} mm"
+            issues.append(f"least dimension {min(b, d):.0f} mm < {basis} (IS 13920 7.1.1)")
+        if max(b, d) > 0 and min(b, d) / max(b, d) < 0.4 - 1e-9:
+            issues.append(f"aspect ratio {min(b, d) / max(b, d):.2f} < 0.4 (IS 13920 7.1.2, Amd 1)")
+        if issues:
+            out.append((cid, "; ".join(issues)))
+    return out
+
+
+def eq_axial_stress_ratio(design_forces, b_mm: float, d_mm: float, fck: float) -> float:
+    """Largest factored axial stress over the earthquake combinations divided by 0.40 fck
+    (IS 13920:2016 7.1 as amended by Amendment 2); 0 when there is no earthquake combination."""
+    pus = [f[1] for f in design_forces if "EQ" in f[0].upper()]
+    if not pus or b_mm <= 0 or d_mm <= 0:
+        return 0.0
+    return max(pus) * 1000.0 / (b_mm * d_mm) / (0.40 * fck)
+
+
+def _largest_bar(desc: str) -> int:
+    import re
+    return max((int(x) for x in re.findall(r"-(\d+)#", desc or "")), default=0)
+
+
 def _ll_factor(q: float) -> float:
     """IS 1893 (Part 1):2016 Table 10 - live load fraction for seismic weight."""
     return 0.25 if q <= 3.0 else 0.50
 
 
 def run_design(gm: GridManager, beams: list, inputs: DesignInputs) -> DesignResults:
-    from .seismic import evaluate_joint_checks, run_seismic_check
+    from .seismic import check_soft_storeys, evaluate_joint_checks, run_seismic_check
     from .rebar_detailer import RebarDetailer  # noqa: F401
     messages: List[str] = []
 
@@ -213,6 +250,10 @@ def run_design(gm: GridManager, beams: list, inputs: DesignInputs) -> DesignResu
     gm.num_stories = inputs.num_stories
     gm.story_height_m = inputs.story_height_m
     gm.slab_thickness_mm = float(lp.slab_thickness_mm)
+    from .durability import requirements as durability_requirements
+    dreq = durability_requirements(inputs.exposure, inputs.nbc_construction_type, fck)
+    gm.beam_cover_mm, gm.slab_cover_mm = dreq.beam_cover_mm, dreq.slab_cover_mm
+    gm.column_cover_mm, gm.footing_cover_mm = dreq.column_cover_mm, dreq.footing_cover_mm
     t = gm.slab_thickness_mm / 1000.0
     sdl = lp.floor_finish_kn_m2 + lp.partition_load_kn_m2 + lp.services_load_kn_m2
     gm.superimposed_dead_kn_m2 = sdl
@@ -325,7 +366,8 @@ def run_design(gm: GridManager, beams: list, inputs: DesignInputs) -> DesignResu
         mbase = max([max(abs(f[2]), abs(f[3])) / combo_factor.get(f[0].rsplit("@", 1)[0], 1.5)
                      for f in col.design_forces if f[0].endswith("@bottom")], default=0.0)
         ft = design_footing(service, inputs.sbc_kn_m2, col.width_nb, col.depth_nb, concrete, fy=fy,
-                            factored_load_kn=pu, base_moment_knm=mbase if inputs.fixed_base else 0.0)
+                            factored_load_kn=pu, base_moment_knm=mbase if inputs.fixed_base else 0.0,
+                            clear_cover_mm=gm.footing_cover_mm)
         ft.id = f"F-{col.id}"
         footings.append(ft)
     gm.footings = footings
@@ -360,8 +402,10 @@ def run_design(gm: GridManager, beams: list, inputs: DesignInputs) -> DesignResu
         slab_thickness_mm=gm.slab_thickness_mm, beam_depth_mm=avg_beam_depth)
     auditor = StructuralAuditor(gm, all_beams, footings, sbc_kn_m2=inputs.sbc_kn_m2, fck=fck, fy=fy)
     audit_results = auditor.run_audit()
-    stab_checks, stab_summary = run_stability_check(gm.columns, beams, inputs.num_stories, inputs.story_height_m,
-                                                    column_cover_mm=40.0, beam_cover_mm=25.0)
+    stab_checks, stab_summary = run_stability_check(
+        gm.columns, beams, inputs.num_stories, inputs.story_height_m, column_cover_mm=gm.column_cover_mm,
+        beam_cover_mm=gm.beam_cover_mm, requirements=dreq, slab_cover_mm=gm.slab_cover_mm,
+        slabs=[(sid, r.thickness_mm) for sid, r in gm.slab_schedule.items()])
     safety_summary = run_safety_warnings_check(gm.columns, beams, gm.width_m, gm.length_m, fck, inputs.seismic_zone,
                                                joint_details=seismic_result.joint_details,
                                                cracked_sections_applied=inputs.use_cracked_sections, fy=fy)
@@ -402,6 +446,14 @@ def run_design(gm: GridManager, beams: list, inputs: DesignInputs) -> DesignResu
                 f"Vj {j['Vj_demand_kN']:.0f} > {j['Vj_capacity_kN']:.0f} kN" + ("" if ductile else " (advisory for OMRF)"))
     if not seismic_result.static_analysis_allowed:
         add("Building", "Seismic method", "FAIL", seismic_result.analysis_method_check.reason)
+    if not seismic_result.system_permitted:   # S2
+        add("Building", "Structural system", "FAIL",
+            f"OMRF is not allowed in Zone {inputs.seismic_zone}: RC structures in Zones III, IV and V shall be ductile "
+            f"(IS 1893 (Part 1):2016 Table 9, Note 1). Select SMRF and provide IS 13920 detailing.")
+    for fc in seismic_result.floating_columns:   # S7
+        add(fc.column_id, "Floating column", "FAIL",
+            f"{fc.warning} Floating columns that are part of or support the lateral load resisting system are not "
+            f"permitted (IS 1893 (Part 1):2016 Table 6(vi), Amendment 2).")
     for m in overlap_msgs:
         add("Footings", "Overlap", "WARN", m)
 
@@ -413,16 +465,80 @@ def run_design(gm: GridManager, beams: list, inputs: DesignInputs) -> DesignResu
         if r["Status"] in ("FAIL", "WARN"):
             add(f"{r['Storey']} ({r['Direction']})", "Storey drift" if r["Check"] == "Storey drift" else "Wind top sway",
                 r["Status"], f"{r['Case']}: {r['Drift (mm)']:.1f} mm over {r['Height (mm)']:.0f} mm = {r['Ratio']:.5f} "
-                             f"> limit {r['Limit']:.5f} (limit value UNVERIFIED)")
+                             f"> limit {r['Limit']:.5f} (IS 1893 7.11.1.1 / IS 456 20.5)")
+    # S5: soft storey, IS 1893 Table 6(i) as amended (Amd 2) - storey stiffness K = storey shear / storey drift
+    # under the EQ case; a storey less stiff than the storey above is a soft storey.
+    forces = seismic_result.storey_forces_kn
+    for case in ("EQX", "EQY"):
+        levels = summary.storey_drift.get(case) or {}
+        if len(forces) > 1 and all(levels.get(i) and levels[i][0] > 0 for i in range(len(forces))):
+            ks = [sum(forces[i:]) / levels[i][0] for i in range(len(forces))]
+            for soft in check_soft_storeys(ks):
+                lvl = "Ground storey" if soft.storey == 0 else f"Storey {soft.storey}"
+                add(f"{lvl} ({case[-1]})", "Soft storey", "FAIL",
+                    f"Lateral stiffness {soft.stiffness:,.0f} kN/m is less than the storey above "
+                    f"({soft.stiffness_above:,.0f} kN/m): soft storey per IS 1893 (Part 1):2016 Table 6(i) "
+                    f"(Amendment 2) - dynamic analysis and drift <= 0.2 % required")
     if not any(r["Case"].startswith("EQ") for r in drift_rows):
         add("Building", "Storey drift", "WARN", "No seismic drift result (lateral analysis not solved)")
     # N19: columns without frame moments in one direction
     for cid, plane in summary.columns_one_plane.items():
         add(cid, "Frame analysis", "WARN", f"Column lies on no {'Y' if plane == 'YZ' else 'X'}-direction frame line: "
                                            f"no frame moments about that axis (minimum eccentricity only)")
+    # IS 13920 applies in Zones III, IV and V (1.1.1) and wherever R = 5 (SMRF) is relied on
+    if ductile or inputs.seismic_zone != "II":
+        h_total = max((c.z_top for c in gm.columns), default=inputs.num_stories * inputs.story_height_m)
+        need = seismic_result.parameters.min_concrete_grade
+        if fck < need:
+            add("Building", "Concrete grade", "FAIL",
+                f"M{int(fck)} is below the minimum M{need} for a {h_total:.1f} m building in Zone "
+                f"{inputs.seismic_zone} (IS 13920:2016 5.2)")
+        add("Building", "Reinforcement grade", "WARN",
+            f"Fe{int(fy)} selected: IS 13920:2016 5.3.1 (Amd 2) requires elongation >= 14.5 % and TS / 0.2 % proof "
+            f"stress between 1.15 and 1.25. IS 1786 minimums do not guarantee this (plain Fe 500: 12 % elongation) - "
+            f"specify D-grade bars (Fe 415D / Fe 500D) and confirm from mill test certificates")
+        beam_bar = max((max(_largest_bar(r.bottom_bars_desc), _largest_bar(r.top_bars_desc))
+                        for r in gm.beam_schedule.values()), default=0)
+        by_issue: Dict[str, List[str]] = {}
+        for cid, issue in is13920_column_geometry([(c.id, c.width_nb, c.depth_nb) for c in gm.columns], beam_bar):
+            by_issue.setdefault(issue, []).append(cid)
+        for issue, ids in by_issue.items():
+            add(", ".join(ids[:6]) + (f" (+{len(ids) - 6})" if len(ids) > 6 else ""), "Column geometry", "FAIL", issue)
+        for c in gm.columns:
+            ratio = eq_axial_stress_ratio(c.design_forces, c.width_nb, c.depth_nb, fck)
+            if ratio > 1.0:
+                add(c.id, "Column axial stress", "FAIL",
+                    f"factored axial stress under earthquake combinations = {ratio * 0.40:.2f} fck > 0.40 fck "
+                    f"(IS 13920:2016 7.1, Amd 2)")
+    # IS 456 8.2.4.1 / Table 5: minimum grade for the exposure condition
+    if fck < dreq.min_grade:
+        add("Building", "Durability", "FAIL",
+            f"M{int(fck)} is below the minimum M{dreq.min_grade} for '{inputs.exposure}' exposure "
+            f"(IS 456:2000 Table 5; also max free w/c {dreq.max_wc}, min cement {dreq.min_cement_kg_m3} kg/m3)")
+    # Fire resistance (NBC 2016 Part 4 Table 1 -> IS 456 Fig. 1 / Table 16A) and stability (IS 456 23.3, 25.3)
+    fire_issues: Dict[Tuple[str, str], List[str]] = {}
+    for chk in stab_checks:
+        if not chk.is_fire_safe:
+            fire_issues.setdefault((chk.member_type, chk.remarks), []).append(chk.member_id)
+        if not chk.is_stable:
+            add(chk.member_id, "Slenderness", "FAIL",
+                f"{chk.member_type}: slenderness {chk.slenderness_ratio:.1f} > {chk.max_slenderness:.1f} "
+                f"(IS 456 {'25.3.1' if chk.member_type == 'column' else '23.3'})")
+    for (kind, remark), ids in fire_issues.items():
+        add(", ".join(ids[:6]) + (f" (+{len(ids) - 6})" if len(ids) > 6 else ""), "Fire resistance", "FAIL",
+            f"{kind}: {remark} - NBC type {inputs.nbc_construction_type} construction")
+    if not inputs.use_cracked_sections:
+        add("Building", "Stiffness modifiers", "WARN",
+            "Gross section stiffness used: IS 1893 (Part 1):2016 6.4.3.1 requires 0.70 Igross for columns and "
+            "0.35 Igross for beams in the structural analysis (drifts are under-estimated)")
     # N18: wind not considered
     if inputs.wind_zone is None:
         add("Building", "Wind", "WARN", "Wind loads not considered (no wind zone given)")
+    for w in (getattr(wind_result, "warnings", None) or []):
+        if w.startswith("UNCONSERVATIVE"):
+            add("Building", "Wind", "FAIL", w)
+        elif "dynamic (gust factor)" in w:
+            add("Building", "Wind", "WARN", w)
 
     order = {"PASS": 0, "WARN": 1, "FAIL": 2}
     status = max([f["Status"] for f in failures] + ["PASS"], key=lambda s: order.get(s, 2))

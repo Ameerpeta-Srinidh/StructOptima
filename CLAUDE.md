@@ -10,7 +10,11 @@ StructOptima is a Python/Streamlit **preliminary** design aid for reinforced-con
 frame buildings (references IS 456, IS 1893 Part 1, IS 875, IS 13920). It is not a
 certified analysis/design or code-compliance tool.
 
-- Entry points: `app.py` (Streamlit dashboard) + `pages/` (5 pages), `main.py` (CLI).
+- Entry points: `app.py` (Streamlit navigation entry point) + `pages/` (setup, overview, checks, members, drawings,
+  reports, site_tools), `main.py` (CLI). Inputs live in `in_*` session keys (`src/ui_state.py`); table rows shown in
+  the UI are built from the design results in `src/ui_tables.py` (never estimated or defaulted in a page).
+- Standards PDFs (copyrighted) go in the git-ignored `_local/standards/`; list in
+  `docs/engineering/standards-to-obtain.md`. Read them before verifying any cited clause.
 - All design orchestration goes through `src/design_pipeline.py::run_design`, which
   returns `DesignResults.status` and `failures` — the single source of design status.
 - Core chain: `grid_manager` (model, service-load takedown) → `analysis_integration`

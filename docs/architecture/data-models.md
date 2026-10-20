@@ -55,7 +55,10 @@ analysis envelope (factored): `mu_sagging_knm`, `mu_hogging_knm`, `vu_kn`,
 
 ## Session state (Streamlit)
 
-`app.py` writes the legacy keys used by the pages (`gm`, `beams`, `all_beams`,
+Project inputs live under `in_*` keys (`ui_state.input_defaults`; e.g. `in_sbc`, `in_zone`, `in_site_confirmed`),
+re-assigned on every run so they survive page switches; an uploaded DXF / IFC is kept as `model_file`
+(`{name, bytes, kind}`). After a run `ui_state._store_results` writes `design_inputs`, `design_fingerprint` and the
+legacy keys used by the pages (`gm`, `beams`, `all_beams`,
 `footings`, `bom`, `audit_results`, `seismic_result`, `wind_result`,
 `stab_checks`, `stab_summary`, `safety_summary`, `conc_grade`, `fck`,
 `num_stories`, `story_height`, …) plus `design_results`, `design_status`,

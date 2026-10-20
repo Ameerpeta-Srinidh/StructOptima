@@ -15,7 +15,17 @@ Classification of the strongest assertion type in each file:
 | `test_drift.py` (new 2026-10-16) | 5 | R | `analysis_integration`, `design_pipeline` | Portal drift vs hand value, cracked modifier ratio, limits/status, pipeline drift rows, one-plane column flag |
 | `test_site_tools.py` (new 2026-10-16) | 9 | A | `site_calculators`, `site_monitoring` | Hand values for materials, pour, formwork, cubes, cutting plan, FFT, strain, survey, member info / QR |
 | `test_drawings.py` (new 2026-10-16) | 13 | A | `src/drawings` | Sheets present and ordered, every member marked, identical marks = identical detailing, schedules carry marks and statuses, void marked, PDF/SVG/DXF consistency, large-plan scaling, CAD and IFC inputs, no files written |
-| `test_streamlit_app.py` (new) | 10 | UI | `app.py`, all pages | `streamlit.testing.AppTest`; CWD = `tmp_path` (the Drawings page writes DXFs to CWD) |
+| `test_streamlit_app.py` (rewritten 2026-10-20) | 21 | UI | `app.py`, all pages, `ui_state` | `streamlit.testing.AppTest`: every page after a run and without one, run gating, site confirmation cleared on change, inputs kept across pages, out-of-date results, BBS scope; CWD = `tmp_path` (no page may write to it) |
+| `test_is1893_2016.py` (new 2026-10-20) | 29 | A | `seismic`, pipeline | 6.4.2(a) spectrum, minimum VB (Table 7), 7.7.1 method rule, Table 9 Note 1, Table 6 soft storey / mass / floating columns, 6.4.3.1 |
+| `test_is13920_2016.py` (new 2026-10-20) | 23 | A | `seismic`, `bbs_module`, pipeline | Joint factor and breadth (Amd 2), minimum grade, roof SCWB, steel properties, column geometry and axial stress, hooks, end-zone spacing |
+| `test_is456_tables.py` (new 2026-10-20) | 16 | A | `rebar_detailer`, `section_design` | Tables 19, 20, 26 compared with an independent copy of the printed tables |
+| `test_durability.py` (new 2026-10-20) | 18 | A | `durability`, `stability`, pipeline | Tables 5, 16, 16A, Fig. 1, NBC Table 1; covers reach the design; grade and fire failures |
+| `test_is875_wind.py` (new 2026-10-20) | 7 | A | `wind_load` | Table 2 k2, Vb, h/w ≥ 6 |
+| `test_sp16_benchmarks.py` (new 2026-10-20) | 45 | B | `section_design` | SP 16 Tables A, C, D, F and Examples 1, 2, 3, 6, 9, 10 |
+| `test_lateral_sharing.py` (new 2026-10-20) | 3 | B | `analysis_integration` | Rigid-diaphragm sharing: 12 : 3 hand split, equal frames, common drift |
+| `test_dxf_conventions.py` + helper `dxf_conventions.py` (new 2026-10-20) | 23 | E2E | `cad_parser`, `cad_loader`, pipeline | Real drafting conventions (see verification results 5d) |
+| `test_realistic_buildings.py` (new 2026-10-20) | 54 | E2E | pipeline | 9 realistic buildings: clause values recomputed, equilibrium, plausibility ranges |
+| `test_ui_tables.py` (new 2026-10-20) | 14 | A | `ui_tables` | Regression for N23–N25: footing checks and steel from the footing design, status summary from `res.status`, issue order, column / beam / slab rows equal the design results |
 | `test_grid_manager.py` | 23 | A | `grid_manager` | Detailing tests only assert attributes exist (weak) |
 | `test_foundation_eng.py` | 16 | N | `foundation_eng` | Minimum sizes, monotonicity, volumes |
 | `test_load_modeling.py` | 22 | N | `wind_load`, `load_combinations` | Spot values (Vz, pz, Cpi), combination arithmetic |

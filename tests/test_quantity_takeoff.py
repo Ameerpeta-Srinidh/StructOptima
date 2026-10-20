@@ -22,17 +22,18 @@ from src.bbs_module import (
 
 class TestSeismicHookExtension:
     
-    def test_large_diameter_uses_6d(self):
+    # IS 13920:2016 as amended (Amd 1 and 2): 8 d but not less than 75 mm
+    def test_large_diameter_uses_8d(self):
         ext = seismic_hook_extension(16)
-        assert ext == 96  # 6 × 16 = 96 > 65
-    
-    def test_small_diameter_uses_65mm_min(self):
+        assert ext == 128  # 8 × 16 = 128 > 75
+
+    def test_small_diameter_uses_75mm_min(self):
         ext = seismic_hook_extension(8)
-        assert ext == SEISMIC_HOOK_MIN_EXTENSION_MM  # 6 × 8 = 48 < 65
-    
+        assert ext == SEISMIC_HOOK_MIN_EXTENSION_MM == 75  # 8 × 8 = 64 < 75
+
     def test_boundary_case(self):
         ext = seismic_hook_extension(12)
-        assert ext == max(6 * 12, 65)
+        assert ext == max(8 * 12, 75)
 
 
 class TestConfinedZoneSpacing:
@@ -43,17 +44,17 @@ class TestConfinedZoneSpacing:
         )
         assert spacing == 70  # 280/4 = 70 < 128 < 100
     
-    def test_8d_governs(self):
+    def test_6d_governs(self):   # IS 13920 6.3.5(b) as amended by Amd 1
         spacing = confined_zone_stirrup_spacing(
             effective_depth_mm=600, longitudinal_bar_dia_mm=10
         )
-        assert spacing == 80  # 600/4 = 150, 8×10 = 80 < 100
+        assert spacing == 60  # 600/4 = 150, 6×10 = 60 < 100
     
     def test_100mm_max_governs(self):
         spacing = confined_zone_stirrup_spacing(
-            effective_depth_mm=600, longitudinal_bar_dia_mm=16
+            effective_depth_mm=600, longitudinal_bar_dia_mm=20
         )
-        assert spacing == CONFINED_ZONE_MAX_SPACING_MM
+        assert spacing == CONFINED_ZONE_MAX_SPACING_MM  # 600/4 = 150, 6×20 = 120 > 100
 
 
 class TestLapSpliceLength:

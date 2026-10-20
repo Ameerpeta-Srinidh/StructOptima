@@ -3,7 +3,8 @@ import datetime
 import pandas as pd
 import streamlit as st
 
-from src.ui_components import inject_css, render_project_header, render_is_code_reference
+from src.ui_components import page_title, stale_notice
+from src.ui_tables import BBS_SCOPE
 from src.site_calculators import (
     calculate_rebar_weight, rebar_weight_table, concrete_pour_calculator, formwork_area_calculator,
     cube_test_summary, materials_for_mix, optimise_cutting, MIXER_CAPACITIES, REBAR_WEIGHT_PER_M,
@@ -12,35 +13,31 @@ from src.site_guide import SITE_CHECKLISTS
 from src.bim_interop import CobieExporter
 from src.site_inspection import DefectRecord, SiteInspectionManager
 
-st.set_page_config(page_title='StructOptima — Site Tools', layout='wide', page_icon='🔧')
-inject_css()
-render_project_header()
-render_is_code_reference()
-
-st.title("🔧 Site Tools & Execution Hub")
-st.caption("Every number on this page is computed from the designed model or from data you enter. "
-           "Nothing is simulated or assumed. Outputs are PRELIMINARY — verify against the issued drawings.")
+stale_notice()
+page_title("Site tools", "Every number on this page is computed from the designed model or from data you enter. "
+                         "Nothing is simulated or assumed. Outputs are PRELIMINARY — verify against the issued drawings.")
 
 tab1, tab2, tab3, tab4 = st.tabs(["Bar Bending Schedule", "Site Calculators", "Site Checklists", "BIM & Handover"])
 
 # ----------------- TAB 1: BBS -----------------
 with tab1:
     if not st.session_state.get('analysis_done'):
-        st.warning("⚠️ Please complete the structural analysis on the main page to generate the Bar Bending Schedule.")
+        st.info("Run the design on the Setup page to generate the bar bending schedule.")
     else:
-        st.markdown("### Bar Bending Schedule")
+        st.markdown("#### Bar Bending Schedule")
         project_bbs = st.session_state.get('project_bbs')
         gm = st.session_state.get('gm')
         if not project_bbs or not gm:
             st.error("BBS data or structural model not found in session state.")
         else:
-            st.markdown(f"**Total steel (cut lengths):** {project_bbs.total_steel_kg:.2f} kg")
+            st.markdown(f"**Steel in this schedule (cut lengths):** {project_bbs.total_steel_kg:,.1f} kg")
+            st.caption(BBS_SCOPE)
             summary_data = []
             for dia in sorted(project_bbs.summary_by_diameter.keys()):
                 wt = project_bbs.summary_by_diameter[dia]
                 pct = (wt / project_bbs.total_steel_kg * 100) if project_bbs.total_steel_kg > 0 else 0
                 summary_data.append({"Diameter (mm)": dia, "Weight (kg)": round(wt, 2), "% of Total": round(pct, 1)})
-            st.dataframe(summary_data, use_container_width=True, hide_index=True)
+            st.dataframe(summary_data, width="stretch", hide_index=True)
 
             with st.expander("Detailed member-wise BBS"):
                 for member in project_bbs.members:
@@ -50,7 +47,7 @@ with tab1:
                                    "Wt (kg)": round(e.total_weight_kg, 2)} for e in member.entries],
                                   height=150, hide_index=True)
 
-            st.markdown("#### ✂️ Cutting plan from stock bars")
+            st.markdown("#### Cutting plan from stock bars")
             stock_len = st.number_input("Stock bar length supplied (m)", min_value=6.0, max_value=15.0, value=12.0,
                                         step=0.5, help="Length of the bars delivered to site")
             pieces = [(e.bar_mark, int(e.bar_diameter_mm), e.cutting_length_mm / 1000.0, int(e.number_of_bars))
@@ -59,35 +56,35 @@ with tab1:
             rows = [{"Dia (mm)": d, "Stock bars": v["stock_bars"], "Stock weight (kg)": v["stock_weight_kg"],
                      "Cut weight (kg)": v["cut_weight_kg"], "Offcut (m)": v["offcut_m"], "Efficiency %": v["efficiency_pct"]}
                     for d, v in plan["by_diameter"].items()]
-            st.dataframe(rows, use_container_width=True, hide_index=True)
+            st.dataframe(rows, width="stretch", hide_index=True)
             st.caption("First-fit-decreasing plan: pieces are cut longest first from the fewest stock bars. "
                        "Offcuts are not reused across diameters.")
             if plan["needs_lap"]:
                 st.warning(f"{len(plan['needs_lap'])} bar mark(s) are longer than the stock bar and need a lap or coupler "
                            "— locate laps as shown on the drawings / by the engineer:")
-                st.dataframe(plan["needs_lap"], use_container_width=True, hide_index=True)
+                st.dataframe(plan["needs_lap"], width="stretch", hide_index=True)
             sel_dia = st.selectbox("Show cutting plan for diameter", list(plan["by_diameter"].keys()) or [None])
             if sel_dia is not None:
-                st.dataframe(plan["by_diameter"][sel_dia]["plan"], use_container_width=True, hide_index=True, height=250)
+                st.dataframe(plan["by_diameter"][sel_dia]["plan"], width="stretch", hide_index=True, height=250)
                 st.download_button("⬇️ Cutting plan (CSV)", pd.DataFrame(plan["by_diameter"][sel_dia]["plan"]).to_csv(index=False),
                                    f"cutting_plan_{sel_dia}mm.csv", "text/csv", key="dl_cut_plan")
 
 # ----------------- TAB 2: Calculators -----------------
 with tab2:
-    st.markdown("### Site Calculators")
+    st.markdown("#### Site Calculators")
     calc_c1, calc_c2 = st.columns([1, 1])
 
     with calc_c1:
-        with st.expander("⚖️ Rebar Weight Calculator", expanded=True):
+        with st.expander("Rebar Weight Calculator", expanded=True):
             r_dia = st.selectbox("Diameter", list(REBAR_WEIGHT_PER_M.keys()), format_func=lambda x: f"{x} mm")
             r_len = st.number_input("Length (m)", min_value=0.1, value=12.0)
             r_cnt = st.number_input("Count", min_value=1, value=1)
             wt_res = calculate_rebar_weight(r_dia, r_len, r_cnt)
             st.success(f"Total weight: **{wt_res['total_weight_kg']:.2f} kg** ({wt_res['unit_weight_kg_m']} kg/m)")
             if st.checkbox("Show unit weight table (d²/162)"):
-                st.dataframe(rebar_weight_table(), use_container_width=True)
+                st.dataframe(rebar_weight_table(), width="stretch")
 
-        with st.expander("🧪 Approved mix design", expanded=True):
+        with st.expander("Approved mix design", expanded=True):
             st.caption("Enter the batch weights per m³ of the mix approved for this project (lab trial mix / RMC "
                        "supplier). StructOptima does not assume a mix.")
             _m = st.session_state.get('approved_mix') or {}
@@ -106,7 +103,7 @@ with tab2:
                     st.success(f"Saved. w/c = {wat / cem:.2f}. Used for material quantities on the dashboard, "
                                "pour planner and report.")
 
-        with st.expander("🧱 Cube test register"):
+        with st.expander("Cube test register"):
             st.caption("Records cube results for a sample. Acceptance is judged by the engineer per IS 456 / IS 516.")
             c_grade = st.selectbox("Specified grade", ["M20", "M25", "M30", "M35", "M40"], index=1, key="cube_grade")
             k1, k2, k3 = st.columns(3)
@@ -121,7 +118,7 @@ with tab2:
                          f"mean / fck = {cs['mean_over_fck']} · largest deviation from mean {cs['max_deviation_from_mean_pct']} %")
 
     with calc_c2:
-        with st.expander("🚛 Concrete Pour Planner", expanded=True):
+        with st.expander("Concrete Pour Planner", expanded=True):
             _bom = st.session_state.get('bom')
             vol_def = float(getattr(_bom, 'total_concrete_vol_m3', 0.0) or 1.0)
             vol = st.number_input("Net volume to pour (m³)", min_value=0.1, value=round(vol_def, 2),
@@ -144,7 +141,7 @@ with tab2:
             else:
                 st.info("Save the approved mix (left) to get material quantities.")
 
-        with st.expander("🪵 Formwork contact area"):
+        with st.expander("Formwork contact area"):
             if st.session_state.get('analysis_done'):
                 gm = st.session_state.get('gm')
                 all_beams = st.session_state.get('all_beams', [])
@@ -161,12 +158,12 @@ with tab2:
 
 # ----------------- TAB 3: Checklists -----------------
 with tab3:
-    st.markdown("### Site Checklists & Quick References")
+    st.markdown("#### Site Checklists & Quick References")
     st.caption("Prompts for the inspecting engineer. Numerical values are as cited and UNVERIFIED against the printed "
                "standards; the project specification and the engineer's instructions govern.")
     
     for category, md_content in SITE_CHECKLISTS.items():
-        with st.expander(f"📋 {category}"):
+        with st.expander(f"{category}"):
             for i, line in enumerate(md_content.strip().split('\n')):
                 line = line.strip()
                 if not line:
@@ -193,7 +190,7 @@ with tab3:
 # ----------------- TAB 4: BIM & Handover -----------------
 with tab4:
     if not st.session_state.get('analysis_done') or st.session_state.get('design_results') is None:
-        st.warning("⚠️ Please complete the structural analysis on the main page to enable these tools.")
+        st.info("Run the design on the Setup page to enable these tools.")
     else:
         from src.documentation import calculation_summary
         from src.drawings import compute_marks
@@ -216,7 +213,7 @@ with tab4:
                        "column check, items needing attention and the checks StructOptima does not perform.")
             text = calculation_summary(res, project_name, engineer_name)
             st.text_area("Preview", text, height=360)
-            st.download_button("📄 Download calculation summary (.txt)", text, "Calculation_Summary.txt", "text/plain",
+            st.download_button("Download calculation summary (.txt)", text, "Calculation_Summary.txt", "text/plain",
                                key="dl_calc_summary")
 
             st.markdown("#### COBie data (from the design)")
@@ -240,7 +237,7 @@ with tab4:
                     cobie.add_type(tname, "Beam", f"RCC beam {grade}, Fe{gm.fy:.0f}")
                 cobie.add_component(b.id, tname, "Typical floor", f"Mark {marks.beams.get(b.id, '')}")
                 cobie.add_attribute(b.id, "Bars", f"T {r.top_bars_desc} / B {r.bottom_bars_desc} / {r.stirrups_desc}", "")
-            st.download_button("📦 Download COBie JSON", cobie.export_json(), "COBie_Data.json", "application/json",
+            st.download_button("Download COBie JSON", cobie.export_json(), "COBie_Data.json", "application/json",
                                key="dl_cobie")
 
         with ht2:
@@ -298,7 +295,7 @@ with tab4:
                         st.error(str(e))
             site_mgr.defects = list(log)
             if log:
-                st.dataframe([vars(d) for d in log], use_container_width=True, hide_index=True)
+                st.dataframe([vars(d) for d in log], width="stretch", hide_index=True)
                 st.download_button("⬇️ Defect log (CSV)", site_mgr.defects_csv(), "Defect_Log.csv", "text/csv",
                                    key="dl_defects")
                 pts = site_mgr.get_defect_map_data()
@@ -331,8 +328,8 @@ with tab4:
                                    type=["csv", "txt"], key="strain_csv")
             if up2 is not None:
                 try:
-                    st.dataframe(strain_from_csv(up2.getvalue(), gm.fy), use_container_width=True, hide_index=True)
-                    st.caption(f"Yield strain = fy / Es = {gm.fy:.0f} / 200000 (Es as cited in IS 456, UNVERIFIED).")
+                    st.dataframe(strain_from_csv(up2.getvalue(), gm.fy), width="stretch", hide_index=True)
+                    st.caption(f"Yield strain = fy / Es = {gm.fy:.0f} / 200000 (Es = 200 kN/mm², IS 456 5.6.3).")
                 except ValueError as e:
                     st.error(f"Cannot read the readings: {e}")
 
@@ -350,7 +347,7 @@ with tab4:
                         sv = survey_from_csv(gm, up3.getvalue(), tol)
                         (st.error if sv["exceeding"] else st.success)(
                             f"{sv['exceeding']} of {len(sv['rows'])} surveyed columns exceed the tolerance.")
-                        st.dataframe(sv["rows"], use_container_width=True, hide_index=True)
+                        st.dataframe(sv["rows"], width="stretch", hide_index=True)
                         if sv["unknown_ids"]:
                             st.warning("Ids not in the design: " + ", ".join(sv["unknown_ids"]))
                         if sv["not_surveyed"]:

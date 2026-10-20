@@ -17,7 +17,9 @@ the internal-force diagrams.  Results are written to:
     column.design_forces = [(combo@end, Pu, Mx, My), ...]               (factored)
 
 Limitations (documented in docs/engineering/limitations.md): no torsion /
-accidental eccentricity, rigid-diaphragm load sharing by column stiffness,
+accidental eccentricity; lateral storey forces are shared between parallel frames as for a rigid diaphragm in
+translation (each frame's condensed lateral stiffness from unit floor loads - since 2026-10-20; previously by
+column stiffness only, which ignored the beams),
 column axial loads from the tributary takedown (not from the frames) for
 gravity cases, beams not on a grid line are not part of any frame.
 """
@@ -66,6 +68,8 @@ class AnalysisSummary:
     storey_drift: Dict[str, Dict[int, Tuple[float, float, str]]] = field(default_factory=dict)
     # {case: (largest absolute lateral displacement at the top of the top storey m, column id)}
     top_displacement: Dict[str, Tuple[float, str]] = field(default_factory=dict)
+    # {case: {"XZ@y" / "YZ@x": [storey force per level carried by that frame, kN]} (rigid-diaphragm sharing)
+    lateral_shares: Dict[str, Dict[str, List[float]]] = field(default_factory=dict)
 
     @property
     def ok(self) -> bool:
@@ -341,14 +345,8 @@ def update_structural_analysis(gm: GridManager, beams: List[StructuralMember], f
             if 0 <= c.level < N:
                 kl[c.level] += 12.0 * E * I / h ** 3
         frame_defs.append((plane, cc, cols, fbeams, kl))
-    k_tot = {"XZ": [0.0] * N, "YZ": [0.0] * N}
-    for plane, _, _, _, kl in frame_defs:
-        for i in range(N):
-            k_tot[plane][i] += kl[i]
-
-    for plane, cc, cols, fbeams, kl in frame_defs:
-        summary.frames_total += 1
-        name = f"{plane}@{cc:.2f}"
+    def build_frame(plane, cols, fbeams):
+        """Plane frame model: (solver, registry of (u, z, node), column elements, beam elements)."""
         solver = FrameSolver2D(fixed_base=fixed_base, base_level=min([c.z_bottom for c in cols], default=0.0))
         registry: List[Tuple[float, float, int]] = []
 
@@ -378,6 +376,68 @@ def update_structural_analysis(gm: GridManager, beams: List[StructuralMember], f
                 if n1 == n2:
                     continue
                 beam_elem[(bm.id, lvl)] = solver.add_element(n1, n2, E, I, A)
+        # Floor slab in its own plane: neighbouring nodes at a level that no beam connects are tied by an axially
+        # rigid link with negligible bending stiffness (diaphragm action without frame action), so that every
+        # column of the frame takes part in resisting the floor's lateral force.
+        connected = {tuple(sorted((solver.elements[e]["n1"], solver.elements[e]["n2"]))) for e in beam_elem.values()}
+        for lvl in range(1, N + 1):
+            row = sorted((u, idx) for (u, z, idx) in registry if abs(z - elev[lvl - 1]) < MERGE_TOL)
+            for (u1, n1), (u2, n2) in zip(row, row[1:]):
+                if tuple(sorted((n1, n2))) not in connected and u2 - u1 > MERGE_TOL:
+                    solver.add_element(n1, n2, E, 1e-9, 10.0)
+        return solver, registry, col_elem, beam_elem
+
+    def load_node(registry, lvl):
+        at_level = [(u, idx) for (u, z, idx) in registry if abs(z - elev[lvl - 1]) < MERGE_TOL]
+        return min(at_level)[1] if at_level else None
+
+    # Rigid-diaphragm (translation) sharing of the storey forces between parallel frames: condensed lateral
+    # stiffness of every frame from unit horizontal loads at each floor, K = sum K_f, u = K^-1 F, F_f = K_f u.
+    import numpy as np
+    k_frames: Dict[Tuple[str, float], np.ndarray] = {}
+    for plane, cc, cols, fbeams, _kl in frame_defs:
+        if not (has_eq or has_wl):
+            break
+        solver, registry, _, _ = build_frame(plane, cols, fbeams)
+        lv = [l for l in range(1, N + 1) if load_node(registry, l) is not None]
+        unit = {f"U{l}": ({}, {load_node(registry, l): [1.0, 0.0, 0.0]}) for l in lv}
+        res_u = solver.solve_cases(unit) if (solver.elements and unit) else {}
+        K = np.zeros((N, N))
+        if res_u:
+            flex = np.array([[float(res_u[f"U{j}"]["displacements"][3 * load_node(registry, i)]) for j in lv]
+                             for i in lv])
+            try:
+                Kf = np.linalg.inv(flex)
+                for a, i in enumerate(lv):
+                    for b, j in enumerate(lv):
+                        K[i - 1, j - 1] = Kf[a, b]
+            except np.linalg.LinAlgError:
+                summary.messages.append(f"Frame {plane}@{cc:.2f}: lateral flexibility singular - no lateral load "
+                                        f"assigned to it")
+        k_frames[(plane, cc)] = K
+    k_tot = {pl: sum((K for (p_, _), K in k_frames.items() if p_ == pl), np.zeros((N, N))) for pl in ("XZ", "YZ")}
+    frame_lateral: Dict[Tuple[str, float, str], np.ndarray] = {}
+    for pl, cases_ in (("XZ", (("EQX", lateral.eq_x), ("WLX", lateral.wl_x))),
+                       ("YZ", (("EQY", lateral.eq_y), ("WLY", lateral.wl_y)))):
+        for cname, forces in cases_:
+            if not forces:
+                continue
+            Fv = np.zeros(N)
+            Fv[:min(N, len(forces))] = forces[:N]
+            u, *_ = np.linalg.lstsq(k_tot[pl], Fv, rcond=None)
+            for (p_, cc), K in k_frames.items():
+                if p_ == pl:
+                    frame_lateral[(pl, cc, cname)] = K @ u
+                    summary.lateral_shares.setdefault(cname, {})[f"{pl}@{cc:.2f}"] = [float(v) for v in K @ u]
+            got = sum(frame_lateral.get((pl, cc, cname), np.zeros(N)).sum() for (p_, cc) in k_frames if p_ == pl)
+            if abs(got - Fv.sum()) > 1e-6 * max(1.0, abs(Fv.sum())):
+                summary.messages.append(f"{cname}: frames resist {got:.1f} of {Fv.sum():.1f} kN storey force "
+                                        f"(levels without a laterally stable frame)")
+
+    for plane, cc, cols, fbeams, kl in frame_defs:
+        summary.frames_total += 1
+        name = f"{plane}@{cc:.2f}"
+        solver, registry, col_elem, beam_elem = build_frame(plane, cols, fbeams)
 
         cases: Dict[str, Tuple[Dict[int, float], Dict[int, List[float]]]] = {
             "DL": ({}, {}), "LL": ({}, {})}
@@ -392,15 +452,12 @@ def update_structural_analysis(gm: GridManager, beams: List[StructuralMember], f
             if not forces:
                 continue
             nloads: Dict[int, List[float]] = {}
+            shares = frame_lateral.get((plane, cc, cname))
             for lvl in range(1, min(N, len(forces)) + 1):
-                tot = k_tot[plane][lvl - 1]
-                if tot <= 0 or kl[lvl - 1] <= 0:
+                share = float(shares[lvl - 1]) if shares is not None else 0.0
+                n = load_node(registry, lvl)
+                if n is None or share == 0.0:
                     continue
-                share = kl[lvl - 1] / tot * forces[lvl - 1]
-                at_level = [(u, idx) for (u, z, idx) in registry if abs(z - elev[lvl - 1]) < MERGE_TOL]
-                if not at_level:
-                    continue
-                n = min(at_level)[1]
                 cur = nloads.get(n, [0.0, 0.0, 0.0])
                 nloads[n] = [cur[0] + share, cur[1], cur[2]]
             cases[cname] = ({}, nloads)

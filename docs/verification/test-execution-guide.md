@@ -27,7 +27,7 @@ Plain `pytest` (as in CI) also works; it creates the cache directories.
 | Test group | Writes | Location |
 |---|---|---|
 | CAD / DXF exporter / IFC / reports / CLI tests | DXF, IFC, PDF, XLSX | pytest `tmp_path` (system temp) |
-| `test_streamlit_app.py` | DXF exports from the Drawings page | `tmp_path` (the test changes CWD) |
+| `test_streamlit_app.py` | nothing (asserted: the CWD stays empty) | `tmp_path` (the test changes CWD) |
 | `test_pipeline_e2e.py::test_cli_main` | PDF | `tmp_path`; file logging monkeypatched off |
 | All others | nothing | — |
 

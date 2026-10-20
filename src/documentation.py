@@ -43,7 +43,7 @@ def calculation_summary(res, project_name: str, engineer_name: str) -> str:
         L.append("No seismic result.")
     L.append("")
 
-    L += ["3. STOREY DRIFT (unfactored design lateral forces, 2D frames; limit values UNVERIFIED)", "-" * 40,
+    L += ["3. STOREY DRIFT (unfactored design lateral forces, 2D frames; limits IS 1893 7.11.1.1 and IS 456 20.5)", "-" * 40,
           f"{'Case':<5} {'Storey':<14} {'Column':<10} {'Drift mm':>9} {'H mm':>7} {'Ratio':>9} {'Limit':>7}  Status"]
     for r in res.drift_results:
         lim = "-" if r["Limit"] is None else f"{r['Limit']:.4f}"

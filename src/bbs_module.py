@@ -47,9 +47,10 @@ STANDARD_BAR_DIAMETERS = [6, 8, 10, 12, 16, 20, 25, 32]
 # IS 13920 DUCTILE DETAILING CONSTANTS
 # =============================================================================
 
-# Seismic hook extension: 6d but not less than 65mm (IS 13920)
-SEISMIC_HOOK_MIN_EXTENSION_MM = 65
-SEISMIC_HOOK_EXTENSION_FACTOR = 6
+# Seismic hook extension: 8d but not less than 75 mm (IS 13920:2016 3.5, 6.3.1(a), 7.4.1 as amended by
+# Amendments 1 and 2; was 6d / 65 mm - finding J8)
+SEISMIC_HOOK_MIN_EXTENSION_MM = 75
+SEISMIC_HOOK_EXTENSION_FACTOR = 8
 
 # Confined zone length from column face
 CONFINED_ZONE_LENGTH_FACTOR = 2.0  # 2d from column face
@@ -321,7 +322,7 @@ def seismic_hook_extension(diameter_mm: int) -> float:
     """
     Calculate seismic hook extension per IS 13920.
     
-    Rule: 6d but not less than 65mm.
+    Rule: 8d but not less than 75 mm (IS 13920:2016, Amendments 1 and 2).
     
     Args:
         diameter_mm: Bar diameter in mm
@@ -340,7 +341,8 @@ def confined_zone_stirrup_spacing(
     """
     Calculate stirrup spacing in confined zone per IS 13920.
     
-    Rule: Minimum of (d/4, 8 × smallest longitudinal bar dia, 100mm)
+    Rule: Minimum of (d/4, 6 × smallest longitudinal bar dia, 100mm) - IS 13920:2016 6.3.5 as amended by
+    Amendment 1 (6 times, was 8 times; finding J9)
     
     Args:
         effective_depth_mm: Effective depth of beam/column
@@ -350,7 +352,7 @@ def confined_zone_stirrup_spacing(
         Maximum allowed spacing in mm
     """
     option_1 = effective_depth_mm / 4
-    option_2 = 8 * longitudinal_bar_dia_mm
+    option_2 = 6 * longitudinal_bar_dia_mm
     option_3 = CONFINED_ZONE_MAX_SPACING_MM
     
     return min(option_1, option_2, option_3)

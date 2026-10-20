@@ -48,68 +48,29 @@ class FireResistanceRequirements:
 
 
 # IS 456 Table 16A - Fire Resistance Requirements
-FIRE_RESISTANCE_TABLE = {
-    FireRating.HALF_HOUR: FireResistanceRequirements(
-        fire_rating=FireRating.HALF_HOUR,
-        min_column_width_mm=200,
-        min_beam_width_mm=200,
-        min_slab_thickness_mm=75,
-        min_cover_column_mm=20,
-        min_cover_beam_mm=20,
-        min_cover_slab_mm=15,
-        description="0.5 hour fire resistance"
-    ),
-    FireRating.ONE_HOUR: FireResistanceRequirements(
-        fire_rating=FireRating.ONE_HOUR,
-        min_column_width_mm=200,
-        min_beam_width_mm=200,
-        min_slab_thickness_mm=95,
-        min_cover_column_mm=25,
-        min_cover_beam_mm=20,
-        min_cover_slab_mm=20,
-        description="1 hour fire resistance"
-    ),
-    FireRating.ONE_HALF_HOUR: FireResistanceRequirements(
-        fire_rating=FireRating.ONE_HALF_HOUR,
-        min_column_width_mm=200,
-        min_beam_width_mm=200,
-        min_slab_thickness_mm=110,
-        min_cover_column_mm=30,
-        min_cover_beam_mm=25,
-        min_cover_slab_mm=25,
-        description="1.5 hour fire resistance"
-    ),
-    FireRating.TWO_HOUR: FireResistanceRequirements(
-        fire_rating=FireRating.TWO_HOUR,
-        min_column_width_mm=300,
-        min_beam_width_mm=200,
-        min_slab_thickness_mm=125,
-        min_cover_column_mm=40,
-        min_cover_beam_mm=30,
-        min_cover_slab_mm=25,
-        description="2 hour fire resistance"
-    ),
-    FireRating.THREE_HOUR: FireResistanceRequirements(
-        fire_rating=FireRating.THREE_HOUR,
-        min_column_width_mm=400,
-        min_beam_width_mm=240,
-        min_slab_thickness_mm=150,
-        min_cover_column_mm=50,
-        min_cover_beam_mm=35,
-        min_cover_slab_mm=35,
-        description="3 hour fire resistance"
-    ),
-    FireRating.FOUR_HOUR: FireResistanceRequirements(
-        fire_rating=FireRating.FOUR_HOUR,
-        min_column_width_mm=450,
-        min_beam_width_mm=280,
-        min_slab_thickness_mm=170,
-        min_cover_column_mm=55,
-        min_cover_beam_mm=40,
-        min_cover_slab_mm=45,
-        description="4 hour fire resistance"
-    ),
-}
+def _fire_table() -> Dict["FireRating", FireResistanceRequirements]:
+    """IS 456 Fig. 1 (minimum dimensions; columns fully exposed) and Table 16A (covers; beams continuous, slabs
+    simply supported, columns 40 mm) - built from src/durability.py, checked against the printed standard on
+    2026-10-20 (the previous transcription had column covers of 20-30 mm and a 200 mm column at 1.5 h)."""
+    from .durability import FIG1_MIN, TABLE16A
+    out = {}
+    for rating in FireRating:
+        h = float(rating.value)
+        b, d, col, _, _ = FIG1_MIN[h]
+        _bss, bcont, sss, _scont, ccol = TABLE16A[h]
+        out[rating] = FireResistanceRequirements(
+            fire_rating=rating, min_column_width_mm=col, min_beam_width_mm=b, min_slab_thickness_mm=d,
+            min_cover_column_mm=ccol, min_cover_beam_mm=bcont, min_cover_slab_mm=sss,
+            description=f"{rating.value} hour fire resistance (IS 456 Fig. 1, Table 16A)")
+    return out
+
+
+FIRE_RESISTANCE_TABLE = _fire_table()
+
+
+def rating_for_hours(h: float) -> "FireRating":
+    return {0.5: FireRating.HALF_HOUR, 1.0: FireRating.ONE_HOUR, 1.5: FireRating.ONE_HALF_HOUR,
+            2.0: FireRating.TWO_HOUR, 3.0: FireRating.THREE_HOUR, 4.0: FireRating.FOUR_HOUR}[h]
 
 
 @dataclass
@@ -162,41 +123,23 @@ class StabilityChecker:
         num_floors: int,
         building_height_m: float,
         exposure: ExposureCondition = ExposureCondition.MODERATE,
-        fire_rating: Optional[FireRating] = None
+        fire_rating: Optional[FireRating] = None,
+        requirements=None,
     ):
+        """Fire ratings per element come from NBC 2016 Part 4 Table 1 for the type of construction
+        (``requirements``: src.durability.DurabilityRequirements). The previous rule by number of floors and
+        height is not in NBC and was removed (2026-10-20). ``fire_rating`` forces one rating for every member."""
+        from .durability import requirements as _requirements
         self.num_floors = num_floors
         self.building_height_m = building_height_m
         self.exposure = exposure
-        
-        # Determine fire rating based on building height per NBC 2016
-        if fire_rating:
-            self.fire_rating = fire_rating
-        else:
-            self.fire_rating = self._get_required_fire_rating()
-        
+        self.req = requirements or _requirements("Moderate", 2)
+        self.forced_rating = fire_rating
+        self.fire_rating = fire_rating or rating_for_hours(self.req.column_fire_h)
         self.fire_req = FIRE_RESISTANCE_TABLE[self.fire_rating]
-    
-    def _get_required_fire_rating(self) -> FireRating:
-        """
-        Determine fire rating based on building height per NBC 2016.
-        
-        NBC 2016 Part 4:
-        - Up to 2 floors: 0.5 - 1 hour
-        - 3-4 floors: 1.5 hours
-        - 5+ floors: 2 hours
-        - High-rise (>15m): 2-3 hours
-        - Very tall (>45m): 4 hours
-        """
-        if self.num_floors <= 2:
-            return FireRating.ONE_HOUR
-        elif self.num_floors <= 4:
-            return FireRating.ONE_HALF_HOUR
-        elif self.building_height_m <= 15:
-            return FireRating.TWO_HOUR
-        elif self.building_height_m <= 45:
-            return FireRating.THREE_HOUR
-        else:
-            return FireRating.FOUR_HOUR
+
+    def _rating(self, hours_: float) -> FireRating:
+        return self.forced_rating or rating_for_hours(hours_)
     
     def check_column_slenderness(
         self,
@@ -265,44 +208,48 @@ class StabilityChecker:
         self,
         width_mm: float,
         depth_mm: float,
-        cover_mm: float = 40
+        cover_mm: float = 40,
+        rating: Optional[FireRating] = None,
     ) -> Tuple[bool, bool, str]:
         """
-        Check column fire resistance per IS 456 Table 16A.
+        Check column fire resistance per IS 456 Fig. 1 (fully exposed) and Table 16A.
         
         Returns:
             (dimension_ok, cover_ok, remarks)
         """
+        fr = FIRE_RESISTANCE_TABLE[rating or self.fire_rating]
         min_dim = min(width_mm, depth_mm)
-        req_dim = self.fire_req.min_column_width_mm
-        req_cover = self.fire_req.min_cover_column_mm
+        req_dim = fr.min_column_width_mm
+        req_cover = fr.min_cover_column_mm
         
         dim_ok = min_dim >= req_dim
         cover_ok = cover_mm >= req_cover
         
         remarks = []
         if not dim_ok:
-            remarks.append(f"Min width {req_dim}mm required for {self.fire_rating.value}hr rating")
+            remarks.append(f"Min width {req_dim}mm required for {fr.fire_rating.value}hr rating (IS 456 Fig. 1)")
         if not cover_ok:
-            remarks.append(f"Min cover {req_cover}mm required for {self.fire_rating.value}hr rating")
+            remarks.append(f"Min cover {req_cover}mm required for {fr.fire_rating.value}hr rating (IS 456 Table 16A)")
         
         return dim_ok, cover_ok, "; ".join(remarks) if remarks else "OK"
     
     def check_fire_resistance_beam(
         self,
         width_mm: float,
-        cover_mm: float = 30
+        cover_mm: float = 30,
+        rating: Optional[FireRating] = None,
     ) -> Tuple[bool, bool, str]:
-        """Check beam fire resistance per IS 456 Table 16A."""
-        req_width = self.fire_req.min_beam_width_mm
-        req_cover = self.fire_req.min_cover_beam_mm
+        """Check beam fire resistance per IS 456 Fig. 1 and Table 16A (continuous beam)."""
+        fr = FIRE_RESISTANCE_TABLE[rating or self.fire_rating]
+        req_width = fr.min_beam_width_mm
+        req_cover = fr.min_cover_beam_mm
         
         width_ok = width_mm >= req_width
         cover_ok = cover_mm >= req_cover
         
         remarks = []
         if not width_ok:
-            remarks.append(f"Min width {req_width}mm required for {self.fire_rating.value}hr rating")
+            remarks.append(f"Min width {req_width}mm required for {fr.fire_rating.value}hr rating (IS 456 Fig. 1)")
         if not cover_ok:
             remarks.append(f"Min cover {req_cover}mm required")
         
@@ -311,18 +258,20 @@ class StabilityChecker:
     def check_fire_resistance_slab(
         self,
         thickness_mm: float,
-        cover_mm: float = 20
+        cover_mm: float = 20,
+        rating: Optional[FireRating] = None,
     ) -> Tuple[bool, bool, str]:
-        """Check slab fire resistance per IS 456 Table 16A."""
-        req_thick = self.fire_req.min_slab_thickness_mm
-        req_cover = self.fire_req.min_cover_slab_mm
+        """Check slab fire resistance per IS 456 Fig. 1 and Table 16A (simply supported slab, conservative)."""
+        fr = FIRE_RESISTANCE_TABLE[rating or self.fire_rating]
+        req_thick = fr.min_slab_thickness_mm
+        req_cover = fr.min_cover_slab_mm
         
         thick_ok = thickness_mm >= req_thick
         cover_ok = cover_mm >= req_cover
         
         remarks = []
         if not thick_ok:
-            remarks.append(f"Min thickness {req_thick}mm required for {self.fire_rating.value}hr rating")
+            remarks.append(f"Min thickness {req_thick}mm required for {fr.fire_rating.value}hr rating (IS 456 Fig. 1)")
         if not cover_ok:
             remarks.append(f"Min cover {req_cover}mm required")
         
@@ -334,9 +283,12 @@ class StabilityChecker:
         width_mm: float,
         depth_mm: float,
         height_mm: float,
-        cover_mm: float = 40
+        cover_mm: float = 40,
+        rating: Optional[FireRating] = None,
     ) -> StabilityCheck:
         """Full stability and fire check for a column."""
+        rating = rating or self.fire_rating
+        fr = FIRE_RESISTANCE_TABLE[rating]
         # Slenderness
         slend, max_slend, slend_ok = self.check_column_slenderness(
             width_mm, depth_mm, height_mm
@@ -344,7 +296,7 @@ class StabilityChecker:
         
         # Fire
         dim_ok, cover_ok, remarks = self.check_fire_resistance_column(
-            width_mm, depth_mm, cover_mm
+            width_mm, depth_mm, cover_mm, rating
         )
         
         return StabilityCheck(
@@ -353,11 +305,11 @@ class StabilityChecker:
             slenderness_ratio=slend,
             max_slenderness=max_slend,
             slenderness_ok=slend_ok,
-            fire_rating_required=self.fire_rating,
-            min_dimension_required_mm=self.fire_req.min_column_width_mm,
+            fire_rating_required=rating,
+            min_dimension_required_mm=fr.min_column_width_mm,
             actual_dimension_mm=int(min(width_mm, depth_mm)),
             dimension_ok=dim_ok,
-            min_cover_required_mm=self.fire_req.min_cover_column_mm,
+            min_cover_required_mm=fr.min_cover_column_mm,
             actual_cover_mm=int(cover_mm),
             cover_ok=cover_ok,
             is_stable=slend_ok,
@@ -371,9 +323,12 @@ class StabilityChecker:
         width_mm: float,
         depth_mm: float,
         span_mm: float,
-        cover_mm: float = 30
+        cover_mm: float = 30,
+        rating: Optional[FireRating] = None,
     ) -> StabilityCheck:
         """Full stability and fire check for a beam."""
+        rating = rating or self.fire_rating
+        fr = FIRE_RESISTANCE_TABLE[rating]
         # Slenderness
         slend, max_slend, slend_ok = self.check_beam_slenderness(
             width_mm, depth_mm, span_mm
@@ -381,7 +336,7 @@ class StabilityChecker:
         
         # Fire
         dim_ok, cover_ok, remarks = self.check_fire_resistance_beam(
-            width_mm, cover_mm
+            width_mm, cover_mm, rating
         )
         
         return StabilityCheck(
@@ -390,11 +345,11 @@ class StabilityChecker:
             slenderness_ratio=slend,
             max_slenderness=max_slend,
             slenderness_ok=slend_ok,
-            fire_rating_required=self.fire_rating,
-            min_dimension_required_mm=self.fire_req.min_beam_width_mm,
+            fire_rating_required=rating,
+            min_dimension_required_mm=fr.min_beam_width_mm,
             actual_dimension_mm=int(width_mm),
             dimension_ok=dim_ok,
-            min_cover_required_mm=self.fire_req.min_cover_beam_mm,
+            min_cover_required_mm=fr.min_cover_beam_mm,
             actual_cover_mm=int(cover_mm),
             cover_ok=cover_ok,
             is_stable=slend_ok,
@@ -408,7 +363,9 @@ class StabilityChecker:
         beams: List,    # StructuralMember objects
         story_height_m: float,
         column_cover_mm: float = 40.0,
-        beam_cover_mm: float = 25.0
+        beam_cover_mm: float = 25.0,
+        slabs: Optional[List[Tuple[str, float]]] = None,
+        slab_cover_mm: float = 20.0,
     ) -> Tuple[List[StabilityCheck], StabilitySummary]:
         """
         Check all columns and beams for stability and fire resistance.
@@ -423,12 +380,15 @@ class StabilityChecker:
         
         # Check columns
         for col in columns:
+            # NBC Table 1: columns below the top storey support more than one floor; top-storey columns the roof only
+            more_than_one = getattr(col, "level", 0) < self.num_floors - 1
             check = self.check_column(
                 col.id,
                 col.width_nb,
                 col.depth_nb,
                 height_mm,
-                cover_mm=column_cover_mm  # clear cover used by rebar_detailer
+                cover_mm=column_cover_mm,  # clear cover used by rebar_detailer
+                rating=self._rating(self.req.column_fire_hours(more_than_one)),
             )
             results.append(check)
             if not (check.is_stable and check.is_fire_safe):
@@ -445,27 +405,33 @@ class StabilityChecker:
                 beam.properties.width_mm,
                 beam.properties.depth_mm,
                 span_mm,
-                cover_mm=beam_cover_mm  # clear cover used by rebar_detailer
+                cover_mm=beam_cover_mm,  # clear cover used by rebar_detailer
+                rating=self._rating(self.req.beam_fire_h),
             )
             results.append(check)
             if not (check.is_stable and check.is_fire_safe):
                 failed.append(beam.id)
+
+        # Slabs: NBC Table 1 floor construction; IS 456 Fig. 1 thickness and Table 16A cover
+        for sid, thk in slabs or []:
+            rating = self._rating(self.req.slab_fire_h)
+            fr = FIRE_RESISTANCE_TABLE[rating]
+            thick_ok, cover_ok, remarks = self.check_fire_resistance_slab(thk, slab_cover_mm, rating)
+            results.append(StabilityCheck(
+                member_id=sid, member_type="slab", slenderness_ratio=0.0, max_slenderness=0.0, slenderness_ok=True,
+                fire_rating_required=rating, min_dimension_required_mm=fr.min_slab_thickness_mm,
+                actual_dimension_mm=int(thk), dimension_ok=thick_ok, min_cover_required_mm=fr.min_cover_slab_mm,
+                actual_cover_mm=int(slab_cover_mm), cover_ok=cover_ok, is_stable=True,
+                is_fire_safe=thick_ok and cover_ok, remarks=remarks))
+            if not (thick_ok and cover_ok):
+                failed.append(sid)
         
         # Summary
         passed_stab = sum(1 for r in results if r.is_stable)
         passed_fire = sum(1 for r in results if r.is_fire_safe)
         
-        recommendations = []
-        if passed_fire < len(results):
-            recommendations.append(
-                f"Increase cover to {self.fire_req.min_cover_column_mm}mm for columns "
-                f"and {self.fire_req.min_cover_beam_mm}mm for beams"
-            )
-        if any(not r.dimension_ok for r in results):
-            recommendations.append(
-                f"Minimum column width {self.fire_req.min_column_width_mm}mm required "
-                f"for {self.fire_rating.value}hr fire rating"
-            )
+        recommendations = sorted({f"{r.member_type.title()} {r.member_id}: {r.remarks}" for r in results
+                                  if not r.is_fire_safe})[:20]
         
         summary = StabilitySummary(
             total_members=len(results),
@@ -487,7 +453,10 @@ def run_stability_check(
     story_height_m: float,
     fire_rating: Optional[FireRating] = None,
     column_cover_mm: float = 40.0,
-    beam_cover_mm: float = 25.0
+    beam_cover_mm: float = 25.0,
+    requirements=None,
+    slabs: Optional[List[Tuple[str, float]]] = None,
+    slab_cover_mm: float = 20.0,
 ) -> Tuple[List[StabilityCheck], StabilitySummary]:
     """
     Main function to run stability and fire resistance checks.
@@ -507,7 +476,9 @@ def run_stability_check(
     checker = StabilityChecker(
         num_floors=num_floors,
         building_height_m=building_height,
-        fire_rating=fire_rating
+        fire_rating=fire_rating,
+        requirements=requirements,
     )
     
-    return checker.check_all_members(columns, beams, story_height_m, column_cover_mm, beam_cover_mm)
+    return checker.check_all_members(columns, beams, story_height_m, column_cover_mm, beam_cover_mm, slabs,
+                                     slab_cover_mm)

@@ -579,7 +579,7 @@ class ReportGenerator:
             if _drift:
                 elements.append(Spacer(1, 6))
                 elements.append(Paragraph("<b>Storey drift</b> (unfactored design lateral forces, 2D frames; "
-                                          "limit values UNVERIFIED)", styles["Normal"]))
+                                          "limits IS 1893 7.11.1.1 / IS 456 20.5)", styles["Normal"]))
                 _rows = [["Case", "Storey", "Column", "Drift mm", "Height mm", "Ratio", "Limit", "Status"]] + [
                     [r["Case"], r["Storey"], r["Column"], f"{r['Drift (mm)']:.2f}", f"{r['Height (mm)']:.0f}",
                      f"{r['Ratio']:.5f}", "-" if r["Limit"] is None else f"{r['Limit']:.4f}", r["Status"]] for r in _drift]

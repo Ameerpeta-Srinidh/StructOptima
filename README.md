@@ -34,7 +34,8 @@ geometry → occupancy loads → load takedown → seismic + wind storey forces
 → quantities, BBS, masonry → design status (PASS / WARN / FAIL) + list of issues
 ```
 
-Results are shown in a Streamlit dashboard (`app.py` + 5 pages) or produced by
+Results are shown in a Streamlit web app (`app.py` + 7 pages: Setup, Overview, Checks, Members,
+Drawings & 3D, Reports, Site tools) or produced by
 the CLI (`main.py`), with PDF reports, Excel and DXF exports.
 
 ## Implemented features (status as of 2026-10-15)
@@ -86,7 +87,8 @@ pip install -r requirements.txt   # includes ifcopenshell for IFC import/export
 streamlit run app.py
 ```
 
-Open `http://localhost:8501`, accept the disclaimer and press **Run Analysis**.
+Open `http://localhost:8501`. On the **Setup** page enter the inputs and the SBC, confirm the site parameters,
+accept the verification statement and press **Run design** (user guide: [docs/user-guide.md](docs/user-guide.md)).
 
 ### Run from the command line
 
@@ -144,9 +146,9 @@ doc.saveas("my_design.dxf")
 ## Repository structure
 
 ```
-app.py                Streamlit dashboard (inputs, design run, status, column editor)
+app.py                Streamlit entry point (navigation, input persistence, project header)
 main.py               CLI
-pages/                Analysis, Schedules, Drawings, Reports, Site Tools
+pages/                Setup, Overview, Checks, Members, Drawings & 3D, Reports, Site tools
 src/design_pipeline.py   End-to-end design orchestration (single source of design status)
 src/                  Engineering, ingest, output and UI modules (see docs/architecture/module-catalogue.md)
 tests/                pytest suite (unit, benchmark, end-to-end, headless UI)

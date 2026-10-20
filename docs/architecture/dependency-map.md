@@ -7,10 +7,11 @@ alone is not treated as a runtime dependency.
 
 ```mermaid
 flowchart TD
-  app[app.py] --> dp[design_pipeline.run_design]
+  app[app.py + pages/setup.py] --> uis[ui_state.run_design_from_inputs]
+  uis --> dp[design_pipeline.run_design]
   main[main.py] --> dp
-  app --> cad[cad_loader.CADLoader]
-  app --> bim[bim_loader.BIMLoader]
+  uis --> cad[cad_loader.CADLoader]
+  uis --> bim[bim_loader.BIMLoader]
   main --> cad
   cad --> parser[cad_parser]
   cad --> af[auto_framer] --> bp[beam_placer]
@@ -51,7 +52,7 @@ grid_manager`, `rebar_detailer → section_design`).
 |---|---|---|
 | numpy | `fea_solver`, `section_design`, `bim_loader` | Linear algebra, vectorised interaction curves |
 | pydantic 2 | most models | Data models (`Column`, `StructuralMember`, result models) |
-| streamlit | `app.py`, `pages/`, `ui_components` | UI; `streamlit.testing` in tests |
+| streamlit | `app.py`, `pages/`, `ui_components`, `ui_state` | UI; `streamlit.testing` in tests |
 | ezdxf | `cad_parser`, `dxf_exporter`, tests | DXF read/write |
 | segno 1.6.1 (added 2026-10-16) | `site_monitoring` | QR member tags (pure Python, no Pillow) |
 | three 0.170.0, esbuild 0.24.0 (npm, build-time only, 2026-10-16) | `components/viewer3d` | 3D viewer bundle; only the built `dist/viewer.js` is needed at runtime (no npm on Streamlit Cloud) |

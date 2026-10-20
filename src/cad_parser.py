@@ -1,9 +1,32 @@
 import ezdxf
 from typing import Dict, List, Tuple, Optional
 import math
+import re
 from .logging_config import get_logger
 
 logger = get_logger(__name__)
+
+# Layer-name tokens (split on any non-alphanumeric character). Matching whole tokens avoids look-alikes such as
+# "COLOR-FILL" or "PROTOCOL"; annotation tokens exclude tag / dimension / hatch layers such as "S-COLS-IDEN".
+COLUMN_TOKENS = {"COL", "COLS", "COLM", "COLMN", "COLUMN", "COLUMNS", "PILLAR", "PILLARS", "STANCHION", "STANCHIONS"}
+BEAM_TOKENS = {"BEAM", "BEAMS", "BM", "BMS", "GIRDER", "GIRDERS"}
+ANNOTATION_TOKENS = {"IDEN", "TEXT", "TXT", "TAG", "TAGS", "DIM", "DIMS", "ANNO", "NOTE", "NOTES", "LABEL", "LABELS",
+                     "HATCH", "PATT", "SYMB", "MARK", "MARKS", "NUM", "SCHED", "TITLE"}
+MAX_BLOCK_DEPTH = 8
+
+
+def layer_tokens(name: str) -> List[str]:
+    return [t for t in re.split(r"[^A-Z0-9]+", (name or "").upper()) if t]
+
+
+def is_column_layer(name: str) -> bool:
+    t = layer_tokens(name)
+    return any(x in COLUMN_TOKENS for x in t) and not any(x in ANNOTATION_TOKENS for x in t)
+
+
+def is_beam_layer(name: str) -> bool:
+    t = layer_tokens(name)
+    return any(x in BEAM_TOKENS for x in t) and not any(x in ANNOTATION_TOKENS for x in t)
 
 class CADParser:
     """
@@ -19,6 +42,7 @@ class CADParser:
         self.filepath = filepath
         self.doc = None
         self.msp = None
+        self._flat_cache = None
         self.warnings: List[str] = []   # user-facing parsing warnings (audit finding R17)
         
         # Default layer mapping
@@ -67,16 +91,75 @@ class CADParser:
         model-space entities (valid DXFs need not declare every layer)."""
         names = [layer.dxf.name for layer in self.doc.layers]
         seen = set(names)
-        for e in self.msp:
+        for e in self._flat():
             lay = e.dxf.get("layer", "0")
             if lay not in seen:
                 seen.add(lay)
                 names.append(lay)
         return names
 
+    def _flat(self) -> list:
+        """Model-space entities with block references (INSERT) exploded recursively into world coordinates.
+        Entities on layer "0" inside a block take the layer of the INSERT, as in AutoCAD. Unbound external
+        references cannot be read and are reported."""
+        if self._flat_cache is None:
+            self._flat_cache = list(self._explode(self.msp, None, 0)) if self.msp is not None else []
+        return self._flat_cache
+
+    def _explode(self, entities, parent_layer, depth):
+        for e in entities:
+            layer = e.dxf.get("layer", "0")
+            if layer == "0" and parent_layer:
+                layer = parent_layer
+            if e.dxftype() != "INSERT":
+                if layer != e.dxf.get("layer", "0"):
+                    e.dxf.layer = layer
+                yield e
+                continue
+            name = e.dxf.get("name", "")
+            block = self.doc.blocks.get(name)
+            if block is None:
+                self.warnings.append(f"Block '{name}' is referenced but not defined: its contents were not read.")
+                continue
+            if block.block is not None and (block.block.dxf.get("flags", 0) & 4):
+                self.warnings.append(f"External reference '{name}' is not bound: bind the xref in CAD and re-export.")
+                continue
+            if depth >= MAX_BLOCK_DEPTH:
+                self.warnings.append(f"Block '{name}' nested deeper than {MAX_BLOCK_DEPTH} levels: not read.")
+                continue
+            try:
+                virtual = list(e.virtual_entities())
+            except Exception as ex:   # non-uniform scaling of some entity types etc.
+                self.warnings.append(f"Block '{name}' could not be exploded ({ex}): its contents were not read.")
+                continue
+            yield from self._explode(virtual, layer, depth + 1)
+
     def _by_type_and_layer(self, dxftype, layer_name):
         """Filter entities directly — avoids ezdxf's query()/pyparsing dependency entirely."""
-        return [e for e in self.msp if e.dxftype() == dxftype and e.dxf.layer == layer_name]
+        return [e for e in self._flat() if e.dxftype() == dxftype and e.dxf.layer == layer_name]
+
+    def _outline(self, entity) -> Optional[List[Tuple[float, float]]]:
+        """Vertices of a closed LWPOLYLINE / 2D POLYLINE, or None when the outline is open (leaders, tags)."""
+        t = entity.dxftype()
+        if t == "LWPOLYLINE":
+            pts = [(float(x), float(y)) for x, y in self._lwpoly_xy(entity)]
+            closed = bool(getattr(entity, "closed", False))
+        elif t == "POLYLINE":
+            pts = [(float(v.dxf.location.x), float(v.dxf.location.y)) for v in entity.vertices]
+            closed = bool(getattr(entity, "is_closed", False))
+        else:
+            return None
+        if len(pts) < 2:
+            return None
+        size = math.hypot(max(p[0] for p in pts) - min(p[0] for p in pts), max(p[1] for p in pts) - min(p[1] for p in pts))
+        # first == last vertex closes the outline; tolerance relative to the outline (not the coordinates, which
+        # can be survey values of millions of units)
+        if len(pts) >= 4 and math.hypot(pts[0][0] - pts[-1][0], pts[0][1] - pts[-1][1]) <= 1e-6 * size:
+            pts = pts[:-1]
+            closed = True
+        if not closed or len(pts) < 3:
+            return None
+        return pts
 
     @staticmethod
     def _lwpoly_xy(ply) -> List[Tuple[float, float]]:
@@ -173,51 +256,93 @@ class CADParser:
          return (width, depth)
 
     def extract_columns(self) -> List[Dict]:
-        """Extracts column data from column layers."""
-        columns = []
+        """Columns on column layers (``is_column_layer``): closed LWPOLYLINE / POLYLINE outlines (directly or inside
+        blocks) and circles. Open polylines (leaders) are ignored; duplicate outlines at the same place count once.
+        Dimensions are in drawing units; circular columns are given the square of equal area (``shape``)."""
         if not self.msp or not self.doc:
             return []
-
-        layer_names = self._all_layer_names()
-        col_layers = [n for n in layer_names if any(kw in n.upper() for kw in ['COL', 'PILLAR', 'STANCHION'])]
-        if not col_layers and self.layer_map['columns'] in layer_names:
-            col_layers.append(self.layer_map['columns'])
-
-        for layer in col_layers:
-            for entity in self._by_type_and_layer('LWPOLYLINE', layer):
-                 cx, cy = self._get_entity_center(entity)
-                 w, d = self._get_dims(entity)
-                 columns.append({
-                     'x': cx,
-                     'y': cy,
-                     'width': w,
-                     'depth': d,
-                     'id': f"C{len(columns)+1}"
-                 })
-                 
+        found = []
+        for e in self._flat():
+            if not is_column_layer(e.dxf.get("layer", "0")):
+                continue
+            t = e.dxftype()
+            if t in ("LWPOLYLINE", "POLYLINE"):
+                pts = self._outline(e)
+                if pts is None:
+                    continue
+                w, d, ang, cx, cy = self._rect_dims(pts)
+                found.append({"x": cx, "y": cy, "width": w, "depth": d, "orientation_deg": ang, "shape": "rect"})
+            elif t == "CIRCLE":
+                r = float(e.dxf.radius)
+                side = 2 * r * math.sqrt(math.pi) / 2.0
+                found.append({"x": float(e.dxf.center.x), "y": float(e.dxf.center.y), "width": side, "depth": side,
+                              "orientation_deg": 0.0, "shape": "circle", "diameter": 2 * r})
+        columns, dup = [], 0
+        for c in found:
+            tol = 0.25 * min(c["width"], c["depth"])
+            if any(math.hypot(c["x"] - k["x"], c["y"] - k["y"]) <= tol for k in columns):
+                dup += 1
+                continue
+            columns.append(c)
+        if dup:
+            self.warnings.append(f"{dup} duplicate column outline(s) at the same position were counted once.")
+        n_circ = sum(1 for c in columns if c["shape"] == "circle")
+        if n_circ:
+            self.warnings.append(f"{n_circ} circular column(s): designed as squares of equal area "
+                                 f"(side = 0.886 x diameter). Check circular columns separately.")
+        skew = sum(1 for c in columns if abs(((c["orientation_deg"] + 45) % 90) - 45) > 1.0)
+        if skew:
+            self.warnings.append(f"{skew} column(s) are not parallel to the drawing axes: designed with their "
+                                 f"plan dimensions on the main axes. Check the orientation.")
+        for i, c in enumerate(columns):
+            c["id"] = f"C{i + 1}"
         return columns
 
+    @staticmethod
+    def _rect_dims(pts) -> Tuple[float, float, float, float, float]:
+        """(width along x, depth along y, orientation deg, centre x, centre y) of a column outline. Uses the frame
+        of the longest edge so rotated rectangles give their true sides; at multiples of 90 degrees the sides map
+        back to the drawing axes."""
+        n = len(pts)
+        edges = [(pts[i], pts[(i + 1) % n]) for i in range(n)]
+        (x1, y1), (x2, y2) = max(edges, key=lambda e: math.hypot(e[1][0] - e[0][0], e[1][1] - e[0][1]))
+        ang = math.atan2(y2 - y1, x2 - x1)
+        ca, sa = math.cos(-ang), math.sin(-ang)
+        rx = [x * ca - y * sa for x, y in pts]
+        ry = [x * sa + y * ca for x, y in pts]
+        a, b = max(rx) - min(rx), max(ry) - min(ry)
+        mx, my = (max(rx) + min(rx)) / 2, (max(ry) + min(ry)) / 2
+        cx, cy = mx * math.cos(ang) - my * math.sin(ang), mx * math.sin(ang) + my * math.cos(ang)
+        deg = math.degrees(ang) % 180.0
+        if abs(deg - 90.0) < 45.0:      # longest edge closer to the y axis
+            return b, a, deg, cx, cy
+        return a, b, deg, cx, cy
+
     def extract_beams(self) -> List[Dict]:
-        """Extracts beams, typically represented as lines or polylines."""
+        """Beam centre lines on beam layers (``is_beam_layer``): LINE, and every segment of LWPOLYLINE / POLYLINE,
+        directly or inside blocks. Coordinates in drawing units."""
         beams = []
         if not self.msp or not self.doc:
-             return []
-
-        layer_names = self._all_layer_names()
-        beam_layers = [n for n in layer_names if 'BEAM' in n.upper()]
-        if not beam_layers and self.layer_map['beams'] in layer_names:
-            beam_layers.append(self.layer_map['beams'])
-
-        for layer in beam_layers:
-            for entity in self._by_type_and_layer('LINE', layer):
-                start = entity.dxf.start
-                end = entity.dxf.end
-                beams.append({
-                    'start': (start.x, start.y),
-                    'end': (end.x, end.y),
-                    'id': f"B{len(beams)+1}"
-                })
-            
+            return []
+        for e in self._flat():
+            if not is_beam_layer(e.dxf.get("layer", "0")):
+                continue
+            t = e.dxftype()
+            segs = []
+            if t == "LINE":
+                segs = [((e.dxf.start.x, e.dxf.start.y), (e.dxf.end.x, e.dxf.end.y))]
+            elif t in ("LWPOLYLINE", "POLYLINE"):
+                if t == "LWPOLYLINE":
+                    pts = [(float(x), float(y)) for x, y in self._lwpoly_xy(e)]
+                    closed = bool(getattr(e, "closed", False))
+                else:
+                    pts = [(float(v.dxf.location.x), float(v.dxf.location.y)) for v in e.vertices]
+                    closed = bool(getattr(e, "is_closed", False))
+                segs = list(zip(pts, pts[1:])) + ([(pts[-1], pts[0])] if closed and len(pts) > 2 else [])
+            for a, b in segs:
+                if math.hypot(b[0] - a[0], b[1] - a[1]) > 0:
+                    beams.append({"start": (float(a[0]), float(a[1])), "end": (float(b[0]), float(b[1])),
+                                  "id": f"B{len(beams) + 1}"})
         return beams
 
     def extract_walls(self) -> List[Tuple[Tuple[float, float], Tuple[float, float]]]:
@@ -516,50 +641,32 @@ class CADParser:
         
         return result
 
-    def detect_wall_thickness(self, walls: List[Tuple]) -> float:
-        """Detects wall thickness from parallel line pairs. Returns average thickness in mm."""
-        if not walls or len(walls) < 2:
+    def detect_wall_thickness(self, walls: List[Tuple], unit_m: float = 0.001) -> float:
+        """Most frequent gap (mm) between pairs of parallel, overlapping wall lines, measured perpendicular to the
+        lines. ``unit_m``: metres per drawing unit. Considers segments of at least 0.1 m and gaps of 75-500 mm
+        (brick and block walls); returns 230 mm when no pair qualifies (reported by the loader)."""
+        segs = []
+        for (a, b) in walls or []:
+            ax, ay, bx, by = a[0] * unit_m, a[1] * unit_m, b[0] * unit_m, b[1] * unit_m
+            ln = math.hypot(bx - ax, by - ay)
+            if ln >= 0.1:
+                segs.append((ax, ay, bx, by, ln))
+        gaps = []
+        for i, (ax, ay, bx, by, ln) in enumerate(segs):
+            ux, uy = (bx - ax) / ln, (by - ay) / ln
+            for cx, cy, dx, dy, ln2 in segs[i + 1:]:
+                if abs(ux * (dy - cy) - uy * (dx - cx)) / ln2 > math.sin(math.radians(2)):
+                    continue                                   # not parallel
+                gap = abs((cx - ax) * -uy + (cy - ay) * ux)    # perpendicular distance
+                if not 0.075 <= gap <= 0.5:
+                    continue
+                t1, t2 = sorted(((cx - ax) * ux + (cy - ay) * uy, (dx - ax) * ux + (dy - ay) * uy))
+                if min(t2, ln) - max(t1, 0.0) < 0.1:         # must overlap along the wall
+                    continue
+                gaps.append(round(gap * 1000.0 / 5.0) * 5.0)
+        if not gaps:
             return 230.0
-        
-        thicknesses = []
-        used = [False] * len(walls)
-        
-        for i, w1 in enumerate(walls):
-            if used[i]:
-                continue
-            
-            v1 = (w1[1][0] - w1[0][0], w1[1][1] - w1[0][1])
-            mag1 = math.hypot(v1[0], v1[1])
-            if mag1 < 100:
-                continue
-            
-            for j, w2 in enumerate(walls):
-                if i == j or used[j]:
-                    continue
-                
-                v2 = (w2[1][0] - w2[0][0], w2[1][1] - w2[0][1])
-                mag2 = math.hypot(v2[0], v2[1])
-                if mag2 < 100:
-                    continue
-                
-                dot = (v1[0]*v2[0] + v1[1]*v2[1]) / (mag1 * mag2)
-                angle = math.degrees(math.acos(max(-1, min(1, abs(dot)))))
-                
-                if angle < 5:
-                    mx1 = (w1[0][0] + w1[1][0]) / 2
-                    my1 = (w1[0][1] + w1[1][1]) / 2
-                    mx2 = (w2[0][0] + w2[1][0]) / 2
-                    my2 = (w2[0][1] + w2[1][1]) / 2
-                    
-                    dist = math.hypot(mx2 - mx1, my2 - my1)
-                    
-                    if 100 < dist < 500:
-                        thicknesses.append(dist)
-                        used[j] = True
-        
-        if thicknesses:
-            return sum(thicknesses) / len(thicknesses)
-        return 230.0
+        return float(max(set(gaps), key=gaps.count))
 
     def detect_enclosed_rectangles(self) -> List[Tuple[float, float, float, float]]:
         """Detects enclosed rectangular zones (potential stairwells/lift cores)."""
