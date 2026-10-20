@@ -69,10 +69,12 @@ Open **"Checks NOT performed by StructOptima"** under the banner. It lists what 
 - beam torsion and deflection;
 - footing moments and settlement.
 
-**Why most designs FAIL "Seismic method".** IS 1893 (Part 1):2016 clause 7.7.1 allows the equivalent static method
-only for regular buildings lower than 15 m in Zone II. StructOptima has only that method, so every other building is
-reported FAIL until a dynamic (response-spectrum) analysis is done, in StructOptima's future 3D engine or in ETABS /
-STAAD. In Zones III–V an OMRF is also a FAIL (Table 9, Note 1): select SMRF.
+**Seismic analysis.** StructOptima runs the response spectrum method of IS 1893 (Part 1):2016 (clause 7.7.5) on a 3D
+model with rigid floors: modes, CQC combination, scaling up to the static base shear (7.7.3) and the design
+eccentricity of 7.8.2 (torsion), which also loads the frames of the other direction. The Checks page (Seismic tab)
+shows the periods, the modal mass, the scale factors and the torsion ratio. Things this model cannot do appear as WARN
+with the check to be done elsewhere, for example L/T-shaped plans, which IS 1893 wants analysed with flexible floors.
+In Zones III–V an OMRF is a FAIL (Table 9, Note 1): select SMRF.
 
 **Issues to resolve** lists every FAIL and WARN item, failures first. Filter by status or type; hover a cell to read
 long text.

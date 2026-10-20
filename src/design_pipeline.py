@@ -20,7 +20,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-from .analysis_integration import AnalysisSummary, LateralLoads, update_structural_analysis
+from .analysis_integration import AnalysisSummary, LateralLoads, SeismicSpec, update_structural_analysis
 from .building_types import get_load_parameters
 from .foundation_eng import Footing, check_footing_overlaps, design_footing
 from .grid_manager import GridManager
@@ -38,14 +38,16 @@ EQ_DRIFT_LIMIT = 0.004
 # Lateral sway at the top under transient wind load: IS 456:2000 Cl 20.5 as
 # (H/500, "should") - checked 2026-10-20.  Serviceability -> WARN, not FAIL.
 WIND_TOP_SWAY_LIMIT = 1.0 / 500.0
+# Soft storey (IS 1893 Table 6(i), Amd 2: "less than the storey above"): drops of the computed storey stiffness
+# up to 10 % are treated as numerical / load-pattern variation (decision D-27, PROPOSED)
+SOFT_STOREY_TOLERANCE = 0.10
 
 # Checks that are NOT performed, whatever the status says (gap analysis N17).
 # Shown with every result so PASS cannot be read as complete engineering validation.
 CHECKS_NOT_PERFORMED = [
-    "3D analysis: torsion, accidental eccentricity and diaphragm flexibility (2D frames sharing storey forces as for "
-    "a rigid diaphragm in translation only)",
-    "Response-spectrum / dynamic analysis - required by IS 1893 7.7.1 for every building except regular buildings "
-    "lower than 15 m in Zone II (equivalent static method only)",
+    "Flexible floor diaphragms (re-entrant corners, large openings - IS 1893 Table 5 as amended), diaphragm, collector "
+    "and chord design: the 3D dynamic model has rigid floors",
+    "Time history analysis, site-specific spectra, soil-structure interaction, P-Delta",
     "Orthogonal seismic combination (100 % + 30 %, IS 1893 6.3.2.2) and vertical seismic action (6.3.3.1, Amd 2)",
     "Imposed loads on corridors, stairs and balconies (IS 875-2 Table 1: 3.0 / 4.0 kN/m2) - one floor load is used",
     "Wind topography factor k3 and cyclonic importance factor k4 (IS 875-3 6.3.3, 6.3.4) - taken as 1.0",
@@ -233,6 +235,33 @@ def _largest_bar(desc: str) -> int:
     return max((int(x) for x in re.findall(r"-(\d+)#", desc or "")), default=0)
 
 
+def seismic_spec(gm: GridManager, seismic_result, inputs: "DesignInputs") -> SeismicSpec:
+    """Floors (weight, centre of mass and polar radius of gyration from the slab panels) and the response
+    spectrum of IS 1893 6.4.2(b) for the rigid-diaphragm 3D analysis (src/pseudo3d.py)."""
+    from .pseudo3d import Floor
+    from .seismic import SeismicDesignChecker, SeismicZone
+    panels = gm.slab_panels() or [{"x0": 0.0, "x1": gm.width_m, "y0": 0.0, "y1": gm.length_m}]
+    area = [(p["x1"] - p["x0"]) * (p["y1"] - p["y0"]) for p in panels]
+    a_tot = sum(area) or 1.0
+    xc = sum(a * (p["x0"] + p["x1"]) / 2 for a, p in zip(area, panels)) / a_tot
+    yc = sum(a * (p["y0"] + p["y1"]) / 2 for a, p in zip(area, panels)) / a_tot
+    r2 = sum(a * (((p["x0"] + p["x1"]) / 2 - xc) ** 2 + ((p["y0"] + p["y1"]) / 2 - yc) ** 2
+                  + ((p["x1"] - p["x0"]) ** 2 + (p["y1"] - p["y0"]) ** 2) / 12.0) for a, p in zip(area, panels)) / a_tot
+    floors = [Floor(weight_kn=w, xcm=xc, ycm=yc, r2=r2) for w in seismic_result.storey_weights_kn]
+    p = seismic_result.parameters
+    chk = SeismicDesignChecker(zone=SeismicZone(inputs.seismic_zone), soil_type=inputs.soil_type,
+                               structural_system=inputs.structural_system)
+
+    def ah_of_t(t):
+        return p.zone_factor / 2.0 * p.importance_factor / p.response_reduction * \
+            chk.get_spectral_acceleration(t, method="response_spectrum")
+    cols = [c for c in gm.columns if c.level == 0] or gm.columns
+    ext_x = (min(c.x for c in cols), max(c.x for c in cols))
+    ext_y = (min(c.y for c in cols), max(c.y for c in cols))
+    return SeismicSpec(method="response spectrum", floors=floors, static_forces=list(seismic_result.storey_forces_kn),
+                       vb_static=seismic_result.base_shear_kn, ah_of_t=ah_of_t, extent_x=ext_x, extent_y=ext_y)
+
+
 def _ll_factor(q: float) -> float:
     """IS 1893 (Part 1):2016 Table 10 - live load fraction for seismic weight."""
     return 0.25 if q <= 3.0 else 0.50
@@ -315,7 +344,8 @@ def run_design(gm: GridManager, beams: list, inputs: DesignInputs) -> DesignResu
             lateral.wl_x, lateral.wl_y = wind_result.storey_forces_x_kn, wind_result.storey_forces_y_kn
 
         summary = update_structural_analysis(gm, beams, fck=fck, use_cracked_sections=inputs.use_cracked_sections,
-                                             fixed_base=inputs.fixed_base, lateral=lateral)
+                                             fixed_base=inputs.fixed_base, lateral=lateral,
+                                             seismic=seismic_spec(gm, seismic_result, inputs))
         before_beams = [(b.properties.width_mm, b.properties.depth_mm) for b in beams]
         gm.detail_beams(beams, fck=fck, fy=fy, ductile=ductile)
         gm.detail_columns(concrete, fy=fy, ductile=ductile, le_factor=inputs.le_factor)
@@ -344,7 +374,8 @@ def run_design(gm: GridManager, beams: list, inputs: DesignInputs) -> DesignResu
     if not converged:
         gm.calculate_loads(beams=beams, **load_kwargs)
         summary = update_structural_analysis(gm, beams, fck=fck, use_cracked_sections=inputs.use_cracked_sections,
-                                             fixed_base=inputs.fixed_base, lateral=lateral)
+                                             fixed_base=inputs.fixed_base, lateral=lateral,
+                                             seismic=seismic_spec(gm, seismic_result, inputs))
         gm.detail_beams(beams, fck=fck, fy=fy, ductile=ductile)
         gm.detail_columns(concrete, fy=fy, ductile=ductile, le_factor=inputs.le_factor)
 
@@ -385,6 +416,35 @@ def run_design(gm: GridManager, beams: list, inputs: DesignInputs) -> DesignResu
 
     # Joint checks from the designed members
     seismic_result = evaluate_joint_checks(gm, beams, fck, fy, seismic_result)
+
+    # Dynamic analysis actually performed (rigid-diaphragm 3D model, src/pseudo3d.py)
+    sd = summary.seismic_design
+    if "X" in sd:
+        seismic_result.method_used = "response spectrum (7.7.5), 3D rigid-diaphragm model with torsion (7.8)"
+        seismic_result.dynamic = {
+            "modes": [{"Mode": k + 1, "Period (s)": round(m.period_s, 3), "Type": m.kind,
+                       "Mass X %": round(100 * m.mass_x, 1), "Mass Y %": round(100 * m.mass_y, 1)}
+                      for k, m in enumerate(sd["modes"])],
+            "regularity": sd["regularity"]}
+        for d in ("X", "Y"):
+            r = sd[d]
+            seismic_result.dynamic[d] = {
+                "VB static (kN)": round(seismic_result.base_shear_kn, 1),
+                "VB dynamic (kN)": round(r.base_shear_dynamic_kn, 1), "Scale factor": round(r.scale_factor, 3),
+                "VB design (kN)": round(r.base_shear_kn, 1), "Modes for 90 % mass": r.modes_for_90pc,
+                "Mass in those modes %": round(100 * r.mass_90pc, 1), "Torsion ratio": round(r.torsion_ratio, 3),
+                "Storey forces (kN)": [round(v, 1) for v in r.storey_forces_kn],
+                "Max static eccentricity (m)": round(max(abs(e[0]) for e in r.eccentricity_m), 3)}
+        messages.append("Seismic design forces from the response spectrum method (IS 1893 7.7.5) on a 3D "
+                        "rigid-diaphragm model with design eccentricity (7.8.2): T1 = "
+                        f"{sd['modes'][0].period_s:.2f} s; VB = {sd['X'].base_shear_kn:.0f} / {sd['Y'].base_shear_kn:.0f} "
+                        f"kN along X / Y (scaled to the static VB where lower, 7.7.3)")
+        seismic_result.warnings = [
+            ("Equivalent static method not permitted for this building (IS 1893 7.7.1): the response spectrum method "
+             "(7.7.5) was used, scaled to the static base shear (7.7.3).")
+            if w.startswith("Equivalent static method NOT permitted") else w for w in seismic_result.warnings]
+    elif sd.get("model") == "translation only":
+        seismic_result.method_used = "equivalent static (7.6), translation only (no torsion)"
 
     from .bbs_report import generate_bbs_from_grid_manager
     from .quantifier import Quantifier
@@ -444,8 +504,51 @@ def run_design(gm: GridManager, beams: list, inputs: DesignInputs) -> DesignResu
         if not j["pass"]:
             add(j["joint"], "Joint shear", "FAIL" if ductile else "WARN",
                 f"Vj {j['Vj_demand_kN']:.0f} > {j['Vj_capacity_kN']:.0f} kN" + ("" if ductile else " (advisory for OMRF)"))
-    if not seismic_result.static_analysis_allowed:
-        add("Building", "Seismic method", "FAIL", seismic_result.analysis_method_check.reason)
+    # Seismic method (IS 1893 7.7.1) - owner decision D-26: what the model cannot represent is a WARN with details
+    from .seismic import IrregularityType
+    irr = set(seismic_result.analysis_method_check.irregularities_found or [])
+    flexible = [t.value for t in irr if t in (IrregularityType.RE_ENTRANT_CORNER, IrregularityType.FLOOR_OPENING)]
+    if flexible:
+        add("Building", "Seismic method", "WARN",
+            f"{', '.join(flexible)}: IS 1893 Table 5 (Amendment 2) requires a 3D dynamic analysis with FLEXIBLE floor "
+            f"diaphragms (in addition to the rigid one) to capture force concentrations at re-entrant corners / "
+            f"openings. StructOptima's dynamic analysis assumes rigid floors: member forces near the corners and the "
+            f"floor slabs (diaphragm forces, collectors, chords) are NOT designed. Check the building with a "
+            f"flexible-diaphragm 3D model (ETABS / STAAD / SAP2000) before construction.")
+    if "X" not in sd and not seismic_result.static_analysis_allowed:
+        add("Building", "Seismic method", "WARN",
+            seismic_result.analysis_method_check.reason + ". The 3D dynamic model could not be built because the "
+            "floors are not restrained against rotation (fewer than two frame lines in a direction); equivalent "
+            "static forces without torsion were used. Add frame lines or verify with an independent 3D dynamic "
+            "analysis.")
+    # Table 5(i) as amended (Amd 2): torsional irregularity, and Table 6(vii) (Amd 2): irregular modes
+    if "X" in sd:
+        reg = sd["regularity"]
+        for d in ("X", "Y"):
+            ratio = sd[d].torsion_ratio
+            if ratio > 1.4:
+                add("Building", "Torsional irregularity", "FAIL",
+                    f"Along {d}: Delta_max / Delta_ave = {ratio:.2f} > 1.4 - the structural configuration shall be "
+                    f"revised (IS 1893 Table 5(i), Amendment 2)")
+            elif ratio > 1.2:
+                ok = reg.t_torsion is not None and all(t is None or reg.t_torsion < t for t in (reg.t1x, reg.t1y))
+                add("Building", "Torsional irregularity", "WARN" if ok else "FAIL",
+                    f"Along {d}: Delta_max / Delta_ave = {ratio:.2f} (1.2-1.4): 3D dynamic analysis performed; "
+                    f"fundamental torsional period {reg.t_torsion or 0:.2f} s "
+                    + ("is below the first translational periods (Table 5(i), Amendment 2)" if ok else
+                       f"is NOT below the first translational periods ({reg.t1x or 0:.2f} / {reg.t1y or 0:.2f} s): "
+                       f"revise the configuration (Table 5(i), Amendment 2)"))
+        low = [d for d, mfrac in (("X", reg.first3_mass_x), ("Y", reg.first3_mass_y)) if mfrac < 0.65]
+        if low:
+            add("Building", "Irregular modes", "FAIL",
+                f"First three modes carry less than 65 % of the mass along {', '.join(low)} "
+                f"({100 * reg.first3_mass_x:.0f} % / {100 * reg.first3_mass_y:.0f} %): IS 1893 Table 6(vii), Amendment 2")
+        if inputs.seismic_zone in ("IV", "V") and reg.t1x and reg.t1y and \
+                abs(reg.t1x - reg.t1y) < 0.1 * max(reg.t1x, reg.t1y):
+            add("Building", "Irregular modes", "FAIL",
+                f"Fundamental periods along X and Y ({reg.t1x:.2f} / {reg.t1y:.2f} s) are within 10 % of each other; "
+                f"in Zones IV and V they shall differ by at least 10 % (IS 1893 Table 6(vii), Amendment 2; not "
+                f"applicable to buildings with large podiums). Make the two directions' stiffness different.")
     if not seismic_result.system_permitted:   # S2
         add("Building", "Structural system", "FAIL",
             f"OMRF is not allowed in Zone {inputs.seismic_zone}: RC structures in Zones III, IV and V shall be ductile "
@@ -468,17 +571,23 @@ def run_design(gm: GridManager, beams: list, inputs: DesignInputs) -> DesignResu
                              f"> limit {r['Limit']:.5f} (IS 1893 7.11.1.1 / IS 456 20.5)")
     # S5: soft storey, IS 1893 Table 6(i) as amended (Amd 2) - storey stiffness K = storey shear / storey drift
     # under the EQ case; a storey less stiff than the storey above is a soft storey.
-    forces = seismic_result.storey_forces_kn
     for case in ("EQX", "EQY"):
+        r_dir = sd.get(case[-1])
+        forces = r_dir.storey_forces_kn if r_dir is not None else seismic_result.storey_forces_kn
         levels = summary.storey_drift.get(case) or {}
         if len(forces) > 1 and all(levels.get(i) and levels[i][0] > 0 for i in range(len(forces))):
             ks = [sum(forces[i:]) / levels[i][0] for i in range(len(forces))]
-            for soft in check_soft_storeys(ks):
+            # D-27: computed V / drift stiffness varies by a few % along any frame; drops above 10 % are flagged
+            for soft in check_soft_storeys(ks, tolerance=SOFT_STOREY_TOLERANCE):
                 lvl = "Ground storey" if soft.storey == 0 else f"Storey {soft.storey}"
-                add(f"{lvl} ({case[-1]})", "Soft storey", "FAIL",
+                worst = max(levels[i][0] / levels[i][1] for i in range(soft.storey + 1))
+                dyn = r_dir is not None
+                bad = worst > 0.002 or not dyn
+                add(f"{lvl} ({case[-1]})", "Soft storey", "FAIL" if bad else "WARN",
                     f"Lateral stiffness {soft.stiffness:,.0f} kN/m is less than the storey above "
                     f"({soft.stiffness_above:,.0f} kN/m): soft storey per IS 1893 (Part 1):2016 Table 6(i) "
-                    f"(Amendment 2) - dynamic analysis and drift <= 0.2 % required")
+                    f"(Amendment 2). Requires dynamic analysis ({'performed' if dyn else 'NOT performed'}) and drift "
+                    f"<= 0.2 % in this storey and below (largest {100 * worst:.3f} %)")
     if not any(r["Case"].startswith("EQ") for r in drift_rows):
         add("Building", "Storey drift", "WARN", "No seismic drift result (lateral analysis not solved)")
     # N19: columns without frame moments in one direction

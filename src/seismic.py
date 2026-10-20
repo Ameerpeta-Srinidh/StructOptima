@@ -253,6 +253,9 @@ class SeismicAnalysisResult:
     is_regular: bool = True
     static_analysis_allowed: bool = True
     system_permitted: bool = True             # IS 1893 Table 9 Note 1 (OMRF not allowed in Zones III-V)
+    # analysis actually used for the design forces (set by the design pipeline after the frame analysis)
+    method_used: str = "equivalent static (7.6)"
+    dynamic: dict = field(default_factory=dict)  # periods, modal mass, scaling, base shears, torsion per direction
     
     # Storey forces (equivalent static vertical distribution)
     height_m: float = 0.0
@@ -1018,14 +1021,15 @@ def evaluate_joint_checks(gm, beams, fck: float, fy: float, result: SeismicAnaly
     return result
 
 
-def check_soft_storeys(storey_stiffnesses: List[float]) -> List["SoftStorey"]:
+def check_soft_storeys(storey_stiffnesses: List[float], tolerance: float = 0.0) -> List["SoftStorey"]:
     """IS 1893 (Part 1):2016 Table 6(i) as amended (Amendment 2, 2020): a soft storey is a storey whose lateral
     stiffness is less than that of the storey above. ``storey_stiffnesses`` from the ground storey (index 0) up;
-    finding S5 (the previous 70 % limit was from the 2002 edition)."""
+    finding S5 (the previous 70 % limit was from the 2002 edition). ``tolerance``: relative drop ignored as
+    numerical / load-pattern variation of the computed stiffness (decision D-27)."""
     out = []
     for i in range(len(storey_stiffnesses) - 1):
         k, k_above = storey_stiffnesses[i], storey_stiffnesses[i + 1]
-        if k_above > 0 and k < k_above * (1.0 - 1e-9):
+        if k_above > 0 and k < k_above * (1.0 - max(tolerance, 1e-9)):
             out.append(SoftStorey(storey=i, stiffness=k, stiffness_above=k_above))
     return out
 

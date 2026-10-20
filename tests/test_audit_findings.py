@@ -117,8 +117,9 @@ def test_R5_failures_reach_the_status_list(monkeypatch):
     failing_cols = {cid for cid, r in res.gm.rebar_schedule.items() if r.status == "FAIL"}
     assert failing_cols
     assert failing_cols == {f["Member"] for f in res.failures if f["Type"] == "Column" and f["Status"] == "FAIL"}
-    # 28 m in Zone V: equivalent static method not permitted -> reported
-    assert any(f["Type"] == "Seismic method" for f in res.failures)
+    # 28 m in Zone V: equivalent static method not permitted (IS 1893 7.7.1) -> the response spectrum method is used
+    assert res.seismic_result.method_used.startswith("response spectrum")
+    assert not any(f["Type"] == "Seismic method" for f in res.failures)
 
 
 def test_R5_every_non_pass_schedule_item_is_reported(design_g1):

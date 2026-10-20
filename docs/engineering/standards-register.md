@@ -42,11 +42,13 @@ engineer.
 | IS 1893 (Part 1):2016 | Minimum design lateral force | 7.2.2, Table 7 | `seismic.MIN_BASE_SHEAR_FRACTION` | FIXED (S3) |
 | IS 1893 (Part 1):2016 | Seismic weight live-load fraction, no roof live load | Table 10, 7.3.2 | `design_pipeline._ll_factor` | VERIFIED |
 | IS 1893 (Part 1):2016 | Vertical distribution | 7.6.3 | `run_full_analysis` | VERIFIED |
-| IS 1893 (Part 1):2016 | Analysis method | 7.6, 7.7.1 | `check_analysis_method` | FIXED (S4: 2002 limits replaced) |
+| IS 1893 (Part 1):2016 | Analysis method | 7.6, 7.7.1 | `check_analysis_method` | FIXED (S4: 2002 limits replaced); dynamic analysis now performed (D-26) |
 | IS 1893 (Part 1):2016 | Irregularities: re-entrant, openings, soft storey, mass, floating columns | Tables 5, 6 (Amd 2) | `seismic`, `design_pipeline` | VERIFIED / FIXED (S5–S7) |
 | IS 1893 (Part 1):2016 | Cracked section stiffness | 6.4.3.1 | `analysis_integration` | VERIFIED |
 | IS 1893 (Part 1):2016 | Load combinations | 6.3.2.1 | `analysis_integration` | VERIFIED (6.3.2.2, 6.3.3 — GAP) |
 | IS 1893 (Part 1):2016 | Storey drift 0.004 h | 7.11.1.1 | `design_pipeline.EQ_DRIFT_LIMIT` | VERIFIED |
+| IS 1893 (Part 1):2016 | Response spectrum method: modes, 90 % mass, CQC, spectrum 6.4.2(b), scaling | 7.7.3, 7.7.5 | `pseudo3d` | IMPLEMENTED 2026-10-20 (hand-checked, `test_pseudo3d.py`) |
+| IS 1893 (Part 1):2016 | Design eccentricity, torsional irregularity, irregular modes | 7.8.2, Table 5(i), Table 6(vii) (Amd 2) | `pseudo3d`, `design_pipeline` | IMPLEMENTED 2026-10-20 |
 | IS 13920:2016 (Amd 1, 2) | SCWB 1.4, roof waiver above 4 storeys | 7.2.1, 7.2.1.3 | `evaluate_joint_checks` | VERIFIED / FIXED (J3) |
 | IS 13920:2016 | Joint shear strength and effective area | 9.1.1, 9.1.2 (Amd 2) | `joint_confinement_factor`, `joint_effective_breadth` | FIXED (J1, J2); bj for bc ≥ bb UNVERIFIED (not printed in full) |
 | IS 13920:2016 | End-zone spacing beams / columns | 6.3.5 (Amd 1), 7.6.1 | `detail_beam`, `detail_column`, `bbs_module` | FIXED (J9) / CONSERVATIVE |

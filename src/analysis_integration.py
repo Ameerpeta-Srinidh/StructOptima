@@ -70,11 +70,27 @@ class AnalysisSummary:
     top_displacement: Dict[str, Tuple[float, str]] = field(default_factory=dict)
     # {case: {"XZ@y" / "YZ@x": [storey force per level carried by that frame, kN]} (rigid-diaphragm sharing)
     lateral_shares: Dict[str, Dict[str, List[float]]] = field(default_factory=dict)
+    # rigid-diaphragm 3D model results (src/pseudo3d.py): {"X": DirectionResult, "Y": ..., "modes": [...],
+    # "regularity": RegularityOfModes, "model": "3D rigid diaphragm" / "translation only"}
+    seismic_design: Dict[str, object] = field(default_factory=dict)
+
 
     @property
     def ok(self) -> bool:
         return not self.failed_frames
 
+
+
+@dataclass
+class SeismicSpec:
+    """Input for the rigid-diaphragm 3D seismic design (IS 1893 7.6 / 7.7.5 / 7.8)."""
+    method: str                       # "static" or "response spectrum"
+    floors: list                      # pseudo3d.Floor per level 1..N
+    static_forces: List[float]        # 7.6.3 storey forces for VB(Ta) incl. the Table 7 minimum
+    vb_static: float
+    ah_of_t: object                   # callable T -> Ah (6.4.2(b) spectrum for the response spectrum method)
+    extent_x: Tuple[float, float]     # plan extent (m) - ends for the torsional irregularity ratio
+    extent_y: Tuple[float, float]
 
 def build_combinations(has_eq: bool, has_wl: bool) -> List[Tuple[str, Dict[str, float]]]:
     """Expand IS 456 Table 18 / IS 1893 combinations into case factors.
@@ -275,7 +291,8 @@ def _col_dims(col) -> Tuple[float, float]:
 
 def update_structural_analysis(gm: GridManager, beams: List[StructuralMember], fck: float = 25.0,
                                use_cracked_sections: bool = False, fixed_base: bool = True,
-                               lateral: Optional[LateralLoads] = None) -> AnalysisSummary:
+                               lateral: Optional[LateralLoads] = None,
+                               seismic: Optional["SeismicSpec"] = None) -> AnalysisSummary:
     """Analyse the building and write factored design envelopes to beams and
     columns.  See module docstring."""
     summary = AnalysisSummary()
@@ -434,6 +451,57 @@ def update_structural_analysis(gm: GridManager, beams: List[StructuralMember], f
                 summary.messages.append(f"{cname}: frames resist {got:.1f} of {Fv.sum():.1f} kN storey force "
                                         f"(levels without a laterally stable frame)")
 
+    # Rigid-diaphragm 3D model (ux, uy, rotation per floor): seismic design forces with torsion (IS 1893 7.8),
+    # response spectrum method (7.7.5) where required, wind applied at the plan centre. Replaces the translation-only
+    # sharing above when the floors are restrained in rotation.
+    if k_frames and (has_eq or has_wl):
+        from . import pseudo3d as p3
+        p3_frames = [p3.Frame(f"{pl}@{cc:.2f}", pl, cc, K) for (pl, cc), K in k_frames.items() if np.any(K)]
+        K3 = p3.assemble(p3_frames, N)
+        if p3.is_stable(K3):
+            summary.seismic_design["model"] = "3D rigid diaphragm"
+            if seismic is not None and has_eq:
+                floors = list(seismic.floors)
+                modal = p3.modes(K3, p3.mass_matrix(floors), floors)
+                summary.seismic_design["modes"] = modal[2]
+                summary.seismic_design["regularity"] = p3.regularity_of_modes(modal[2])
+                static = np.array(seismic.static_forces[:N], dtype=float)
+                for d, cname, b, ext in (("X", "EQX", seismic.extent_y[1] - seismic.extent_y[0], seismic.extent_y),
+                                         ("Y", "EQY", seismic.extent_x[1] - seismic.extent_x[0], seismic.extent_x)):
+                    r = p3.design_direction(d, seismic.method, p3_frames, floors, K3, static, seismic.vb_static, b,
+                                            ext, seismic.ah_of_t, modal=modal if seismic.method != "static" else None)
+                    summary.seismic_design[d] = r
+                    for (pl, cc) in k_frames:
+                        key = f"{pl}@{cc:.2f}"
+                        if key in r.frame_forces:
+                            frame_lateral[(pl, cc, cname)] = r.frame_forces[key]
+                            summary.lateral_shares.setdefault(cname, {})[key] = [float(v) for v in r.frame_forces[key]]
+            cx = (seismic.extent_x[0] + seismic.extent_x[1]) / 2 if seismic else gm.width_m / 2
+            cy = (seismic.extent_y[0] + seismic.extent_y[1]) / 2 if seismic else gm.length_m / 2
+            for d, cname, forces in (("X", "WLX", lateral.wl_x), ("Y", "WLY", lateral.wl_y)):
+                if not forces:
+                    continue
+                F = np.zeros(3 * N)
+                for i, f in enumerate(forces[:N]):
+                    if d == "X":
+                        F[3 * i], F[3 * i + 2] = f, -f * cy
+                    else:
+                        F[3 * i + 1], F[3 * i + 2] = f, f * cx
+                ff = p3.frame_forces(p3_frames, p3.static_solve(K3, F), N)
+                for (pl, cc) in k_frames:
+                    key = f"{pl}@{cc:.2f}"
+                    if key in ff:
+                        frame_lateral[(pl, cc, cname)] = ff[key]
+                        summary.lateral_shares.setdefault(cname, {})[key] = [float(v) for v in ff[key]]
+        else:
+            summary.seismic_design["model"] = "translation only"
+            summary.messages.append("Floors are not restrained against rotation by the frames (fewer than two frame "
+                                    "lines in a direction): storey forces shared in translation only, no torsion")
+
+    def seismic_forces(d):
+        r = summary.seismic_design.get(d)
+        return getattr(r, "storey_forces_kn", None)
+
     for plane, cc, cols, fbeams, kl in frame_defs:
         summary.frames_total += 1
         name = f"{plane}@{cc:.2f}"
@@ -446,10 +514,10 @@ def update_structural_analysis(gm: GridManager, beams: List[StructuralMember], f
             dl, ll = beam_case_loads(bm, lvl)
             cases["DL"][0][e] = dl
             cases["LL"][0][e] = ll
-        lat_map = {"XZ": (("EQX", lateral.eq_x), ("WLX", lateral.wl_x)),
-                   "YZ": (("EQY", lateral.eq_y), ("WLY", lateral.wl_y))}[plane]
+        lat_map = (("EQX", lateral.eq_x or seismic_forces("X")), ("WLX", lateral.wl_x),
+                   ("EQY", lateral.eq_y or seismic_forces("Y")), ("WLY", lateral.wl_y))
         for cname, forces in lat_map:
-            if not forces:
+            if not forces or (plane, cc, cname) not in frame_lateral:
                 continue
             nloads: Dict[int, List[float]] = {}
             shares = frame_lateral.get((plane, cc, cname))
@@ -549,10 +617,8 @@ def update_structural_analysis(gm: GridManager, beams: List[StructuralMember], f
         for combo, fac in combos:
             pu = fac.get("DL", 0.0) * col.load_dl_kn + fac.get("LL", 0.0) * col.load_ll_kn
             for cn, fv in fac.items():
-                if cn in ("EQX", "WLX") and cn in xz:
-                    pu += fv * xz[cn][2]
-                elif cn in ("EQY", "WLY") and cn in yz:
-                    pu += fv * yz[cn][2]
+                if cn in ("EQX", "WLX", "EQY", "WLY"):     # torsion loads frames of both directions
+                    pu += fv * (xz[cn][2] if cn in xz else 0.0) + fv * (yz[cn][2] if cn in yz else 0.0)
             for end, k in (("bottom", 0), ("top", 1)):
                 mx = sum(fv * xz[cn][k] for cn, fv in fac.items() if cn in xz)
                 my = sum(fv * yz[cn][k] for cn, fv in fac.items() if cn in yz)

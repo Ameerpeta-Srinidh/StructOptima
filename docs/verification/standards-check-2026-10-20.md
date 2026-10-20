@@ -141,3 +141,21 @@ Result codes:
 | X2 | DXF: columns drawn as blocks, old POLYLINEs or circles, and plans bound inside a block, were not read | **FIXED**: blocks exploded (layer-0 inheritance), POLYLINE, CIRCLE (equal-area square, warned), unbound xrefs reported |
 | X3 | DXF: no grid clustering (millimetre drafting misalignment created extra grid lines); beam ends drawn to column faces not connected; survey coordinates passed through; duplicate outlines double-counted; "closed" tolerance relative to coordinate size (a column at survey coordinates lost a corner) | **FIXED** (`tests/test_dxf_conventions.py`, 23 cases) |
 | X4 | DXF wall thickness: millimetre thresholds applied to drawings in metres; midpoint instead of perpendicular distance | **FIXED** (unit-aware, perpendicular, overlapping pairs) |
+
+## Dynamic analysis added after the check (D-26)
+
+IS 1893 7.7.5 (response spectrum), 7.7.3 (scaling), 7.8.2 (design eccentricity), Table 5(i) and Table 6(vii) as amended
+are implemented on a rigid-diaphragm 3D model (`src/pseudo3d.py`) and checked against hand results
+(`tests/test_pseudo3d.py`).
+
+| Hand check | Result |
+|---|---|
+| Symmetric single storey, 4 equal frames, e_d = ±0.05 b | worse frame 0.525 F; transverse frames ±0.025 F; Δmax / Δave = 1.05 |
+| X frames of stiffness k and 3k, e_s = −0.25 L | frame forces equal the closed-form centre-of-resistance solution (50.5 kN on the flexible side for F = 100 kN) |
+| Two-storey shear building | periods 2π / √((k/m)(3 ∓ √5)/2) |
+| Single storey, response spectrum | VB = Ah(T) W |
+| 7.7.3 | scaled to VB static when lower |
+| CQC | SRSS for separated modes, algebraic sum for equal frequencies |
+
+Not represented: flexible diaphragms (re-entrant corners, openings > 50 %), reported as WARN.
+

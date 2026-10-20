@@ -78,7 +78,8 @@ with t["Seismic"]:
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Zone factor Z", p.zone_factor, help=f"Zone {seismic_zone}", border=True)
         m2.metric("Design acceleration Ah", f"{p.design_acceleration:.3f}", border=True)
-        m3.metric("Base shear Vb", f"{seismic_result.base_shear_kn:.0f} kN", border=True)
+        m3.metric("Static base shear VB", f"{seismic_result.base_shear_kn:.0f} kN", border=True,
+                  help="Equivalent static VB with Ta (7.6); the response spectrum results are scaled up to it (7.7.3)")
         m4.metric("I / R", f"{p.importance_factor} / {p.response_reduction}", help=f"Soil type {p.soil_type}",
                   border=True)
         for warn in seismic_result.warnings or []:
@@ -108,14 +109,37 @@ with t["Seismic"]:
                 st.caption(fc.warning)
         else:
             st.success("No floating columns — vertical load path continuous")
-        if getattr(seismic_result, 'storey_forces_kn', None):
+        st.markdown(f"**Analysis used:** {getattr(seismic_result, 'method_used', 'equivalent static')}")
+        dyn = getattr(seismic_result, 'dynamic', None) or {}
+        if "X" in dyn:
+            st.dataframe([{"Direction": d, **{k: v for k, v in dyn[d].items() if k != "Storey forces (kN)"}}
+                          for d in ("X", "Y")], hide_index=True)
+            st.caption("VB static: equivalent static base shear with Ta (7.6.2) incl. the Table 7 minimum; VB dynamic: "
+                       "CQC of all modes (7.7.5.3); the design forces are scaled up to VB static where the dynamic value "
+                       "is lower (7.7.3). Torsion ratio: Delta_max / Delta_ave at the plan ends (Table 5(i), Amd 2; "
+                       "irregular above 1.2). Each frame takes the more severe design eccentricity 1.5 e_s + 0.05 b or "
+                       "e_s - 0.05 b (7.8.2). Floors are modelled as rigid diaphragms.")
+            st.markdown("**Design storey forces (applied to the frames)**")
+            st.dataframe([{"Level": i + 1, "Height (m)": round(h, 2), "Seismic weight (kN)": round(w, 0),
+                           "Static (kN)": round(fs, 1), "Design X (kN)": fx, "Design Y (kN)": fy_}
+                          for i, (h, w, fs, fx, fy_) in enumerate(zip(
+                              seismic_result.storey_heights_m, seismic_result.storey_weights_kn,
+                              seismic_result.storey_forces_kn, dyn["X"]["Storey forces (kN)"],
+                              dyn["Y"]["Storey forces (kN)"]))], hide_index=True)
+            with st.expander(f"Natural modes ({len(dyn['modes'])})"):
+                st.dataframe(dyn["modes"], hide_index=True)
+                reg = dyn.get("regularity")
+                if reg is not None:
+                    st.caption(f"First three modes: {100 * reg.first3_mass_x:.0f} % of the mass along X, "
+                               f"{100 * reg.first3_mass_y:.0f} % along Y (Table 6(vii) requires at least 65 %).")
+        elif getattr(seismic_result, 'storey_forces_kn', None):
             st.markdown("**Equivalent static storey forces (applied to the frame analysis)**")
             st.dataframe([{"Level": i + 1, "Height (m)": round(h, 2), "Seismic weight (kN)": round(w, 0),
                            "Storey force (kN)": round(f, 1)}
                           for i, (h, w, f) in enumerate(zip(seismic_result.storey_heights_m,
                                                             seismic_result.storey_weights_kn,
                                                             seismic_result.storey_forces_kn))], hide_index=True)
-            st.caption("Forces shared between parallel frames by column stiffness; torsion not modelled.")
+            st.caption("Forces shared between parallel frames in translation only; torsion not modelled.")
         with st.expander("Ductile detailing requirements (IS 13920)"):
             if seismic_result.ductile_checks:
                 st.dataframe([{"Member": dc.member_id, "Type": dc.member_type.title(),

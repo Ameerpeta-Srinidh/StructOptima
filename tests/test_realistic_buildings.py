@@ -110,8 +110,9 @@ def test_status_list_agrees_with_the_check_tables(run):
     r, c = run
     drift_fail = any(d["Status"] == "FAIL" for d in r.drift_results)
     assert drift_fail == any(f["Type"] == "Storey drift" and f["Status"] == "FAIL" for f in r.failures)
-    method_needed = c["seismic_zone"] != "II" or c["n"] * c["h"] >= 15.0
-    assert method_needed == any(f["Type"] == "Seismic method" for f in r.failures)
+    # dynamic analysis performed for every building (7.7.5 is permitted for any building; 7.7.1 requires it for most)
+    assert r.seismic_result.method_used.startswith("response spectrum")
+    assert not any(f["Type"] == "Seismic method" for f in r.failures)
     order = {"PASS": 0, "WARN": 1, "FAIL": 2}
     assert order[r.status] >= max([order[f["Status"]] for f in r.failures] + [0])
 

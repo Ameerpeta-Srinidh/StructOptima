@@ -105,10 +105,16 @@ def test_zone_ii_low_rise_regular_building_has_no_method_failure():
     assert not any(f["Type"] == "Seismic method" for f in r.failures)
 
 
-def test_zone_iii_building_reports_that_dynamic_analysis_is_required():
+def test_zone_iii_building_uses_the_response_spectrum_method():
+    # 7.7.1 requires dynamic analysis -> 7.7.5 response spectrum on the 3D rigid-diaphragm model, scaled to VB (7.7.3)
     r = _design("III", "SMRF")
-    rows = [f for f in r.failures if f["Type"] == "Seismic method"]
-    assert rows and rows[0]["Status"] == "FAIL" and "7.7.1" in rows[0]["Issue"]
+    assert r.seismic_result.method_used.startswith("response spectrum")
+    assert not any(f["Type"] == "Seismic method" for f in r.failures)
+    for d in ("X", "Y"):
+        dyn = r.seismic_result.dynamic[d]
+        assert dyn["Scale factor"] >= 1.0
+        assert dyn["VB design (kN)"] >= dyn["VB static (kN)"] - 1e-6
+        assert dyn["Mass in those modes %"] >= 90.0
 
 
 # ---- S6: Table 6(ii) mass irregularity -----------------------------------------------------------------------
@@ -151,3 +157,41 @@ def test_gross_stiffness_is_flagged():
     r = _design("II", "OMRF", use_cracked_sections=False)
     assert any(f["Type"] == "Stiffness modifiers" and f["Status"] == "WARN" for f in r.failures)
     assert not any(f["Type"] == "Stiffness modifiers" for f in _design("II", "OMRF").failures)
+
+
+def test_soft_storey_tolerance_for_computed_stiffness():   # D-27
+    assert check_soft_storeys([207578.0, 208808.0], tolerance=0.10) == []
+    assert [c.storey for c in check_soft_storeys([150000.0, 210000.0], tolerance=0.10)] == [0]
+
+
+# ---- D-26: dynamic analysis on the rigid-diaphragm 3D model -----------------------------------------------------
+
+def test_torsion_loads_the_frames_of_the_other_direction():
+    r = _design("III", "SMRF")
+    shares = r.analysis_summary.lateral_shares["EQX"]
+    yz = [v for k, v in shares.items() if k.startswith("YZ")]
+    assert yz and any(abs(x) > 0 for v in yz for x in v)          # accidental torsion (7.8.2) reaches Y frames
+    xz = [sum(v) for k, v in shares.items() if k.startswith("XZ")]
+    # each frame takes its more severe eccentricity case (7.8.2), so the X frames together carry at least VB
+    vb = r.seismic_result.dynamic["X"]["VB design (kN)"]
+    assert vb - 1e-6 <= sum(xz) <= 1.15 * vb
+
+
+def test_re_entrant_plan_is_a_warning_with_the_check_to_do():
+    import os
+    from src.cad_loader import CADLoader
+    path = os.path.join(os.path.dirname(__file__), "..", "samples", "test_cases", "stress", "l_shape.dxf")
+    loader = CADLoader(path)
+    gm, beams = loader.load_grid_manager(num_stories=2, story_height_m=3.2)
+    gm.columns = gm.stack_columns([c for c in gm.columns if c.level == 0], 2, 3.2)
+    r = run_design(gm, beams, DesignInputs(num_stories=2, story_height_m=3.2, seismic_zone="III",
+                                           structural_system="SMRF", max_iterations=3))
+    rows = [f for f in r.failures if f["Type"] == "Seismic method"]
+    assert rows and all(f["Status"] == "WARN" for f in rows)
+    assert "FLEXIBLE" in rows[0]["Issue"] and "ETABS" in rows[0]["Issue"]
+
+
+def test_no_stale_static_method_warning_after_dynamic_analysis():
+    r = _design("III", "SMRF")
+    assert not any("results are not valid for design" in w for w in r.seismic_result.warnings)
+    assert any("response spectrum method (7.7.5) was used" in w for w in r.seismic_result.warnings)

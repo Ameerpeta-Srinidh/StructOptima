@@ -9,6 +9,47 @@ Each entry states what changed, why, the evidence (tests actually run) and what 
 
 ---
 
+## 2026-10-20 — Dynamic analysis (response spectrum on a 3D rigid-diaphragm model)
+
+Owner: "do the dynamic analysis part if we can, otherwise keep it as WARN with more info". Decisions D-26 (approved)
+and D-27 (proposed), remediation RM-36.
+
+### What it does
+- **3D model** (`src/pseudo3d.py`): one rigid-floor model with 3 degrees of freedom per floor (X, Y, rotation),
+  assembled from the condensed lateral stiffness of every plane frame. Floor mass, centre of mass and rotational
+  inertia come from the slab panels.
+- **Response spectrum method (IS 1893 7.7.5), used for every building:**
+  - all modes, with the number needed for 90 % of the mass reported;
+  - spectrum of 6.4.2(b), CQC combination;
+  - scaled up to the static base shear (7.7.3).
+- **Torsion (7.8.2):** design eccentricity 1.5 e_s + 0.05 b or e_s − 0.05 b, whichever is more severe for each frame.
+  Torsion loads the frames of the other direction too, and column axial forces now add both directions.
+- **New checks:**
+  - torsional irregularity ratio (Table 5(i), Amendment 2): FAIL above 1.4; between 1.2 and 1.4, FAIL unless the
+    torsional period is below the translational ones;
+  - irregular modes (Table 6(vii), Amendment 2);
+  - soft storey: with the dynamic analysis performed, FAIL only if drift exceeds 0.2 %; drops of the computed
+    stiffness up to 10 % are ignored (D-27).
+- **"Seismic method" is no longer a FAIL:**
+  - re-entrant corners and large openings (which need flexible floors) give a WARN describing the check to do in
+    ETABS / STAAD;
+  - floors without torsional restraint give a WARN explaining that static forces were used.
+- **Checks page, Seismic tab:** method used, static / dynamic / design base shear, scale factor, modes for 90 % of the
+  mass, torsion ratio, design storey forces per direction, and the modes table.
+- **CI:** installs the test-only `pypdfium2` (N28).
+
+### Tests run
+- `PYTHONDONTWRITEBYTECODE=1 python -m pytest tests -p no:cacheprovider -q`: **774 passed, 3 skipped**.
+- New `tests/test_pseudo3d.py` checks against hand results:
+  - symmetric building with ±0.05 b eccentricity → 0.525 F on the worse frame;
+  - eccentric stiffness → 50.5 kN, worked by hand;
+  - two-storey shear building periods (closed form);
+  - single-storey response spectrum = Ah W;
+  - 7.7.3 scaling; CQC equals SRSS for well-separated modes and the algebraic sum for equal ones.
+- DXF sweep, Zone III SMRF: 0 crashes, all 90 drawings analysed with the response spectrum method.
+
+---
+
 ## 2026-10-20 — Check against the printed standards, DXF import and analysis fixes
 
 Owner instruction: "check whatever you need to check and change whatever is wrong". The code's values were compared

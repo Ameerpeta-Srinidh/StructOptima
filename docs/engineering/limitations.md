@@ -10,10 +10,10 @@
 ## Analysis
 
 - Independent 2D plane frames along grid lines; beams off grid lines are designed as simply supported (warning).
-- No torsion, accidental eccentricity, diaphragm flexibility, P-Δ or second-order analysis.
+- Rigid floor diaphragms only (no flexible-diaphragm analysis); no P-Δ or second-order analysis.
 - Storey drift is computed per column from the 2D frames (since 2026-10-16); without torsion it under-estimates drift at the flexible edge of irregular plans. Limits checked against IS 1893 7.11.1.1 and IS 456 20.5 (2026-10-20).
 - Storey forces are shared between parallel frames as for a rigid floor in translation (each frame's condensed lateral stiffness; slab links tie the column tops a beam does not connect) since 2026-10-20.
-- Equivalent static seismic method only. IS 1893:2016 7.7.1 permits it only for regular buildings lower than 15 m in Zone II; every other building is reported as FAIL ("Seismic method") because the required dynamic analysis is not available (KD-23).
+- Seismic forces by the response spectrum method (IS 1893 7.7.5) on a rigid-diaphragm 3D model assembled from the condensed frame stiffnesses (3 DOF per floor), CQC of all modes, scaled to the static VB (7.7.3), with design eccentricity (7.8.2). Floor centre of mass and rotational inertia from the slab panels (columns and walls not located individually). Re-entrant corners and large openings need a flexible-diaphragm 3D model (WARN).
 - No orthogonal seismic combination, vertical seismic or pattern live loading.
 - Column gravity axial load from tributary areas (not from frame continuity).
 - Static wind only; dynamic/gust effects are flagged for tall/slender buildings but not computed; Kd, Ka, Kc taken as 1.0 (conservative); k3 and k4 taken as 1.0 (sloping sites and cyclone-prone coasts need them); h/w ≥ 6 is a FAIL.
