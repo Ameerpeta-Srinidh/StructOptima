@@ -1,9 +1,9 @@
 # Risk Register
 
-**As of:** 2026-10-20. Original audit IDs R1–R27 are preserved; N1–N12 were
+**As of:** 2026-10-21. Original audit IDs R1–R27 are preserved; N1–N12 were
 found during stage-2 verification and remediation; N13 by the manual walkthrough; N14–N21 by the
 mandate gap analysis ([gap-analysis.md](gap-analysis.md)); N23–N28 by the UI review of 2026-10-20; N29–N45 by the
-check against the printed standards and the testing of 2026-10-20
+check against the printed standards and the testing of 2026-10-20; N50–N52 by the DXF fuzz tests of 2026-10-21
 ([../verification/standards-check-2026-10-20.md](../verification/standards-check-2026-10-20.md), whose ids S/J/T/D/F/L/W/A/X
 are given in brackets).
 
@@ -89,3 +89,6 @@ C critical · H high · M medium · L low. Confidence refers to the original fin
 | N46 | Slab strip above each beam counted twice in beam loads and seismic weight when the designed slab is thicker than the occupancy slab (web uses 125 mm, panel extra covers the whole panel): +0.5 kN/m per 300 mm beam for 195 mm slabs | L | High | `analysis_integration.beam_case_loads`, `design_pipeline.storey_seismic_weights` | Conservative (about 1.4 % beam load, 2 % seismic weight) | `test_hand_check_complex_house.py` (documents the current value) | UNVERIFIED (fix implemented 2026-10-20, approved D-30) | D-30 | RM-38 |
 | N47 | DXF: columns drawn smaller than designed were replaced silently (complex_house: 230 x 230 drawn, 300 x 450 designed); room labels outside the structure not reported; layers named "PLINTH BEAM" read as floor beams; unrecognised layer names dropped structure | M | High | `cad_parser`, `cad_loader`, `design_pipeline` | Drawing and design disagree; parts of a building missed | `test_dxf_layers.py` | UNVERIFIED (fix implemented 2026-10-20) | D-28 (approved) | RM-37 |
 | N48 | A beam wider than the column it frames into (outer bars outside the column cage) was not detected | M | Medium | `design_pipeline` | Unbuildable joint | `test_beam_wider_than_column_is_reported` | UNVERIFIED (check implemented 2026-10-20) | D-29 | RM-38 |
+| N50 | DXF geometry was not bounded: a line drawn far from the building (fuzz mutation: LINE starts x 1e7) reached the design. Without column entities the auto-framer put a node every 5 m along each wall (3.0 x 10^8 nodes for `real_3_l_shape_farmhouse.dxf`, about 12 GiB; Linux OOM kill of pytest workers); with drawn columns, kilometre-long beams and walls gave W and VB about 8 x 10^14 kN and interaction ratio inf in every column | H | High (reproduced and measured 2026-10-21) | `cad_loader.load_grid_manager`, `auto_framer.identify_structural_nodes` | Machine memory exhausted; absurd design presented as a result | `tests/test_geometry_validation.py` (OOM case in a 1.5 GiB-capped child process), `test_dxf_robustness.py::test_damaged_drawings_*` | UNVERIFIED (fix implemented 2026-10-21) | D-32 | RM-39 |
+| N51 | A NaN design force in the column check returned interaction ratio -1.0 (a pass) because every comparison with NaN is false | H | High (reproduced 2026-10-21) | `section_design.check_column` | A broken analysis could pass columns | `test_check_column_rejects_non_finite_forces` | UNVERIFIED (fix implemented 2026-10-21) | — | RM-39 |
+| N52 | A NaN / infinite beam moment or shear reached `math.floor` and raised ValueError / OverflowError; the Setup page and the fuzz tests treat ValueError as a fixable input error | M | High (reproduced 2026-10-21) | `section_design.design_flexure`, `design_shear` | A broken analysis reported as a drawing problem | `test_beam_design_rejects_non_finite_forces` | UNVERIFIED (fix implemented 2026-10-21) | — | RM-39 |

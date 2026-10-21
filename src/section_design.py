@@ -144,6 +144,9 @@ class FlexureResult:
 
 def design_flexure(mu_knm: float, b: float, d: float, d_prime: float, fck: float, fy: float) -> FlexureResult:
     """Design a rectangular section for a (factored) moment magnitude."""
+    if not math.isfinite(mu_knm):
+        # NaN / inf reached math.floor in the bar choice as a ValueError, which callers treat as an input error
+        raise FloatingPointError(f"Beam flexure given a non-finite design moment ({mu_knm} kNm): the analysis failed")
     mu = abs(mu_knm)
     mlim = mu_lim_knm(b, d, fck, fy)
     if mu <= mlim:
@@ -183,6 +186,8 @@ class ShearResult:
 def design_shear(vu_kn: float, b: float, d: float, pt_percent: float, fck: float, fy: float,
                  stirrup_dia: int = 8, legs: int = 2) -> ShearResult:
     """Vertical stirrup design for a rectangular beam (IS 456 Cl 40)."""
+    if not math.isfinite(vu_kn):
+        raise FloatingPointError(f"Beam shear design given a non-finite design shear ({vu_kn} kN): the analysis failed")
     tv = abs(vu_kn) * 1000.0 / (b * d)
     tc = tau_c(pt_percent, fck)
     tcm = tau_c_max(fck)
@@ -390,6 +395,10 @@ def check_column(sec: ColumnSection, pu_kn: float, mx_kNm: float, my_kNm: float,
                  curves: Optional[dict] = None) -> ColumnCheck:
     """Biaxial check (IS 456 Cl 39.6) including minimum eccentricity (applied
     about one axis at a time) and slenderness additional moments."""
+    if not all(math.isfinite(v) for v in (pu_kn, mx_kNm, my_kNm, unsupported_length_mm)):
+        # a NaN compares False everywhere and used to return ratio -1 (a pass): a broken analysis must not pass
+        raise FloatingPointError(f"Column check given non-finite design forces (Pu {pu_kn} kN, Mx {mx_kNm}, "
+                                 f"My {my_kNm} kNm, L {unsupported_length_mm} mm): the analysis failed")
     curves = curves or {"x": interaction_curve(sec, "x"), "y": interaction_curve(sec, "y")}
     pu = pu_kn                      # negative = net tension
     pa = abs(pu)
@@ -410,6 +419,8 @@ def check_column(sec: ColumnSection, pu_kn: float, mx_kNm: float, my_kNm: float,
             r = float("inf")
         else:
             r = (mx / m1x) ** an + (my / m1y) ** an
+        if math.isnan(r):
+            raise FloatingPointError(f"Column interaction ratio is undefined for Pu {pu_kn} kN ({name})")
         if r > worst[0]:
             worst = (r, name, mx, my)
     return ColumnCheck(pu, worst[2], worst[3], m1x, m1y, puz, an, worst[0], worst[1],

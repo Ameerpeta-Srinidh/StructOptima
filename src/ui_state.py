@@ -328,7 +328,12 @@ def _store_results(res, inputs: DesignInputs) -> None:
 def run_design_from_inputs():
     """Build the model from the current inputs and run the design. Raises InputError for fixable input problems."""
     s = st.session_state
-    gm, beams, loader = _acquire_geometry(s)
+    from src.grid_manager import check_plan_geometry
+    try:
+        gm, beams, loader = _acquire_geometry(s)
+        check_plan_geometry(gm, beams)
+    except ValueError as e:             # loaders and the geometry check raise ValueError for a fixable drawing
+        raise InputError(str(e)) from e
     s['geometry_beams'] = [b.model_copy(deep=True) for b in beams]
     if loader is not None and getattr(loader, 'placer', None) is not None:
         s['editor_centerlines'] = loader.framer.centerlines

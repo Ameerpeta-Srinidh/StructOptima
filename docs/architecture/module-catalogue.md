@@ -59,7 +59,7 @@ Status key: **P** production · **C** CLI only · **T** tests/demos only · **U*
 | `foundation_eng.py` | P | Square isolated footing: bearing, punching (ks), one-way shear, flexure, reinforcement, eccentricity warning; overlap check | `design_footing`, `check_footing_overlaps` |
 | `member_design.py` | T | Legacy alternative designer (beam/column/slab). **Not used**; its column capacity ignores axial load in Mux1 (see calculation catalogue CAL-LEG-01) | `MemberDesigner` |
 | `slab_generator.py` | T | Slab panel/wall-load generator used only by tests | |
-| `anchorage.py` | P | Development length tables shown in the UI | |
+| `anchorage.py` | U | Development length / lap tables. Not imported by any page or module (checked 2026-10-21; earlier listed as P) and untested; laps and anchorage are not designed (drawing note) | |
 
 ## Checks
 

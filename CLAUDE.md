@@ -34,24 +34,45 @@ certified analysis/design or code-compliance tool.
 ## Running tests
 
 Configuration: `pytest.ini` (`testpaths = tests`); CI: `.github/workflows/ci.yml`.
-Side-effect-free run (no cache/bytecode files in the repo):
+Use the resource-safe runner (one file at a time, memory-capped, exact counts, non-zero exit on anything not
+passed; logs outside the repository):
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 python -m pytest tests -p no:cacheprovider -q
+PYTHONDONTWRITEBYTECODE=1 python tests/run_suite.py --layer regression      # or unit, geometry, engineering,
+PYTHONDONTWRITEBYTECODE=1 python tests/run_suite.py tests/test_drift.py     #   integration, reference, all
 ```
 
-Subsets and side effects: `docs/verification/test-execution-guide.md`.
+Plain pytest for one quick file: `PYTHONDONTWRITEBYTECODE=1 python -m pytest tests/<file> -p no:cacheprovider -q`.
+Layers, measured times / memory and side effects: `docs/verification/test-execution-guide.md`.
 Legacy one-off scripts were moved out of the repository on 2026-10-16 (local copies in the
 git-ignored `_local/`; history in git). Do not add scripts or generated outputs at the root:
 inputs go in `samples/`, documents in `docs/`, personal material in `_local/`.
 IFC tests need the optional `ifcopenshell` (skipped otherwise).
 
+## Resource safety (machine: ~14 GiB RAM, 4 GiB swap)
+
+- Never use parallel pytest workers (`-n`) and never start two test runs or other memory-heavy jobs at once:
+  `-n 8` / `-n 2` were OOM-killed on 2026-10-21 (one worker at 11.8 GiB). Parallelism only after measuring.
+- Start with the targeted test file; widen in batches (`tests/run_suite.py` layers). Cap ad-hoc diagnostics with
+  `prlimit --as=<bytes>` and a `timeout`, and watch peak memory (`/usr/bin/time -f %M`).
+- If memory grows unexpectedly, stop and find the allocating step (smallest input, capped) before running it again.
+- An interrupted, timed-out or OOM-killed run is a failed run, never a pass. Measured per-file costs are in
+  `docs/verification/test-execution-guide.md`; keep them current when a file changes cost.
+
 ## Engineering correctness (non-negotiable)
 
-- Never change formulas, units, load factors/combinations, design assumptions,
-  tabulated code values or cited provisions without (a) documented evidence
-  (independent hand calculation, closed-form result, or authoritative reference)
-  and (b) explicit approval from the user.
+- Structural calculations are engineering-critical. Running without error, or a green test suite, is not evidence
+  that a result is correct or that a building is safe; never say or imply otherwise.
+- Standards in scope (editions as in `docs/engineering/standards-register.md`): IS 456:2000, IS 1893 (Part 1):2016
+  (Amd 1, 2), IS 13920:2016 (Amd 1, 2), IS 875 Parts 1 and 2:1987 and Part 3:2015, SP 16:1980, IS 1786:2008,
+  NBC 2016 Parts 4 and 6. Claim only the clauses the register marks implemented; never claim code compliance.
+- State the evidence level of every behaviour you report: **implemented** (code exists) / **automatically tested**
+  (a test asserts it) / **independently verified** (hand calculation, closed form, SP 16 or printed standard) /
+  **professionally reviewed** (qualified engineer; nothing is yet).
+- Never change formulas, units, load factors/combinations, design assumptions, safety factors, numerical
+  tolerances, tabulated code values or cited provisions to make a test pass, and never without (a) documented
+  evidence (independent hand calculation, closed-form result, or authoritative reference) and (b) explicit
+  approval from the user.
 - Never invent standard clauses or values. Unverified citations go into
   `docs/engineering/standards-register.md` marked UNVERIFIED.
 - Respect the load contract: `Column.load_kn` and related fields are **service**
@@ -60,16 +81,34 @@ IFC tests need the optional `ifcopenshell` (skipped otherwise).
 - One implementation per calculation: change the production function in
   `section_design` / `rebar_detailer` etc. rather than adding a copy.
 
-## Working method (test-driven)
+## Change control (test-driven)
 
-1. Reproduce the defect (minimal script or failing test) before changing code.
-2. Add a regression test — numerical and against an independently derived
-   reference where possible.
-3. Make the minimal fix; avoid unrelated refactoring.
-4. Run the relevant tests, then the full suite; confirm `git status` shows no
-   files written by tests.
-5. Before changing an interface, inspect all callers and dependents (pages, reports,
-   exporters and the pipeline consume result fields).
+Before changing code: read the module, its callers and its tests; record the baseline (run the affected test
+files); check `git status` / `git diff` and preserve every unrelated change, tracked or untracked (never
+`git reset --hard`, `git clean`, blanket checkout or revert). Before changing an interface, inspect all callers and
+dependents (pages, reports, exporters and the pipeline consume result fields).
+
+Fixing a defect:
+1. Reproduce it with the smallest input (script or failing test), capped as under Resource safety.
+2. Find the underlying cause, not just the example; add a regression test that fails before the fix — for the
+   reported case and for the general rule — numerical and against an independent reference where possible.
+3. Make the smallest fix; no unrelated refactoring.
+4. Run the regression test, then the affected layers, then the wider suite in batches; investigate every new
+   failure; confirm `git status` shows no files written by tests.
+
+Never delete, skip or xfail a failing test, weaken an assertion or invariant (`tests/invariants.py`), widen a
+tolerance, change an expected value or suppress a warning to get a green run. An expectation that is genuinely
+wrong is changed only with the engineering requirement and independent evidence written next to it.
+Invalid input is rejected with a clear `ValueError` before expensive calculations; non-finite or implausible
+intermediate results fail loudly (`FloatingPointError` / FAIL status) — never clipped, replaced by finite numbers
+or hidden.
+
+## Completion criteria
+
+A task is done only with: a reviewed diff; new or updated tests; the targeted tests, affected regression and
+integration tests and `tests/invariants.py` checks actually run and passing (or failures reported); the
+documentation below updated. Report what was not run and why. Never report a test as passed unless its run
+completed.
 
 ## Safety
 

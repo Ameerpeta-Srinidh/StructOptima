@@ -1,6 +1,6 @@
 # Limitations
 
-**As of:** 2026-10-16. Read this before relying on any StructOptima output.
+**As of:** 2026-10-21. Read this before relying on any StructOptima output.
 
 ## Scope
 
@@ -44,6 +44,8 @@
   recognised as walls, lines of unrecognised layers are used as walls (warned). Auto-framing assumes drawings in
   millimetres.
 - Drawings whose `$INSUNITS` disagree with the geometry are detected only when the resulting extent is outside 1–1000 m.
+- Plans wider than 1000 m and drawings whose columns / beams / walls span more than 10^6 drawing units (1 km even in
+  millimetres) are rejected as input errors (D-32, 2026-10-21), including far geometry on a structural layer.
 - IFC: only rectangular extruded profiles; inclined beams skipped; storey heights averaged; one plan beam layout for all storeys.
 
 ## Drawings

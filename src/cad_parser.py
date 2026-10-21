@@ -65,14 +65,21 @@ class CADParser:
         """Loads the DXF file."""
         try:
             self.doc = ezdxf.readfile(self.filepath)
-            self.msp = self.doc.modelspace()
-            logger.info("Successfully loaded %s", self.filepath)
-        except IOError:
-            logger.error("Not a DXF file or a generic I/O error: %s", self.filepath)
-            raise
-        except ezdxf.DXFStructureError:
-            logger.error("Invalid or corrupted DXF file: %s", self.filepath)
-            raise
+        except (IOError, ezdxf.DXFError, UnicodeDecodeError, ValueError) as first:
+            # damaged files: read with the recovery reader, as CAD programs do, and say so; a file that cannot be
+            # recovered is an input error the user can fix (never a crash on the page)
+            try:
+                from ezdxf import recover
+                self.doc, auditor = recover.readfile(self.filepath)
+            except Exception as e:  # noqa: BLE001 - every reader failure becomes one input message
+                logger.error("Unreadable DXF %s: %s / %s", self.filepath, first, e)
+                raise ValueError(f"The file could not be read as a DXF drawing ({type(first).__name__}: {first}). "
+                                 f"Save it again from the CAD program as DXF and upload it again.") from e
+            self.warnings.append(f"The DXF file was damaged ({first}) and was repaired while reading "
+                                 f"({len(auditor.fixes)} fix(es), {len(auditor.errors)} error(s)): check the preview "
+                                 f"against the drawing.")
+        self.msp = self.doc.modelspace()
+        logger.info("Loaded %s", self.filepath)
 
     # DXF $INSUNITS codes -> metres per drawing unit
     INSUNITS_TO_M = {1: 0.0254, 2: 0.3048, 4: 0.001, 5: 0.01, 6: 1.0}
@@ -500,6 +507,7 @@ class CADParser:
         walls: List[Tuple[Tuple[float, float], Tuple[float, float]]],
         thickness_range: Tuple[float, float] = (100.0, 400.0),
         angle_tol_deg: float = 8.0,
+        unit_m: Optional[float] = None,
     ) -> List[Tuple[Tuple[float, float], Tuple[float, float]]]:
         """
         Merges double-wall parallel line pairs into single centerlines.
@@ -510,8 +518,9 @@ class CADParser:
 
         Args:
             walls: Raw wall segments from extract_walls()
-            thickness_range: (min, max) perpendicular distance to consider as wall pair
+            thickness_range: (min, max) perpendicular distance to consider as wall pair (drawing units)
             angle_tol_deg: Max angle difference to treat lines as parallel
+            unit_m: metres per drawing unit; None keeps the old guess (coordinates > 500 -> millimetres)
         
         Returns:
             List of centerline segments (merged where pairs found, passthrough for singles)
@@ -534,9 +543,12 @@ class CADParser:
                 'mx': mx, 'my': my,
             })
 
-        max_coord = max(max(abs(p) for seg in walls for pt in seg for p in pt), 1)
-        # If coordinates are > 500, they are likely in mm. Otherwise they are in meters.
-        min_length = 0.1 if max_coord < 500 else 100
+        if unit_m:
+            min_length = 0.1 / unit_m                     # 100 mm in drawing units
+        else:
+            max_coord = max(max(abs(p) for seg in walls for pt in seg for p in pt), 1)
+            # If coordinates are > 500, they are likely in mm. Otherwise they are in meters.
+            min_length = 0.1 if max_coord < 500 else 100
 
         for i in range(n):
             if used[i]:
@@ -627,15 +639,12 @@ class CADParser:
         if not raw:
             return []
             
-        # Detect scale to adapt thickness thresholds
-        max_coord = 0
-        for s, e in raw:
-            max_coord = max(max_coord, abs(s[0]), abs(s[1]), abs(e[0]), abs(e[1]))
-        is_mm = max_coord > 300
-        thickness = (100.0, 500.0) if is_mm else (0.1, 0.5)
-
-        # 2. Normalize
-        return self.normalize_to_centerlines(raw, thickness_range=thickness)
+        # wall faces 100-500 mm apart, in drawing units ($INSUNITS when plausible; a cm drawing paired nothing
+        # under the old mm / m guess and counted every wall twice)
+        from .dxf_layers import drawing_unit_m
+        unit_m = drawing_unit_m(self)
+        thickness = (0.1 / unit_m, 0.5 / unit_m)
+        return self.normalize_to_centerlines(raw, thickness_range=thickness, unit_m=unit_m)
 
     @staticmethod
     def _point_to_line_dist(px, py, x1, y1, x2, y2) -> float:

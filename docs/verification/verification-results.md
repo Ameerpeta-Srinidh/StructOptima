@@ -22,6 +22,7 @@ evidence of engineering correctness beyond the stated reference cases.
 | After the response spectrum analysis (2026-10-20) | same | **774 passed, 3 skipped, 0 failed** (≈ 33 s) |
 | After N46, D-29 wall columns and the beam-width check (2026-10-20) | same | **809 passed, 3 skipped, 0 failed** (≈ 35 s); 92-drawing sweep: 0 crashes |
 | After the DXF layer reading and the worked hand check (2026-10-20) | same | **798 passed, 3 skipped, 0 failed** (≈ 34 s); 92-drawing DXF sweep: same columns, beams and status for every file as before |
+| Geometry bound, non-finite guards, runner (2026-10-21, Ubuntu, Python 3.12) | `python tests/run_suite.py` (every file sequentially, memory-capped) | **1029 passed, 0 failed, 0 errors, 3 skipped, 3 xfailed** in 52 files (428 s of test processes; peak RSS ≤ 308 MB per file; no file written into the repository). Includes the owner's new DXF robustness, invariant, metamorphic and design-matrix suites. Before the fix the damaged-drawing tests failed on 'huge coordinates' and parallel runs were OOM-killed (reproduced: 3.0 x 10^8 auto-framer nodes, MemoryError under a 3 GiB cap; after: 105 MB, input error) |
 
 Skipped: `test_beam_placer.py::test_with_auto_framer` (local `complex_villa.dxf` yields no columns), two `test_column_editor.py` tests (no removable column in the layout).
 

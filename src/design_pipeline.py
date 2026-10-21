@@ -24,7 +24,7 @@ from .analysis_integration import (AnalysisSummary, LateralLoads, SeismicSpec, b
                                    update_structural_analysis, web_self_weight_kn_m)
 from .building_types import get_load_parameters
 from .foundation_eng import Footing, check_footing_overlaps, design_footing
-from .grid_manager import GridManager
+from .grid_manager import GridManager, check_plan_geometry
 from .logging_config import get_logger
 from .materials import Concrete
 
@@ -400,6 +400,7 @@ def run_design(gm: GridManager, beams: list, inputs: DesignInputs) -> DesignResu
     from .seismic import check_soft_storeys, evaluate_joint_checks, run_seismic_check
     from .rebar_detailer import RebarDetailer  # noqa: F401
     messages: List[str] = []
+    check_plan_geometry(gm, beams)          # input error before any calculation (non-finite / km-long geometry)
 
     lp = get_load_parameters(inputs.building_type_name)
     concrete = Concrete.from_grade(inputs.conc_grade)
@@ -625,6 +626,14 @@ def run_design(gm: GridManager, beams: list, inputs: DesignInputs) -> DesignResu
 
     def add(member, kind, status, issue):
         failures.append({"Member": member, "Type": kind, "Status": status, "Issue": issue})
+
+    # a non-finite global result means the analysis broke down: nothing derived from it can be used
+    globals_ = {"Seismic weight W (kN)": building_weight, "Static base shear VB (kN)": seismic_result.base_shear_kn}
+    globals_.update({f"Design base shear VB {d} (kN)": sd[d].base_shear_kn for d in ("X", "Y") if d in sd})
+    for name, val in globals_.items():
+        if not math.isfinite(val):
+            add("Building", "Numerical failure", "FAIL", f"{name} is not a finite number: the analysis did not "
+                f"produce a usable result; no member design of this run can be relied on. Check the geometry and loads.")
 
     for bid, r in gm.beam_schedule.items():
         if r.status != "PASS":

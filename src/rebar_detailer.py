@@ -257,8 +257,14 @@ class RebarDetailer:
                 warnings.append("No bar arrangement satisfies spacing rules for this section size")
             else:
                 chosen = best_fail
-            warnings.append(
-                f"Interaction ratio {chosen[2][1].ratio:.2f} > 1.0 with up to 4% steel: increase column size")
+            chk = chosen[2][1]
+            if math.isinf(chk.ratio):       # no moment capacity at this axial load (IS 456 39.6 curve ends)
+                warnings.append(
+                    f"Factored axial load {chk.pu_kn:.0f} kN is outside the interaction diagram of the section "
+                    f"(Puz = {chk.puz_kN:.0f} kN) with up to 4% steel: increase column size")
+            else:
+                warnings.append(
+                    f"Interaction ratio {chk.ratio:.2f} > 1.0 with up to 4% steel: increase column size")
         n, dia, (gname, chk), sec = chosen
         provided = sec.As
         pct = provided / ag * 100.0

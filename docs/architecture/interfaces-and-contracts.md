@@ -20,6 +20,8 @@ Preconditions: `gm` has grid lines and columns stacked for `inputs.num_stories`
 `beams` are plan beams (one per bay side); may be empty (generated).
 Side effects: mutates `gm` (loads, sizes, schedules) and `beams` (sizes,
 envelopes). No files are written.
+Raises `ValueError` before any calculation when `grid_manager.check_plan_geometry(gm, beams)` fails
+(non-finite coordinate, or columns / beams / walls spanning more than `MAX_PLAN_EXTENT_M` = 1000 m; D-32).
 
 `DesignInputs` (defaults): `num_stories=2`, `story_height_m=3.5`,
 `building_type_name="Residential"`, `wall_load_kn_m=12` (only without walls),
@@ -79,7 +81,7 @@ re-derive pass/fail from other quantities.
 
 ## Ingest contracts
 
-- `CADLoader.load_grid_manager(...) -> (GridManager, beams)`; geometry in metres, column sizes in mm; warnings in `load_warnings`; raises `ValueError` when no geometry.
+- `CADLoader.load_grid_manager(...) -> (GridManager, beams)`; geometry in metres, column sizes in mm; warnings in `load_warnings`; raises `ValueError` when no geometry, when the raw drawing spans more than 10^6 drawing units or has a non-finite coordinate (checked before the auto-framer), or when `check_plan_geometry` fails (D-32).
 - `BIMLoader.load_grid_manager() -> (GridManager, beams)`; warnings in `warnings`; raises `ValueError` when no columns.
 
 ## Logging, caching, configuration
@@ -91,5 +93,8 @@ re-derive pass/fail from other quantities.
 ## Error behaviour
 
 Library functions raise `ValueError` for invalid geometry/inputs (e.g. stability
-checks with zero dimensions — R24, `calculate_loads` without loads). Numerical
-non-solvability is reported through statuses, not exceptions.
+checks with zero dimensions — R24, `calculate_loads` without loads, `check_plan_geometry`). The Setup page shows a
+`ValueError` from geometry acquisition as an input problem (`ui_state.InputError`). Numerical
+non-solvability is reported through statuses, not exceptions, except non-finite design forces:
+`section_design.check_column`, `design_flexure` and `design_shear` raise `FloatingPointError` (a broken analysis is
+never a pass and never an input error; N51, N52). A non-finite W or VB is a FAIL row "Numerical failure".

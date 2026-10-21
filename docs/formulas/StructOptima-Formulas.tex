@@ -16,7 +16,7 @@
 \setlength{\parskip}{4pt}
 \renewcommand{\arraystretch}{1.25}
 \newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
-\newcommand{\lastupdated}{20 October 2026 (evening)}  % change on every amendment
+\newcommand{\lastupdated}{21 October 2026}  % change on every amendment
 \newcommand{\code}[1]{\texttt{\small #1}}
 \newcommand{\status}[1]{\textbf{\small[#1]}}
 \newcommand{\fck}{f_{ck}}
@@ -28,7 +28,7 @@
 \cfoot{\small \thepage}
 
 \title{\textbf{StructOptima}\\[4pt]\large Formulas, decisions and edge cases --- as implemented}
-\author{Srinidh Ameerpeta \& Charan Tej}
+\author{Srinidh Ameerpeta}
 \date{Last updated: \lastupdated}
 
 \begin{document}
@@ -52,6 +52,12 @@ Newest first. Ids point to the records in \code{docs/assurance/} (N = finding, D
 \begin{longtable}{L{22mm}L{142mm}}
 \toprule
 \textbf{Date} & \textbf{Change} \\ \midrule \endhead
+21 Oct 2026 & \textbf{Geometry bound (D-32, approved by the owner):} a column / beam / wall coordinate that is not
+finite, or a structure wider than 1000 m (raw drawing: more than $10^6$ units), is an input error before any
+calculation (Section~\ref{sec:dxf}). Found by the DXF fuzz tests: a line $10^{11}$ units long made the automatic column
+placement create $3\times10^8$ nodes (OOM, N50) or a design with $V_B\approx8\times10^{14}$ kN. Non-finite design forces
+now stop the design instead of passing a column (N51) or reading as an input error (N52); Section~\ref{sec:edge}. No formula
+changed. Tests 1029 passed, 3 skipped, 3 xfailed. \\
 20 Oct 2026 (evening) & D-28 and the N46 fix approved by the owner. \textbf{N46 fixed:} the half beam width of each
 adjacent thicker panel is taken off the beam web (beam loads, column takedown, seismic weight; Section 4).
 \textbf{D-29 (owner request):} columns in 230 mm wall lines get a 230 mm side, within the code limits (Section 7.3).
@@ -532,6 +538,12 @@ $\Rightarrow$ millimetres if coordinates exceed 500 (WARN).
 duplicate and zero-length beams dropped; loose ends reported.
 \item Wall thickness: most frequent perpendicular gap 75--500 mm between parallel overlapping lines ($\ge0.1$ m),
 unit-aware; 230 mm if none.
+\item \textbf{Geometry bound (D-32, 21 Oct 2026):} before any framing, every column / beam / wall coordinate must be
+finite and the raw geometry must span at most $10^6$ drawing units (1000 m even in millimetres, the most permissive
+unit); after the units, the structure must span at most $L_\text{max}=1000$ m in $X$ and in $Y$ (the same bound that
+decides whether \$INSUNITS is plausible). Otherwise a clear input error naming the extent; nothing is designed.
+Only the extent is bounded: survey coordinates far from the origin are accepted. (A line $10^{11}$ units long made the
+automatic column placement create $3\times10^8$ nodes, N50.)
 \item No column found $\Rightarrow$ automatic column placement from walls; nothing usable $\Rightarrow$ clear input
 error.
 \item \textbf{Drawing vs design:} columns drawn at a size other than the designed one give a WARN listing drawn and
@@ -540,7 +552,7 @@ designed sizes (e.g.\ 230$\times$230 drawn, 300$\times$450 designed).
 reported (the area may be missing its columns / beams).
 \end{itemize}
 
-\section{Other edge cases and fallbacks}
+\section{Other edge cases and fallbacks}\label{sec:edge}
 \begin{longtable}{L{56mm}L{108mm}}
 \toprule \textbf{Situation} & \textbf{Behaviour} \\ \midrule \endhead
 No SBC entered & run blocked (no default) \\
@@ -558,6 +570,11 @@ Room label outside the structure read & note on the Setup page \\
 Layer role changed by the engineer & results marked out of date \\
 Beam deflection without analysis load & not evaluated (no assumed load) \\
 Floors without torsional restraint & translation-only sharing (WARN) \\
+Non-finite coordinate, or structure wider than 1000 m & input error before any calculation (D-32) \\
+Non-finite design force (NaN / $\infty$) in a column or beam check & design stops with a numerical error
+(\code{FloatingPointError}); never a pass, never an input error (N51, N52) \\
+Non-finite $W$ or $V_B$ & FAIL ``Numerical failure'' \\
+$P_u$ outside the interaction diagram ($P_u>P_{uz}$) & ratio $\infty$, FAIL; message gives $P_u$ and $P_{uz}$ \\
 Gross stiffness selected & WARN (6.4.3.1) \\
 BBS & one typical floor and ground-storey columns; default bars when a description cannot be parsed (KD-21) \\
 \bottomrule

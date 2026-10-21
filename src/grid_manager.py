@@ -8,6 +8,37 @@ from .logging_config import get_logger
 
 logger = get_logger(__name__)
 
+# Largest plan dimension StructOptima handles, the same plausibility bound used to accept DXF $INSUNITS
+# (cad_loader / dxf_layers): geometry beyond it is a drawing or unit error, not a building
+MAX_PLAN_EXTENT_M = 1000.0
+
+
+def check_plan_geometry(gm: "GridManager", beams: list) -> None:
+    """Raise ``ValueError`` (an input error the user can fix) when the columns, beams and walls have a non-finite
+    coordinate or span more than ``MAX_PLAN_EXTENT_M``: nothing is designed from such geometry (a stray line far
+    from the building made beams and walls kilometres long and the building weight absurd)."""
+    pts = [("column " + c.id, c.x, c.y) for c in gm.columns]
+    for b in beams:
+        for p in (b.start_point, b.end_point):
+            if p is not None:
+                pts.append(("beam " + b.id, p.x, p.y))
+    for w in gm.walls:
+        pts += [("wall " + w.id, w.start_x, w.start_y), ("wall " + w.id, w.end_x, w.end_y)]
+    for name, x, y in pts:
+        if not (math.isfinite(x) and math.isfinite(y)):
+            raise ValueError(f"The {name} has an invalid coordinate ({x}, {y}): the drawing or model is damaged. "
+                             f"Correct it and load it again.")
+    if not pts:
+        return
+    for axis in (1, 2):
+        lo, hi = min(pts, key=lambda p: p[axis]), max(pts, key=lambda p: p[axis])
+        if hi[axis] - lo[axis] > MAX_PLAN_EXTENT_M:
+            raise ValueError(
+                f"The structure spans {hi[axis] - lo[axis]:,.0f} m in {'XY'[axis - 1]} (from the {lo[0]} to the "
+                f"{hi[0]}); StructOptima handles plans up to {MAX_PLAN_EXTENT_M:.0f} m. A line is probably drawn far "
+                f"from the building or the drawing units are wrong: check the drawing extents and units.")
+
+
 class Column(BaseModel):
     id: str
     x: float

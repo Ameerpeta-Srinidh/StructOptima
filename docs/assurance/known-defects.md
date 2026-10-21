@@ -1,6 +1,6 @@
 # Known Defects and Open Issues
 
-**As of:** 2026-10-20. Current behaviour that is known to be wrong, incomplete or
+**As of:** 2026-10-21. Current behaviour that is known to be wrong, incomplete or
 risky after the 2026-10 remediation. For engineering simplifications see
 [../engineering/limitations.md](../engineering/limitations.md); for the full
 history see [risk-register.md](risk-register.md).
@@ -35,4 +35,7 @@ history see [risk-register.md](risk-register.md).
 | KD-26 | DXF beams get an initial 300 × 600 mm section (plan drawings carry no beam size); width is kept, depth is designed | L | Known | Enter beam widths from the architectural drawing (future input) |
 | KD-27 | Circular columns are designed as squares of equal area (warning shown) | M | Known | Design circular columns separately |
 | KD-28 | Imposed loads on corridors, stairs and balconies, wind k3 / k4, cantilever lateral stability limits not modelled | M | Open | See standards register GAP rows |
+| KD-29 | A column whose factored axial load is outside its interaction diagram (Pu > Puz) keeps interaction ratio `inf` in the schedule (FAIL with a readable warning since 2026-10-21); `tests/invariants.py` G4 flags any non-finite number, so such a design (valid input, overloaded column at the size cap) breaks the invariant | L | Known | Owner decision on the representation (e.g. ratio None + flag); not changed because it is an interface change |
+| KD-30 | Plans wider than 1000 m (D-32) and drawings spanning more than 10^6 drawing units are rejected as input errors; a site plan drawn on a structural (wall / beam / column) layer far from the building is rejected too | L | Known (by design) | Move or remove the far geometry, or set its layer to 'ignore' on the Setup page |
+| KD-31 | The auto-framer still guesses millimetres from coordinate size and clusters nodes in O(n^2); the geometry check bounds the nodes to at most 200 per wall (memory), but many long walls can still make the clustering slow (time not bounded; not measured) | L | Known | Use the drawing unit and a spatial grid when the auto-framer is next changed |
 

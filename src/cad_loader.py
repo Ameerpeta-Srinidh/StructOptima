@@ -2,7 +2,7 @@ from typing import List, Tuple, Dict, Optional
 import math
 import re
 from .cad_parser import CADParser
-from .grid_manager import GridManager, Column
+from .grid_manager import GridManager, Column, MAX_PLAN_EXTENT_M, check_plan_geometry
 from .framing_logic import StructuralMember, Point, MemberProperties
 from .logging_config import get_logger
 
@@ -62,7 +62,8 @@ class CADLoader:
         raw_cols = []
         raw_beams = []
         placement_result = None
-        
+        self._check_raw_extent()
+
         if auto_frame:
             from .auto_framer import AutoFramer
             from .column_placer import ColumnPlacer
@@ -163,7 +164,7 @@ class CADLoader:
         unit_scale = self.parser.get_unit_scale()
         units_known = unit_scale is not None
         extent = max((max(xs) - min(xs)), (max(ys) - min(ys))) if xs and ys else 0.0
-        if units_known and extent > 0 and not (1.0 <= extent * unit_scale <= 1000.0):
+        if units_known and extent > 0 and not (1.0 <= extent * unit_scale <= MAX_PLAN_EXTENT_M):
             # Declared unit contradicts the geometry (e.g. ezdxf default $INSUNITS=6 on a
             # millimetre drawing): fall back to the size heuristic and warn.
             self.load_warnings.append(
@@ -360,9 +361,34 @@ class CADLoader:
             self.load_warnings.append("No beams found in the DXF (no BEAM layer): beams will be generated along "
                                       "all column grid lines.")
         self.load_warnings.extend(self._labels_outside_structure(gm, beams, ox, oy))
-        
+        check_plan_geometry(gm, beams)
+
         return gm, beams
-    
+
+    # smallest length unit a drawing is read in (millimetres, CADParser.INSUNITS_TO_M / the size heuristic)
+    MIN_UNIT_M = 0.001
+
+    def _check_raw_extent(self) -> None:
+        """Before any framing: every column / beam / wall coordinate is finite, and the geometry spans no more than
+        MAX_PLAN_EXTENT_M even if the drawing is in millimetres (the units are not known yet). The auto-framer puts a
+        node every 5 m along each wall: a stray line 10^11 units long made 3 x 10^8 nodes and exhausted the memory."""
+        p = self.parser
+        pts = [(c["x"], c["y"]) for c in p.extract_columns()]
+        pts += [pt for b in p.extract_beams() for pt in (b["start"], b["end"])]
+        pts += [tuple(pt) for seg in p.extract_walls() for pt in seg]
+        if not pts:
+            return
+        if not all(math.isfinite(v) for pt in pts for v in pt[:2]):
+            raise ValueError("The drawing has a column, beam or wall with an invalid (infinite or undefined) "
+                             "coordinate: the file is damaged. Save it again from the CAD program.")
+        extent = max(max(pt[i] for pt in pts) - min(pt[i] for pt in pts) for i in (0, 1))
+        if extent * self.MIN_UNIT_M > MAX_PLAN_EXTENT_M:
+            raise ValueError(
+                f"The columns, beams and walls in the drawing span {extent:.3g} drawing units: more than "
+                f"{MAX_PLAN_EXTENT_M:.0f} m even if the drawing is in millimetres. A line is probably drawn far "
+                f"from the building (or has a damaged coordinate): zoom to the drawing extents in the CAD program, "
+                f"remove it and upload the drawing again.")
+
     ROOM_LABEL = re.compile(r"^(?=(?:.*[A-Za-z]){3})[A-Za-z][A-Za-z0-9 .&/'()-]*$")
     COLUMN_MARK = re.compile(r"^(C|COL|P)[-_ ]?\d+[A-Z]?$", re.I)
 
