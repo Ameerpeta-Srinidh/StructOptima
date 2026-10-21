@@ -24,14 +24,17 @@ Each entry states what changed, why, the evidence (tests actually run) and what 
 - **Drafting habits (N61–N64):** MINSERT column arrays read in full; a beam line drawn through several columns is
   one beam per span; columns drawn as four LINEs read (D-39); frozen / off layers not read (D-40); overlapping
   outlines merged (D-41); curved beams warned; NaN coordinates refused.
+- **Design inputs validated (N65, D-42):** every caller of the design (Setup page, CLI, API) gets one clear input
+  error for values outside the Setup page ranges; before, negative storeys, fy = 0 or an unknown soil crashed and
+  SBC <= 0 was designed. UI tests feed damaged, degenerate, rotated and unitless drawings to the Setup page.
 - **Decisions taken under the owner's delegation (engineer review pending):** D-33 a slab panel is required; D-34
   rotated plans are rotated back to the axes; D-35 drawing units inferred from the columns; D-36 circular columns on
   unnamed layers need two members framing in; D-37 column orientation rule deferred (needs a new hand check); D-38
   a column beyond capacity is shown as "beyond capacity", never as a number.
 - **Testing:** `tests/run_suite.py` runs every file sequentially under a memory cap (CLAUDE.md resource rules);
   nightly CI job with 300 random buildings and 300 random drawings (not yet observed running).
-- **Evidence:** full sequential run 1167 passed, 3 skipped, 3 xfailed, 0 failed; 30 of the corpus tests fail on the
-  code before the corpus fixes. New documents: `docs/engineering/supported-inputs.md`, `docs/assurance/readiness-gates.md`.
+- **Evidence:** full sequential run 1222 passed, 3 skipped, 3 xfailed, 0 failed; 1000 random DXF buildings passed;
+  30 of the corpus tests fail on the code before the corpus fixes. New documents: `docs/engineering/supported-inputs.md`, `docs/assurance/readiness-gates.md`.
 - **Open:** column orientation under plan rotation (N49 / D-37); engineer review of D-32–D-38; readiness gate H.
 
 ---

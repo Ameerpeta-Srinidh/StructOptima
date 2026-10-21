@@ -96,6 +96,51 @@ class DesignInputs:
     le_factor: float = 1.0
     project_name: str = "Project"
 
+    def validate(self) -> None:
+        """Raise InvalidInputError listing every input outside the supported domain (D-42: the Setup page ranges;
+        callers of run_design other than the page - CLI, tests, API - passed values that crashed the design
+        (negative storeys, fy = 0, unknown soil, no iteration) or were designed as nonsense (SBC <= 0, M99))."""
+        bad = []
+
+        def num(name, lo, hi, integer=False):
+            v = getattr(self, name)
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or not lo <= v <= hi \
+                    or (integer and int(v) != v):
+                bad.append(f"{name} = {v!r} (allowed {lo} to {hi}{', whole number' if integer else ''})")
+
+        def one_of(name, allowed):
+            if getattr(self, name) not in allowed:
+                bad.append(f"{name} = {getattr(self, name)!r} (allowed {', '.join(map(str, allowed))})")
+
+        num("num_stories", 1, 50, integer=True)
+        num("story_height_m", 2.4, 6.0)
+        num("wall_load_kn_m", 0.0, 50.0)
+        num("sbc_kn_m2", 50.0, 1000.0)
+        one_of("conc_grade", SUPPORTED_CONCRETE)
+        one_of("fy", SUPPORTED_STEEL_FY)
+        one_of("seismic_zone", ("II", "III", "IV", "V"))
+        one_of("soil_type", ("I", "II", "III"))
+        one_of("structural_system", ("OMRF", "SMRF"))
+        if self.importance_factor is not None:
+            num("importance_factor", 1.0, 1.5)
+        num("wind_opening_percentage", 0.0, 100.0)
+        num("wall_core_thickness_mm", 75.0, 300.0)
+        one_of("mortar_ratio", (3, 4, 5, 6))
+        num("wall_opening_fraction", 0.0, 0.5)
+        num("max_iterations", 1, 20, integer=True)
+        num("le_factor", 0.5, 3.0)
+        if bad:
+            raise InvalidInputError("Design inputs outside the supported range: " + "; ".join(bad) + ".")
+
+
+class InvalidInputError(ValueError):
+    """A design input outside the supported domain (shown as an input problem)."""
+
+
+# concrete grades with IS 456 Table 19 / 20 values (M20 = Table 5 minimum for RC) and steel grades of the design
+SUPPORTED_CONCRETE = ("M20", "M25", "M30", "M35", "M40")
+SUPPORTED_STEEL_FY = (415.0, 500.0)
+
 
 @dataclass
 class DesignResults:
@@ -400,6 +445,7 @@ def run_design(gm: GridManager, beams: list, inputs: DesignInputs) -> DesignResu
     from .seismic import check_soft_storeys, evaluate_joint_checks, run_seismic_check
     from .rebar_detailer import RebarDetailer  # noqa: F401
     messages: List[str] = []
+    inputs.validate()                        # input error before any calculation (D-42)
     check_plan_geometry(gm, beams)          # input error before any calculation (non-finite / km-long geometry)
 
     lp = get_load_parameters(inputs.building_type_name)

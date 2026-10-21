@@ -34,6 +34,9 @@ preliminary design (CLAUDE.md, [limitations](limitations.md)).
 | Exposure / NBC type | all five / 1-4 | all |
 | SBC | 50-1000 kN/m2 (required, no default) | 150-200 |
 
+Values outside these ranges are refused before any calculation by every caller (Setup page, CLI, API; D-42).
+Concrete M35 / M40 are accepted but not covered by the design matrix (Not verified).
+
 ## DXF drawings
 
 | Convention | Level | Evidence |

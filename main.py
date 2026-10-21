@@ -75,7 +75,13 @@ def main(argv=None) -> int:
         structural_system=args.system, wind_zone=WindZone(args.wind_zone),
         terrain_category=TerrainCategory(args.terrain),
         project_name=os.path.basename(args.cad) if args.cad else f"{args.width}x{args.length}m grid")
-    res = run_design(gm, beams, inputs)
+    from src.design_pipeline import InvalidInputError
+    from src.grid_manager import InvalidStructureError
+    try:
+        res = run_design(gm, beams, inputs)
+    except (InvalidInputError, InvalidStructureError) as e:
+        logger.error("Input problem: %s", e)
+        return 2
 
     bom = res.bom
     logger.info("Design status: %s (%d failing, %d warnings, %d iterations, converged=%s)", res.status,

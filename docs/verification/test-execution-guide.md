@@ -51,8 +51,9 @@ A file can be in several layers. A new test file is reported as *unclassified* u
 
 ## Measured cost per file (2026-10-21 final run, sequential, runner)
 
-Full run (after RM-41): 53 files, **1167 passed, 0 failed, 0 errors, 3 skipped, 3 xfailed**, 470 s of test processes.
-Peak resident memory per test process: ≤ 367 MB. Files over 5 s or 200 MB:
+Full run (after RM-42): 55 files, **1222 passed, 0 failed, 0 errors, 3 skipped, 3 xfailed**, 476 s of test processes.
+Peak resident memory per test process: ≤ 367 MB. `STRUCTOPTIMA_CORPUS_N=1000` (random DXF buildings only,
+`-- -k random`): 1002 passed in 767 s, 170 MB. Files over 5 s or 200 MB:
 
 | File | Tests | Wall (s) | Peak RSS (MB) |
 |---|---|---|---|

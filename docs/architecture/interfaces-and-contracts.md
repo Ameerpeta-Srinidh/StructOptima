@@ -20,7 +20,8 @@ Preconditions: `gm` has grid lines and columns stacked for `inputs.num_stories`
 `beams` are plan beams (one per bay side); may be empty (generated).
 Side effects: mutates `gm` (loads, sizes, schedules) and `beams` (sizes,
 envelopes). No files are written.
-Raises `grid_manager.InvalidStructureError` (a `ValueError`) before any calculation when
+Raises `design_pipeline.InvalidInputError` (a `ValueError`) first when `inputs.validate()` finds an input outside the
+supported domain (D-42). Raises `grid_manager.InvalidStructureError` (a `ValueError`) before any calculation when
 `grid_manager.check_plan_geometry(gm, beams)` fails (also: columns all on one line, D-33) or when no slab panel is
 enclosed by the columns / beams / drawn walls (checked before walls are generated); the Setup page shows it as an
 input problem. Otherwise it raises `ValueError` before any calculation when `check_plan_geometry` fails

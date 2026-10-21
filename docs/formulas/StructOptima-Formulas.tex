@@ -59,8 +59,8 @@ warnings, outputs broken by a column beyond capacity. Decisions taken under the 
 a slab panel is required), D-34 (rotated plans), D-35 (unit inference), D-36 (circular columns), D-37 (column
 orientation deferred), D-38 (``beyond capacity'' display); Section~\ref{sec:dxf}, Section~\ref{sec:edge}. No formula
 changed. Drafting habits (N61--N64): MINSERT arrays, beam lines through several columns, NaN coordinates,
-columns drawn as lines (D-39), frozen layers (D-40), overlapping outlines (D-41). Tests 1167 passed, 3 skipped,
-3 xfailed. \\
+columns drawn as lines (D-39), frozen layers (D-40), overlapping outlines (D-41). Design inputs validated (D-42).
+Tests 1222 passed, 3 skipped, 3 xfailed; 1000 random DXF buildings passed. \\
 21 Oct 2026 & \textbf{Geometry bound (D-32, approved by the owner):} a column / beam / wall coordinate that is not
 finite, or a structure wider than 1000 m (raw drawing: more than $10^6$ units), is an input error before any
 calculation (Section~\ref{sec:dxf}). Found by the DXF fuzz tests: a line $10^{11}$ units long made the automatic column
@@ -595,6 +595,8 @@ Layer role changed by the engineer & results marked out of date \\
 Beam deflection without analysis load & not evaluated (no assumed load) \\
 Floors without torsional restraint & translation-only sharing (WARN) \\
 Non-finite coordinate, or structure wider than 1000 m & input error before any calculation (D-32) \\
+Design input outside the Setup page ranges (storeys 1--50, storey 2.4--6 m, SBC 50--1000, M20--M40, Fe415 / Fe500,
+\dots) from any caller & input error before any calculation (D-42) \\
 Columns all on one line, or no slab panel enclosed by the drawn columns / beams / walls & input error (D-33) \\
 Floor without rotational mass in the 3D model & translation-only sharing (WARN), no torsion \\
 Non-finite design force (NaN / $\infty$) in a column or beam check & design stops with a numerical error

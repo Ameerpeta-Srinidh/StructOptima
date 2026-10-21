@@ -35,7 +35,7 @@ GIB = 1024 ** 3
 # Test layers (a file may be in several). New test files not listed here still run with --layer all and are
 # reported as unclassified so that the table is kept up to date.
 LAYERS = {
-    "unit": ["test_materials", "test_bbs_module", "test_grid_manager", "test_cad_parser", "test_wall_design",
+    "unit": ["test_input_validation", "test_materials", "test_bbs_module", "test_grid_manager", "test_cad_parser", "test_wall_design",
              "test_estimation_refinements", "test_dxf_exporter", "test_site_tools", "test_new_modules",
              "test_risk_management", "test_risk_safeguards", "test_ui_tables", "test_column_editor",
              "test_column_placer", "test_beam_placer", "test_audit", "test_member_design", "test_analysis_config",
@@ -48,8 +48,10 @@ LAYERS = {
                     "test_pseudo3d", "test_lateral_sharing", "test_drift", "test_foundation_eng", "test_load_modeling",
                     "test_wall_width_columns"],
     "integration": ["test_pipeline_e2e", "test_realistic_buildings", "test_drawings", "test_streamlit_app",
+                    "test_ui_dxf_inputs",
                     "test_ui_tables", "test_new_modules"],
-    "regression": ["test_audit_findings", "test_geometry_validation", "test_dxf_robustness", "test_dxf_corpus",
+    "regression": ["test_audit_findings", "test_geometry_validation", "test_input_validation", "test_dxf_robustness",
+                   "test_dxf_corpus",
                    "test_invariants",
                    "test_metamorphic", "test_design_matrix"],
     "reference": ["test_hand_check_complex_house", "test_sp16_benchmarks", "test_fea_benchmarks", "test_is456_tables",
