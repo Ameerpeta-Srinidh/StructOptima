@@ -28,6 +28,15 @@ def is_beam_layer(name: str) -> bool:
     t = layer_tokens(name)
     return any(x in BEAM_TOKENS for x in t) and not any(x in ANNOTATION_TOKENS for x in t)
 
+class _Messages(list):
+    """Warnings list that keeps each message once: the extractors are called more than once per load (raw extent
+    check, rotation check, the load itself) and used to repeat their warnings."""
+
+    def append(self, msg):
+        if msg not in self:
+            super().append(msg)
+
+
 class CADParser:
     """
     Parses DXF files to extract structural geometry.
@@ -50,7 +59,7 @@ class CADParser:
         self.doc = None
         self.msp = None
         self._flat_cache = None
-        self.warnings: List[str] = []   # user-facing parsing warnings (audit finding R17)
+        self.warnings: List[str] = _Messages()   # user-facing parsing warnings (audit finding R17)
         
         # Default layer mapping
         self.layer_map = {
@@ -79,7 +88,23 @@ class CADParser:
                                  f"({len(auditor.fixes)} fix(es), {len(auditor.errors)} error(s)): check the preview "
                                  f"against the drawing.")
         self.msp = self.doc.modelspace()
+        self._upright(self.msp)
         logger.info("Loaded %s", self.filepath)
+
+    @staticmethod
+    def _upright(entities) -> None:
+        """Entities with an inverted extrusion (0, 0, -1) - mirrored blocks, MIRROR in some CAD programs - store
+        their points in an object coordinate system whose x runs the other way; the readers use the stored
+        coordinates as plan coordinates, so such columns were read mirrored about the origin (corpus seed 17).
+        Rewritten as the equivalent entity with extrusion (0, 0, 1)."""
+        from ezdxf.upright import upright
+        for e in entities:
+            ext = e.dxf.get("extrusion", None) if e.dxf.is_supported("extrusion") else None
+            if ext is not None and ext[2] < 0:
+                try:
+                    upright(e)
+                except Exception:  # noqa: BLE001 - unsupported type: left as is (not a column / beam / wall type)
+                    pass
 
     # DXF $INSUNITS codes -> metres per drawing unit
     INSUNITS_TO_M = {1: 0.0254, 2: 0.3048, 4: 0.001, 5: 0.01, 6: 1.0}
@@ -143,6 +168,7 @@ class CADParser:
                 continue
             try:
                 virtual = list(e.virtual_entities())
+                self._upright(virtual)
             except Exception as ex:   # non-uniform scaling of some entity types etc.
                 self.warnings.append(f"Block '{name}' could not be exploded ({ex}): its contents were not read.")
                 continue
@@ -166,7 +192,7 @@ class CADParser:
         (drawing units)."""
         if self._mixed_cache is not None:
             return self._mixed_cache
-        out = {"columns": [], "beams": [], "walls": []}
+        out = {"columns": [], "circles": [], "beams": [], "walls": []}
         mixed = {n for n, r in self.roles().items() if r == "mixed"}
         if mixed:
             from .dxf_layers import _Geometry
@@ -174,14 +200,15 @@ class CADParser:
             centres = []
             for n, d in g.by_layer.items():
                 if n in mixed or self.role_of(n) == "column":
-                    for o in d["outlines"]:
-                        if g.column_sized(o):
-                            centres.append((o["x"], o["y"], 0.5 * max(o["w"], o["d"]), min(o["w"], o["d"])))
+                    circles = d["circles"] if self.role_of(n) == "column" else g.framed_circles(d["circles"])
+                    for o in [o for o in d["outlines"] if g.column_sized(o)] + circles:
+                        centres.append((o["x"], o["y"], 0.5 * max(o["w"], o["d"]), min(o["w"], o["d"])))
             for n in mixed:
                 d = g.by_layer.get(n)
                 if not d:
                     continue
                 out["columns"] += [o for o in d["outlines"] if g.column_sized(o)]
+                out["circles"] += g.framed_circles(d["circles"])
                 for o in d["outlines"]:
                     if not g.column_sized(o):
                         d["segs"] += list(zip(o["pts"], o["pts"][1:] + o["pts"][:1]))
@@ -281,7 +308,7 @@ class CADParser:
         if entity.dxftype() == 'LWPOLYLINE':
             points = self._lwpoly_xy(entity)
         elif entity.dxftype() == 'POLYLINE':
-            points = [v.dxf.location[:2] for v in entity.vertices]
+            points = [(v.dxf.location.x, v.dxf.location.y) for v in entity.vertices]
         else:
             return (0.0, 0.0)
 
@@ -324,6 +351,10 @@ class CADParser:
         for o in self._mixed()["columns"]:
             w, d, ang, cx, cy = self._rect_dims(o["pts"])
             found.append({"x": cx, "y": cy, "width": w, "depth": d, "orientation_deg": ang, "shape": "rect"})
+        for c in self._mixed()["circles"]:              # circular columns on "decide by shape" layers (D-36)
+            side = 0.886 * c["w"]
+            found.append({"x": c["x"], "y": c["y"], "width": side, "depth": side, "orientation_deg": 0.0,
+                          "shape": "circle", "diameter": c["w"]})
         for e in self._flat():
             if self.role_of(e.dxf.get("layer", "0")) != "column":
                 continue
@@ -433,7 +464,7 @@ class CADParser:
                     for i in range(len(points) - 1): found.append((points[i], points[i+1]))
                     if ply.is_closed and len(points) > 2: found.append((points[-1], points[0]))
                 for ply in self._by_type_and_layer('POLYLINE', layer):
-                    points = [v.dxf.location[:2] for v in ply.vertices]
+                    points = [(v.dxf.location.x, v.dxf.location.y) for v in ply.vertices]
                     for i in range(len(points) - 1): found.append((points[i], points[i+1]))
                     if ply.is_closed and len(points) > 2: found.append((points[-1], points[0]))
             return found
@@ -488,7 +519,7 @@ class CADParser:
                     if entity.dxftype() == 'LWPOLYLINE':
                         pts = self._lwpoly_xy(entity)
                     else:
-                        pts = [v.dxf.location[:2] for v in entity.vertices]
+                        pts = [(v.dxf.location.x, v.dxf.location.y) for v in entity.vertices]
                     for i in range(len(pts)-1):
                         seg_len = math.hypot(pts[i+1][0]-pts[i][0], pts[i+1][1]-pts[i][1])
                         if seg_len > min_len:

@@ -17,6 +17,8 @@ import math
 import os
 from typing import Dict, List, Optional
 
+from .rebar_detailer import interaction_ratio_value
+
 _BUNDLE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                        "components", "viewer3d", "dist", "viewer.js")
 
@@ -53,7 +55,7 @@ def build_scene(gm, beams, footings, marks=None) -> Dict:
                           {"Mark": marks.columns.get(c.id), "Size (mm)": f"{c.width_nb:.0f} x {c.depth_nb:.0f}",
                            "Main bars": r.main_bars_desc if r else None, "Ties": r.links_desc if r else None,
                            "Governing combination": r.governing_combo if r else None,
-                           "Interaction ratio": round(float(r.interaction_ratio), 3) if r else None,
+                           "Interaction ratio": interaction_ratio_value(r.interaction_ratio, 3) if r else None,
                            "Service load (kN)": round(float(c.load_kn), 1)}))
 
     panels = list(zip(gm.slab_panels(), gm.slab_schedule.items()))

@@ -6,6 +6,7 @@ from .grid_manager import GridManager, Column
 from .foundation_eng import Footing
 from .materials import Concrete
 from .framing_logic import StructuralMember, Point
+from .rebar_detailer import format_interaction_ratio
 
 def beam_utilisation(grid_mgr, beam_id: str):
     """(utilisation, status) of a designed beam: max of Ast,req / Ast,prov (top,
@@ -268,7 +269,7 @@ class Visualizer:
                     line=dict(color=c_color, width=col_width),
                     name=f'{col.id}',
                     showlegend=False,
-                    hovertext=(f"ID: {col.id}<br>Interaction ratio: {ratio:.2f}<br>Status: {_cr.status}"
+                    hovertext=(f"ID: {col.id}<br>Interaction ratio: {format_interaction_ratio(_cr.interaction_ratio)}<br>Status: {_cr.status}"
                                if _cr is not None else f"ID: {col.id}<br>Not designed")
                 ))
 

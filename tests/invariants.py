@@ -77,6 +77,12 @@ def design_violations(res, inputs) -> List[str]:
         _finite(f"column {c.id}", c, v)
     for name, sched in (("column", gm.rebar_schedule), ("beam", gm.beam_schedule), ("slab", gm.slab_schedule)):
         for k, r in sched.items():
+            if name == "column" and not math.isfinite(getattr(r, "interaction_ratio", 0.0)):
+                # D-38: an infinite ratio means Pu outside the interaction diagram - allowed only as a FAIL that says so
+                if r.interaction_ratio != math.inf or r.status != "FAIL" or \
+                        not any("outside the interaction diagram" in w for w in r.warnings):
+                    v.append(f"G4: column schedule {k}.interaction_ratio = {r.interaction_ratio} ({r.status})")
+                r = r.model_copy(update={"interaction_ratio": 0.0})
             _finite(f"{name} schedule {k}", r, v)
     for f in res.footings:
         _finite(f"footing {f.id}", f, v)

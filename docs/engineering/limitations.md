@@ -43,6 +43,11 @@
   Circular columns become equal-area squares (warned). Beam sizes are not read (initial 300 × 600). When no layer is
   recognised as walls, lines of unrecognised layers are used as walls (warned). Auto-framing assumes drawings in
   millimetres.
+- DXF reading since 2026-10-21: drawings without a usable $INSUNITS get the unit under which they look like a building
+  (D-35, warned; inch / cm can be ambiguous, KD-33); a plan rotated by one angle is rotated back to the axes (D-34);
+  mirrored entities are read correctly (N53); circular columns on unnamed layers need two members framing in (D-36,
+  KD-32); columns on one line or without an enclosed slab panel are refused (D-33). What is supported:
+  [supported-inputs.md](supported-inputs.md).
 - Drawings whose `$INSUNITS` disagree with the geometry are detected only when the resulting extent is outside 1–1000 m.
 - Plans wider than 1000 m and drawings whose columns / beams / walls span more than 10^6 drawing units (1 km even in
   millimetres) are rejected as input errors (D-32, 2026-10-21), including far geometry on a structural layer.

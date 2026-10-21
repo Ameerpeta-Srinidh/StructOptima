@@ -13,6 +13,10 @@ logger = get_logger(__name__)
 MAX_PLAN_EXTENT_M = 1000.0
 
 
+class InvalidStructureError(ValueError):
+    """The geometry is not a structure StructOptima designs (an input the user can fix, not a calculation error)."""
+
+
 def check_plan_geometry(gm: "GridManager", beams: list) -> None:
     """Raise ``ValueError`` (an input error the user can fix) when the columns, beams and walls have a non-finite
     coordinate or span more than ``MAX_PLAN_EXTENT_M``: nothing is designed from such geometry (a stray line far
@@ -26,14 +30,21 @@ def check_plan_geometry(gm: "GridManager", beams: list) -> None:
         pts += [("wall " + w.id, w.start_x, w.start_y), ("wall " + w.id, w.end_x, w.end_y)]
     for name, x, y in pts:
         if not (math.isfinite(x) and math.isfinite(y)):
-            raise ValueError(f"The {name} has an invalid coordinate ({x}, {y}): the drawing or model is damaged. "
+            raise InvalidStructureError(f"The {name} has an invalid coordinate ({x}, {y}): the drawing or model is damaged. "
                              f"Correct it and load it again.")
     if not pts:
         return
+    base = [c for c in gm.columns if c.level == 0] or gm.columns
+    if base and (len({round(c.x, 3) for c in base}) < 2 or len({round(c.y, 3) for c in base}) < 2):
+        # D-33: StructOptima designs frames carrying floor slabs; columns on one line enclose no slab panel (and
+        # give a floor without rotational mass: the 3D dynamic model has no solution)
+        raise InvalidStructureError(f"The {len(base)} column(s) read all lie on one line, so they enclose no floor slab. "
+                         f"StructOptima designs frame buildings with slabs: at least one bay needs columns on two grid "
+                         f"lines in each direction. Check that every column is on a column layer.")
     for axis in (1, 2):
         lo, hi = min(pts, key=lambda p: p[axis]), max(pts, key=lambda p: p[axis])
         if hi[axis] - lo[axis] > MAX_PLAN_EXTENT_M:
-            raise ValueError(
+            raise InvalidStructureError(
                 f"The structure spans {hi[axis] - lo[axis]:,.0f} m in {'XY'[axis - 1]} (from the {lo[0]} to the "
                 f"{hi[0]}); StructOptima handles plans up to {MAX_PLAN_EXTENT_M:.0f} m. A line is probably drawn far "
                 f"from the building or the drawing units are wrong: check the drawing extents and units.")

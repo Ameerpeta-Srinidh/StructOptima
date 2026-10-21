@@ -51,13 +51,14 @@ A file can be in several layers. A new test file is reported as *unclassified* u
 
 ## Measured cost per file (2026-10-21 final run, sequential, runner)
 
-Full run: 52 files, **1029 passed, 0 failed, 0 errors, 3 skipped, 3 xfailed**, 428 s of test processes. Peak resident memory per
-test process: ≤ 308 MB. Files over 5 s or 200 MB:
+Full run (after RM-40): 53 files, **1154 passed, 0 failed, 0 errors, 3 skipped, 3 xfailed**, 441 s of test processes.
+Peak resident memory per test process: ≤ 339 MB. Files over 5 s or 200 MB:
 
 | File | Tests | Wall (s) | Peak RSS (MB) |
 |---|---|---|---|
-| `test_design_matrix.py` | 60 | 278 | 133 |
-| `test_dxf_robustness.py` | 113 | 53 | 278 |
+| `test_design_matrix.py` | 60 | 267 | 132 |
+| `test_dxf_corpus.py` | 125 | 33 | 339 |
+| `test_dxf_robustness.py` | 113 | 47 | 279 |
 | `test_streamlit_app.py` | 23 | 13 | 250 |
 | `test_metamorphic.py` | 13 | 14 | 97 |
 | `test_realistic_buildings.py` | 54 | 8 | 94 |
@@ -66,7 +67,8 @@ test process: ≤ 308 MB. Files over 5 s or 200 MB:
 | `test_drawings.py` | 13 | 5 | 246 |
 
 All other files: ≤ 2.1 s and ≤ 120 MB. `STRUCTOPTIMA_FUZZ_N` (default 12) sets the number of random buildings in
-`test_design_matrix.py` (≈ 4 s each); the nightly CI job uses 300.
+`test_design_matrix.py` (≈ 4 s each) and `STRUCTOPTIMA_CORPUS_N` (default 30) the random DXF buildings in
+`test_dxf_corpus.py` (≈ 0.3 s each); the nightly CI job uses 300 of each.
 
 ## Plain pytest (one quick file)
 

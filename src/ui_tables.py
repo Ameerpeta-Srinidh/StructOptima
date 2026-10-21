@@ -9,6 +9,8 @@ Every value comes from the production design results (``DesignResults``, ``GridM
 import re
 from typing import Any, Dict, Iterable, List
 
+from .rebar_detailer import interaction_ratio_value
+
 STATUS_ORDER = {"FAIL": 0, "WARN": 1, "PASS": 2}
 
 BBS_SCOPE = ("The bar bending schedule covers one typical floor: the beams and slab panels of one floor and the "
@@ -51,7 +53,7 @@ def column_rows(gm, marks) -> List[Dict[str, Any]]:
             "Level": col.level,
             "Size (mm)": f"{col.width_nb:.0f} x {col.depth_nb:.0f}",
             "Service load (kN)": round(col.load_kn, 1),
-            "P-M ratio": round(r.interaction_ratio, 2) if r is not None else None,
+            "P-M ratio": interaction_ratio_value(r.interaction_ratio) if r is not None else None,
             "Main bars": r.main_bars_desc if r is not None else "-",
             "Ties": r.links_desc if r is not None else "-",
             "Steel (kg)": round(r.total_steel_weight_kg_per_m * height, 1) if r is not None else None,

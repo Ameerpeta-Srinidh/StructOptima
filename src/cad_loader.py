@@ -63,6 +63,7 @@ class CADLoader:
         raw_beams = []
         placement_result = None
         self._check_raw_extent()
+        self._align_to_axes()
 
         if auto_frame:
             from .auto_framer import AutoFramer
@@ -160,7 +161,6 @@ class CADLoader:
         xs = [c['x'] for c in raw_cols]
         ys = [c['y'] for c in raw_cols]
         
-        max_coord = max(max(abs(x) for x in xs), max(abs(y) for y in ys)) if xs and ys else 0
         unit_scale = self.parser.get_unit_scale()
         units_known = unit_scale is not None
         extent = max((max(xs) - min(xs)), (max(ys) - min(ys))) if xs and ys else 0.0
@@ -169,7 +169,7 @@ class CADLoader:
             # millimetre drawing): fall back to the size heuristic and warn.
             self.load_warnings.append(
                 f"DXF $INSUNITS gives a building extent of {extent * unit_scale:.1f} m, which is implausible; "
-                f"units were inferred from coordinate size instead. Correct the drawing units.")
+                f"units were inferred from the drawing instead. Correct the drawing units.")
             units_known = False
             implausible = True
         else:
@@ -177,12 +177,14 @@ class CADLoader:
         if units_known:
             self.scale_factor = unit_scale
         else:
-            # Unitless drawing: legacy heuristic (|coord| > 500 -> mm), flagged (audit finding R17)
-            self.scale_factor = 0.001 if max_coord > 500 else 1.0
-        if not units_known and not implausible:
+            # Unitless or implausible: the unit under which the drawing looks like a building (D-35, one rule shared
+            # with the layer analysis in dxf_layers.drawing_unit_m)
+            from .dxf_layers import drawing_unit_m
+            self.scale_factor = drawing_unit_m(self.parser)
+        if not units_known:
             self.load_warnings.append(
-                f"DXF has no $INSUNITS: units guessed as {'millimetres' if self.scale_factor == 0.001 else 'metres'} "
-                f"from coordinate size (max {max_coord:.0f}). Set drawing units in the CAD file to avoid scale errors.")
+                f"Drawing units taken as {getattr(self.parser, 'unit_reason', 'guessed')}. Check the dimensions in the "
+                f"preview, and set the drawing units ($INSUNITS) in the CAD file to avoid scale errors.")
         if auto_frame and self.scale_factor != 0.001:
             self.load_warnings.append("Auto-frame column placement assumes a drawing in millimetres; results for other "
                                       "units are unreliable.")
@@ -355,7 +357,7 @@ class CADLoader:
                 ))
             
             logger.info("Extracted %d wall segments (thickness=%.0fmm)", len(gm.walls), wall_thickness)
-            self.load_warnings.extend(self.parser.warnings)
+            self.load_warnings.extend(w for w in self.parser.warnings if w not in self.load_warnings)
 
         if not beams:
             self.load_warnings.append("No beams found in the DXF (no BEAM layer): beams will be generated along "
@@ -365,6 +367,64 @@ class CADLoader:
 
         return gm, beams
 
+    # a plan rotated by less than this is left as drawn (drafting noise; grid clustering absorbs it)
+    MIN_ROTATION_DEG = 0.05
+
+    def _align_to_axes(self) -> None:
+        """A plan drawn rotated (every column outline, or every beam / wall line, at the same angle to the drawing
+        axes, other than a multiple of 90 degrees) is rotated back so that its grid runs along X and Y (D-34). The
+        frames, grid lines and member orientations of the design assume an orthogonal grid; read as drawn, a rotated
+        plan gave every column its own grid line and diagonal beams outside every frame. Plans whose members run in
+        several unrelated directions are not rotated (warned by the parser)."""
+        theta = self._plan_rotation_deg()
+        if theta is None or abs(theta) < self.MIN_ROTATION_DEG:
+            return
+        from ezdxf.math import Matrix44
+        m = Matrix44.z_rotate(math.radians(-theta))
+        failed = []
+        for e in self.parser.msp:
+            try:
+                e.transform(m)
+            except Exception:  # noqa: BLE001 - entity types without a transformation (proxies) are reported
+                failed.append(e)
+        self.parser._flat_cache = None
+        self.parser._mixed_cache = None
+        structural = [e for e in failed if self.parser.role_of(e.dxf.get("layer", "0")) in ("column", "beam", "wall")]
+        if structural:
+            raise ValueError(f"The drawing is rotated by {theta:.2f} degrees and {len(structural)} structural "
+                             f"entit(y/ies) ({structural[0].dxftype()}) could not be rotated back to the axes. "
+                             f"Explode them or draw the plan parallel to the axes.")
+        self.load_warnings.append(
+            f"The plan is drawn rotated by {theta:.2f} degrees: it was rotated back so that the grid runs along X and "
+            f"Y. Coordinates, grid lines and directions in the results refer to the rotated plan.")
+
+    def _plan_rotation_deg(self):
+        """Common angle (degrees, -45 .. 45) of the structure to the drawing axes, or None without a consensus.
+        Column outlines decide when there are at least two rectangular ones (75 % within 0.5 degrees of their
+        median); otherwise beam lines, then wall lines (length-weighted mean of 4 x angle, resultant >= 0.95)."""
+        p = self.parser
+        n_warn = len(p.warnings)
+        try:
+            cols = [c for c in p.extract_columns() if c.get("shape") == "rect"]
+            if len(cols) >= 2:
+                a = sorted(((c["orientation_deg"] + 45.0) % 90.0) - 45.0 for c in cols)
+                med = a[len(a) // 2]
+                near = sum(1 for v in a if abs(((v - med + 45.0) % 90.0) - 45.0) <= 0.5)
+                return med if near >= 0.75 * len(a) else None
+            segs = [(b["start"], b["end"]) for b in p.extract_beams()] or list(p.extract_walls())
+        finally:
+            del p.warnings[n_warn:]                      # re-read after the rotation; keep no stale warnings
+        sx = sy = w = 0.0
+        for (x1, y1), (x2, y2) in segs:
+            ln = math.hypot(x2 - x1, y2 - y1)
+            if ln <= 0:
+                continue
+            t = 4.0 * math.atan2(y2 - y1, x2 - x1)
+            sx, sy, w = sx + ln * math.cos(t), sy + ln * math.sin(t), w + ln
+        if w <= 0 or math.hypot(sx, sy) / w < 0.95:
+            return None
+        return math.degrees(math.atan2(sy, sx)) / 4.0
+
     # smallest length unit a drawing is read in (millimetres, CADParser.INSUNITS_TO_M / the size heuristic)
     MIN_UNIT_M = 0.001
 
@@ -373,9 +433,13 @@ class CADLoader:
         MAX_PLAN_EXTENT_M even if the drawing is in millimetres (the units are not known yet). The auto-framer puts a
         node every 5 m along each wall: a stray line 10^11 units long made 3 x 10^8 nodes and exhausted the memory."""
         p = self.parser
-        pts = [(c["x"], c["y"]) for c in p.extract_columns()]
-        pts += [pt for b in p.extract_beams() for pt in (b["start"], b["end"])]
-        pts += [tuple(pt) for seg in p.extract_walls() for pt in seg]
+        n_warn = len(p.warnings)
+        try:
+            pts = [(c["x"], c["y"]) for c in p.extract_columns()]
+            pts += [pt for b in p.extract_beams() for pt in (b["start"], b["end"])]
+            pts += [tuple(pt) for seg in p.extract_walls() for pt in seg]
+        finally:
+            del p.warnings[n_warn:]                      # the load reads them again (after any rotation)
         if not pts:
             return
         if not all(math.isfinite(v) for pt in pts for v in pt[:2]):

@@ -1,6 +1,6 @@
 # StructOptima — Documentation Index
 
-**Status date:** 2026-10-16
+**Status date:** 2026-10-21
 **Applies to:** `main` after the 2026-10-16 work (see [../CHANGELOG.md](../CHANGELOG.md) for every change)
 
 StructOptima is a Python / Streamlit tool that generates and checks a
@@ -21,7 +21,9 @@ verification by a licensed structural engineer.
 | Architecture & data flow | Documented from source | [architecture/](architecture/system-overview.md) |
 | Engineering calculations | Catalogued; most `UNVERIFIED` against an independent engineer; FEA and several section checks `VERIFIED_FOR_CASES` | [engineering/calculation-catalogue.md](engineering/calculation-catalogue.md), [verification/verification-matrix.md](verification/verification-matrix.md) |
 | Audit findings R1–R27 + N1–N22 | Code changes made for most; **none** marked resolved without engineer review | [assurance/risk-register.md](assurance/risk-register.md) |
-| Test suite | 520 passed, 3 skipped, 0 failed (executed 2026-10-16) | [verification/verification-results.md](verification/verification-results.md) |
+| Test suite | 1154 passed, 3 skipped, 3 xfailed, 0 failed (executed 2026-10-21, `python tests/run_suite.py`) | [verification/verification-results.md](verification/verification-results.md) |
+| What inputs are supported | Supported / partial / not verified / unsupported, with evidence | [engineering/supported-inputs.md](engineering/supported-inputs.md) |
+| Production readiness | **Not production-ready**; gates A-H with evidence | [assurance/readiness-gates.md](assurance/readiness-gates.md) |
 | Standards clause wording | **Not verified against printed standards** | [engineering/standards-register.md](engineering/standards-register.md) |
 
 ## Start here

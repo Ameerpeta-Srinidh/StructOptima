@@ -13,6 +13,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import List
 
+from .rebar_detailer import format_interaction_ratio
+
 
 def calculation_summary(res, project_name: str, engineer_name: str) -> str:
     gm = res.gm
@@ -62,7 +64,7 @@ def calculation_summary(res, project_name: str, engineer_name: str) -> str:
               f"Governing combination: {r.governing_combo}",
               f"Pu = {r.pu_design_kn:.1f} kN, Mux = {r.mux_design_knm:.1f} kNm, Muy = {r.muy_design_knm:.1f} kNm "
               f"(including minimum eccentricity / slenderness moments as designed)",
-              f"Steel {r.steel_percent:.2f} %, interaction ratio {r.interaction_ratio:.3f}, status {r.status}"]
+              f"Steel {r.steel_percent:.2f} %, interaction ratio {format_interaction_ratio(r.interaction_ratio, 3)}, status {r.status}"]
         L += [f"  {m}" for m in r.math_log[:25]]
     L.append("")
 

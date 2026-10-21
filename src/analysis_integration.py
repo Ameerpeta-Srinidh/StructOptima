@@ -472,11 +472,13 @@ def update_structural_analysis(gm: GridManager, beams: List[StructuralMember], f
         from . import pseudo3d as p3
         p3_frames = [p3.Frame(f"{pl}@{cc:.2f}", pl, cc, K) for (pl, cc), K in k_frames.items() if np.any(K)]
         K3 = p3.assemble(p3_frames, N)
-        if p3.is_stable(K3):
+        M3 = p3.mass_matrix(list(seismic.floors)) if seismic is not None and has_eq else None
+        massless = M3 is not None and not p3.has_rotational_mass(M3)
+        if p3.is_stable(K3) and not massless:
             summary.seismic_design["model"] = "3D rigid diaphragm"
             if seismic is not None and has_eq:
                 floors = list(seismic.floors)
-                modal = p3.modes(K3, p3.mass_matrix(floors), floors)
+                modal = p3.modes(K3, M3, floors)
                 summary.seismic_design["modes"] = modal[2]
                 summary.seismic_design["regularity"] = p3.regularity_of_modes(modal[2])
                 static = np.array(seismic.static_forces[:N], dtype=float)
@@ -509,8 +511,11 @@ def update_structural_analysis(gm: GridManager, beams: List[StructuralMember], f
                         summary.lateral_shares.setdefault(cname, {})[key] = [float(v) for v in ff[key]]
         else:
             summary.seismic_design["model"] = "translation only"
-            summary.messages.append("Floors are not restrained against rotation by the frames (fewer than two frame "
-                                    "lines in a direction): storey forces shared in translation only, no torsion")
+            summary.messages.append(
+                "Floors have no rotational mass (no slab panel on some floor): storey forces shared in translation "
+                "only, no torsion" if massless else
+                "Floors are not restrained against rotation by the frames (fewer than two frame "
+                "lines in a direction): storey forces shared in translation only, no torsion")
 
     def seismic_forces(d):
         r = summary.seismic_design.get(d)

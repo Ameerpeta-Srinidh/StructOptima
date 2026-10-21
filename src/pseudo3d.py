@@ -77,6 +77,16 @@ def is_stable(K3: np.ndarray) -> bool:
     return bool(w.min() > 1e-9 * max(1.0, w.max()))
 
 
+def has_rotational_mass(M3: np.ndarray) -> bool:
+    """Every floor has mass in both translations and in rotation (positive definite mass matrix). A floor without
+    slab panels has no rotational inertia: the eigenvalue problem then has no solution (scipy LinAlgError)."""
+    try:
+        np.linalg.cholesky((M3 + M3.T) / 2.0)
+    except np.linalg.LinAlgError:
+        return False
+    return True
+
+
 def static_solve(K3: np.ndarray, F: np.ndarray) -> np.ndarray:
     return np.linalg.solve(K3, F)
 

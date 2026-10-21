@@ -21,6 +21,7 @@ import re
 from typing import Dict, List, Optional, Tuple
 
 from .marks import Marks, compute_marks
+from ..rebar_detailer import format_interaction_ratio
 from .primitives import Drawing
 from .sheet import (BORDER, PLAN_AREA, SIDE_PANEL, Sheet, View, grid, new_sheet, north_arrow, notes, plan_dimensions,
                     plan_view, scale_bar, table)
@@ -104,7 +105,7 @@ def _schedule_rows_columns(marks: Marks):
     for mk, info in marks.column_info.items():
         for k, r in enumerate(info.rows):
             rows.append([mk if k == 0 else "", str(info.count) if k == 0 else "", f"L{r['level']}", r["size"],
-                         r["bars"], r["links"].split(" (")[0], f"{r['ratio']:.2f}", r["status"]])
+                         r["bars"], r["links"].split(" (")[0], format_interaction_ratio(r["ratio"]), r["status"]])
             colors.append(_sc(r["status"]))
     return rows, colors
 

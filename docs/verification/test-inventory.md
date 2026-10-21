@@ -1,6 +1,6 @@
 # Test Inventory
 
-**As of:** 2026-10-21. 1035 collected tests in 52 files (2026-10-21 full sequential run: 1029 passed, 0 failed, 3 skipped,
+**As of:** 2026-10-21. 1160 collected tests in 53 files (2026-10-21 full sequential run: 1154 passed, 0 failed, 3 skipped,
 3 xfailed — see [verification-results.md](verification-results.md)). Time, memory and the
 runner layers of every file: [test-execution-guide.md](test-execution-guide.md).
 
@@ -33,6 +33,7 @@ Classification of the strongest assertion type in each file:
 | `test_realistic_buildings.py` (new 2026-10-20) | 54 | E2E | pipeline | 9 realistic buildings: clause values recomputed, equilibrium, plausibility ranges |
 | `test_ui_tables.py` (new 2026-10-20) | 14 | A | `ui_tables` | Regression for N23–N25: footing checks and steel from the footing design, status summary from `res.status`, issue order, column / beam / slab rows equal the design results |
 | `test_geometry_validation.py` (new 2026-10-21) | 20 | R/A | `grid_manager.check_plan_geometry`, `cad_loader`, `section_design`, `rebar_detailer`, pipeline | N50–N52 regressions: far line rejected before auto-framing (child process capped at 1.5 GiB; fails with MemoryError if the guard is removed), far beam end, survey offsets accepted, 1000 m bound both sides, NaN / inf coordinates, `run_design` rejects before calculating, non-finite column and beam forces, Pu > Puz message; a NaN injected into the seismic result ends in FAIL 'Numerical failure' or a numerical error, never PASS; only the 2 structure-less samples are input errors |
+| `test_dxf_corpus.py` + helper `dxf_corpus.py` (new 2026-10-21) | 125 (+ `STRUCTOPTIMA_CORPUS_N`) | E2E/A/metamorphic | `cad_parser`, `cad_loader`, `dxf_layers`, `ui_state.read_dxf`, pipeline, every output | 74 named DXF cases (shapes, units, versions, column / beam / wall styles, layer conventions, rotation, mirroring, offsets, nesting, noise, degenerate structures) + 30 seeded random buildings: input error or a design satisfying the invariants, every drawn column read; 17 equivalent drawings of one building give the same design (W, VB within 1e-6); every output with a column beyond capacity (D-38). 30 tests fail on the code before RM-40 |
 | `test_dxf_robustness.py` + helper `dxf_conventions.py` (new 2026-10-21, owner) | 113 | E2E/A | `cad_parser`, `cad_loader`, `ui_state.read_dxf`, pipeline, `bim_loader`, `ifc_exporter` | Every sample drawing through a full design and `tests/invariants.py`; the same plan in 17 drawing conventions gives the same design; 8 damaged-file mutations x 3 sources give input errors, not crashes; IFC round trip |
 | `test_invariants.py` + helper `invariants.py` (new 2026-10-21, owner) | 17 | A | `tests/invariants.py` | The invariant checker itself: a clean design passes, each injected fault is caught by its rule |
 | `test_metamorphic.py` (new 2026-10-21, owner) | 13 | A | pipeline | Relations between designs (determinism, monotonicity in zone / load, mirror / rotation); 3 strict xfails: plan rotation (N49, owner decision pending) |
@@ -66,6 +67,7 @@ standard) / *professionally reviewed* (none yet).
 | # | Finding | Evidence | Next step |
 |---|---|---|---|
 | A1 | `auto_framer` (production fallback when a drawing has no columns; site of the N50 OOM) has no direct test; `test_beam_placer.py::test_with_auto_framer` is **always skipped** (its DXF yields no columns) | skip reason in every run | Direct tests of node identification and beam generation on a walls-only drawing |
+| A11 | DXF reading had no corpus beyond the samples and one generated plan: 8 defects found 2026-10-21 (N53-N60) | `tests/test_dxf_corpus.py` | Closed; nightly CI runs 300 random buildings |
 | A2 | `test_dxf_robustness.py::test_every_sample_drawing` passes when loading raises `ValueError`; a regression making valid samples unreadable would pass | 2 of 92 samples raise today, both structure-less | Closed by `test_only_the_structureless_samples_are_input_errors` |
 | A3 | The two `test_column_editor.py` removal tests are **always skipped** (no removable column in the layout): column removal is untested | skip reasons | Build a layout with a removable column |
 | A4 | `safety_warnings` (production: plan irregularity screen, joint checks) has no direct test; only exercised through the pipeline | no test imports it | Hand-value tests for the screens it reports |

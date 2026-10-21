@@ -20,7 +20,10 @@ Preconditions: `gm` has grid lines and columns stacked for `inputs.num_stories`
 `beams` are plan beams (one per bay side); may be empty (generated).
 Side effects: mutates `gm` (loads, sizes, schedules) and `beams` (sizes,
 envelopes). No files are written.
-Raises `ValueError` before any calculation when `grid_manager.check_plan_geometry(gm, beams)` fails
+Raises `grid_manager.InvalidStructureError` (a `ValueError`) before any calculation when
+`grid_manager.check_plan_geometry(gm, beams)` fails (also: columns all on one line, D-33) or when no slab panel is
+enclosed by the columns / beams / drawn walls (checked before walls are generated); the Setup page shows it as an
+input problem. Otherwise it raises `ValueError` before any calculation when `check_plan_geometry` fails
 (non-finite coordinate, or columns / beams / walls spanning more than `MAX_PLAN_EXTENT_M` = 1000 m; D-32).
 
 `DesignInputs` (defaults): `num_stories=2`, `story_height_m=3.5`,

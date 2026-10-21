@@ -24,6 +24,8 @@ from typing import Dict, List, Optional
 
 import numpy as np
 
+from .rebar_detailer import BEYOND_CAPACITY
+
 
 def _api():
     import ifcopenshell
@@ -106,7 +108,8 @@ def export_ifc(gm, beams, footings, project_name: str = "StructOptima model", ma
               {"Mark": marks.columns.get(c.id, ""), "Size": f"{c.width_nb:.0f}x{c.depth_nb:.0f}",
                "MainBars": r.main_bars_desc if r else "-", "Ties": r.links_desc if r else "-",
                "Status": r.status if r else "NOT DESIGNED", "GoverningCombination": r.governing_combo if r else "",
-               "InteractionRatio": float(r.interaction_ratio) if r else 0.0,
+               "InteractionRatio": float(r.interaction_ratio) if r and math.isfinite(r.interaction_ratio) else None,
+               "InteractionNote": BEYOND_CAPACITY if r and not math.isfinite(r.interaction_ratio) else None,
                "ServiceLoad_kN": float(c.load_kn)})
 
     # beams and slabs on every floor (top of beam / slab at the floor level)

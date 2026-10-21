@@ -9,6 +9,30 @@ Each entry states what changed, why, the evidence (tests actually run) and what 
 
 ---
 
+## 2026-10-21 — DXF robustness: geometry bound, memory safety, DXF corpus, decisions D-32–D-38
+
+- **OOM kills explained and fixed (N50, D-32 approved):** a line drawn far from the building made the automatic
+  column placement create 3 × 10^8 nodes (~12 GiB). Geometry that is not finite or wider than 1000 m is now an input
+  error before any calculation.
+- **Non-finite results never pass (N51, N52):** NaN / infinite design forces stop the design; a non-finite seismic
+  weight or base shear is a FAIL "Numerical failure".
+- **DXF corpus** (`tests/dxf_corpus.py`): 74 named drawings + seeded random buildings in every supported convention.
+  It found 8 defects, all fixed (N53–N60): mirrored blocks read mirrored; R12 polyline walls crashed the loader;
+  unitless / R12 drawings and drawings with survey coordinates read at the wrong scale; circular columns on layer 0
+  dropped and grid bubbles read as columns; rotated plans misread; one or two columns crashed the dynamic analysis;
+  warnings repeated; IFC export, 3D viewer and drawings broken by a column beyond its capacity.
+- **Decisions taken under the owner's delegation (engineer review pending):** D-33 a slab panel is required; D-34
+  rotated plans are rotated back to the axes; D-35 drawing units inferred from the columns; D-36 circular columns on
+  unnamed layers need two members framing in; D-37 column orientation rule deferred (needs a new hand check); D-38
+  a column beyond capacity is shown as "beyond capacity", never as a number.
+- **Testing:** `tests/run_suite.py` runs every file sequentially under a memory cap (CLAUDE.md resource rules);
+  nightly CI job with 300 random buildings and 300 random drawings (not yet observed running).
+- **Evidence:** full sequential run 1154 passed, 3 skipped, 3 xfailed, 0 failed; 30 of the new corpus tests fail on
+  the code before the fixes. New documents: `docs/engineering/supported-inputs.md`, `docs/assurance/readiness-gates.md`.
+- **Open:** column orientation under plan rotation (N49 / D-37); engineer review of D-32–D-38; readiness gate H.
+
+---
+
 ## 2026-10-20 — D-28 and N46 approved; residential columns match 230 mm walls (D-29)
 
 - **D-28 approved** (DXF layer roles).

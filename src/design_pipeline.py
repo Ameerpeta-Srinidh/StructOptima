@@ -24,7 +24,7 @@ from .analysis_integration import (AnalysisSummary, LateralLoads, SeismicSpec, b
                                    update_structural_analysis, web_self_weight_kn_m)
 from .building_types import get_load_parameters
 from .foundation_eng import Footing, check_footing_overlaps, design_footing
-from .grid_manager import GridManager, check_plan_geometry
+from .grid_manager import GridManager, InvalidStructureError, check_plan_geometry
 from .logging_config import get_logger
 from .materials import Concrete
 
@@ -425,6 +425,14 @@ def run_design(gm: GridManager, beams: list, inputs: DesignInputs) -> DesignResu
     if not beams:
         beams = gm.generate_beams()
         messages.append("No beams supplied: beams generated along all grid lines")
+    gm.boundary_segments = [((b.start_point.x, b.start_point.y), (b.end_point.x, b.end_point.y))
+                            for b in beams if b.end_point is not None]
+    if not gm.slab_panels(include_voids=True):  # drawn walls / beams only, before walls are generated
+        # D-33: no floor slab between the columns / beams read (e.g. three columns in an L): not a frame building
+        raise InvalidStructureError(
+            f"No floor slab panel is enclosed by the {len([c for c in gm.columns if c.level == 0])} columns and "
+            f"{len(beams)} beams read: StructOptima designs frame buildings with slabs (a bay needs four corner "
+            f"columns, or beams / walls on all four sides). Check the column and beam layers.")
     if not gm.walls and inputs.generate_walls_if_missing:
         gm.generate_walls(wall_thickness_mm=inputs.wall_core_thickness_mm, opening_fraction=inputs.wall_opening_fraction,
                           include_interior=inputs.include_interior_walls, slab_thickness_mm=gm.slab_thickness_mm)

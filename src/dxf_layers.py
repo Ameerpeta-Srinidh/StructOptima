@@ -58,6 +58,7 @@ class LayerInfo:
     typical_outline_mm: Optional[Tuple[int, int]] = None
     n_circles: int = 0
     n_column_circles: int = 0           # circles of column size (columns on column layers, symbols elsewhere)
+    n_framed_circles: int = 0           # of those, circles where two or more lines end (columns, D-36)
     n_segments: int = 0                 # line segments (lines, open polylines, edges of large closed outlines)
     n_beam_like: int = 0                # run from column to column along the centres
     n_axis_like: int = 0                # through column centres and past them (grid lines)
@@ -86,26 +87,72 @@ class LayerInfo:
         return ", ".join(parts) or f"{self.n_entities} other entit{'y' if self.n_entities == 1 else 'ies'}"
 
 
+# units tried for a drawing without a plausible $INSUNITS, in order of preference (Indian practice)
+UNIT_CANDIDATES = [("millimetres", 0.001), ("metres", 1.0), ("centimetres", 0.01), ("inches", 0.0254), ("feet", 0.3048)]
+
+
 def drawing_unit_m(parser) -> float:
-    """Metres per drawing unit: the declared $INSUNITS when it gives a plausible building (1-1000 m), otherwise
-    millimetres when coordinates exceed 500 (the loader's rule)."""
-    xs, ys = [], []
+    """Metres per drawing unit: the declared $INSUNITS when it gives a plausible building (1-1000 m); otherwise the
+    unit (UNIT_CANDIDATES) under which the drawing looks like a building - extent 2-1000 m, typical column spacing
+    1.5-15 m (grid bubbles near the end columns pull the median down), most closed outlines / circles 150 mm -
+    1.5 m (column-sized) - preferring the earlier unit on a tie; without such evidence the old rule (millimetres
+    when coordinates exceed 500). The reason is kept in
+    ``parser.unit_reason`` (D-35: R12 files have no $INSUNITS, and survey coordinates broke the size rule)."""
+    cached = getattr(parser, "_unit_cache", None)
+    if cached is not None:
+        return cached
+    xs, ys, outlines = [], [], []
     for e in parser._flat():
         t = e.dxftype()
         if t == "LINE":
             xs += [e.dxf.start.x, e.dxf.end.x]
             ys += [e.dxf.start.y, e.dxf.end.y]
         elif t in ("LWPOLYLINE", "POLYLINE"):
-            for x, y in _points(parser, e):
+            pts = _points(parser, e)
+            for x, y in pts:
                 xs.append(x)
                 ys.append(y)
-    if not xs:
-        return parser.get_unit_scale() or 0.001
-    extent = max(max(xs) - min(xs), max(ys) - min(ys))
+            outline = parser._outline(e)                # the same closed-outline test as the layer analysis
+            if outline is not None and len(outline) >= 3:
+                w, d, _, cx, cy = parser._rect_dims(outline)
+                outlines.append((min(w, d), max(w, d), cx, cy))
+        elif t == "CIRCLE":
+            r = e.dxf.radius
+            outlines.append((2 * r, 2 * r, e.dxf.center.x, e.dxf.center.y))
     declared = parser.get_unit_scale()
+    if not xs:
+        parser._unit_cache, parser.unit_reason = declared or 0.001, "declared" if declared else "default"
+        return parser._unit_cache
+    extent = max(max(xs) - min(xs), max(ys) - min(ys))
     if declared and 1.0 <= extent * declared <= 1000.0:
+        parser._unit_cache, parser.unit_reason = declared, "declared"
         return declared
-    return 0.001 if max(max(map(abs, xs)), max(map(abs, ys))) > 500 else 1.0
+
+    def score(u):
+        sized = [(cx, cy, a) for a, b, cx, cy in outlines if 0.15 <= a * u and b * u <= 1.5]
+        spacing_ok = False
+        near = []
+        for i, (x, y, a) in enumerate(sized):          # nearest DISTINCT column (an outline drawn twice is one)
+            d = [math.hypot(x - x2, y - y2) for j, (x2, y2, _) in enumerate(sized) if j != i]
+            d = [v for v in d if v > 0.5 * a]
+            if d:
+                near.append(min(d))
+        if near:
+            near.sort()
+            spacing_ok = 1.5 <= near[len(near) // 2] * u <= 15.0
+        return (2.0 <= extent * u <= 1000.0, spacing_ok, len(sized))
+
+    scored = [(score(u), -k, name, u) for k, (name, u) in enumerate(UNIT_CANDIDATES)]
+    best = max(scored)
+    if best[0][0] and best[0][1]:
+        parser._unit_cache, parser.unit_reason = best[3], (
+            f"{best[2]} (no usable $INSUNITS: then {best[0][2]} outlines are column-sized, about 1.5-15 m apart, in a "
+            f"building {extent * best[3]:.0f} m across)")
+        return best[3]
+    u = 0.001 if max(max(map(abs, xs)), max(map(abs, ys))) > 500 else 1.0
+    parser._unit_cache, parser.unit_reason = u, (f"{'millimetres' if u == 0.001 else 'metres'} (no usable "
+                                                 f"$INSUNITS and no column outlines to judge from: coordinate size)")
+    return u
 
 
 def _points(parser, e) -> List[Tuple[float, float]]:
@@ -162,6 +209,24 @@ class _Geometry:
 
     def mm(self, v: float) -> float:
         return v * self.unit_m * 1000.0
+
+    def framed_circles(self, circles) -> list:
+        """Column-sized circles at which two or more line ends (of any layer) lie, within the beam-end snap (half
+        the circle + SNAP_MM): circular columns with beams / walls framing in. A grid bubble has one grid line
+        ending at it and is left out (D-36: circular columns drawn on layer 0 or an unnamed layer were dropped)."""
+        if not circles:
+            return []
+        if not hasattr(self, "_ends"):
+            self._ends = [p for d in self.by_layer.values() for s in d["segs"] for p in s]
+        snap = SNAP_MM / (self.unit_m * 1000.0)
+        out = []
+        for c in circles:
+            if not self.column_sized(c):
+                continue
+            r = 0.5 * c["w"] + snap
+            if sum(1 for (x, y) in self._ends if math.hypot(x - c["x"], y - c["y"]) <= r) >= 2:
+                out.append(c)
+        return out
 
     def column_sized(self, o) -> bool:
         lo, hi = COLUMN_SIZE_MM
@@ -254,7 +319,7 @@ def analyse_layers(parser) -> List[LayerInfo]:
         circ = [c for c in d["circles"] if g.column_sized(c)]
         info = LayerInfo(name=layer, n_entities=d["n"], n_outlines=len(d["outlines"]), n_circles=len(d["circles"]),
                          n_column_outlines=len(cols) + len(circ), n_column_circles=len(circ),
-                         n_texts=len(d["texts"]))
+                         n_framed_circles=len(g.framed_circles(circ)), n_texts=len(d["texts"]))
         sized = cols or circ
         if sized:
             ws = sorted(round(g.mm(o["w"]) / 5) * 5 for o in sized)
@@ -283,7 +348,8 @@ def analyse_layers(parser) -> List[LayerInfo]:
         circles = [c for c in d["circles"] if g.column_sized(c)]
         if nm and nm[0] == "column":
             return rects + circles
-        return rects if len(rects) >= 2 else []      # unnamed layers: circles alone are usually symbols
+        framed = g.framed_circles(circles)           # unnamed layers: lone circles are usually symbols (bubbles)
+        return rects + framed if len(rects) + len(framed) >= 2 else []
 
     centres = []
     for layer in g.by_layer:
@@ -336,7 +402,8 @@ def _suggest(info: LayerInfo, name: Optional[Tuple[str, str]]) -> None:
             info.confidence = "high"
             info.reason = why
         return
-    rects = info.n_column_outlines - info.n_column_circles     # circles alone are usually symbols (grid bubbles)
+    # column-shaped: rectangles, and circles with two or more lines ending at them (lone circles are symbols)
+    rects = info.n_column_outlines - info.n_column_circles + info.n_framed_circles
     geometric = info.n_outlines + info.n_circles + max(0, n_lines - info.n_axis_like)
     if rects >= 2 and info.n_beam_like + info.n_wall_pairs == 0:
         info.role, info.confidence = "column", "medium"

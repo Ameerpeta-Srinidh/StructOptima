@@ -52,6 +52,13 @@ Newest first. Ids point to the records in \code{docs/assurance/} (N = finding, D
 \begin{longtable}{L{22mm}L{142mm}}
 \toprule
 \textbf{Date} & \textbf{Change} \\ \midrule \endhead
+21 Oct 2026 (later) & \textbf{DXF corpus} (74 named drawings + seeded random buildings) found 8 defects, fixed
+(N53--N60): mirrored blocks read mirrored, R12 polylines crashed, unitless / R12 / survey drawings at the wrong scale,
+circular columns on layer 0 dropped, rotated plans misread, 1--2 columns crashed the dynamic analysis, repeated
+warnings, outputs broken by a column beyond capacity. Decisions taken under the owner's delegation: D-33 (scope:
+a slab panel is required), D-34 (rotated plans), D-35 (unit inference), D-36 (circular columns), D-37 (column
+orientation deferred), D-38 (``beyond capacity'' display); Section~\ref{sec:dxf}, Section~\ref{sec:edge}. No formula
+changed. Tests 1154 passed, 3 skipped, 3 xfailed. \\
 21 Oct 2026 & \textbf{Geometry bound (D-32, approved by the owner):} a column / beam / wall coordinate that is not
 finite, or a structure wider than 1000 m (raw drawing: more than $10^6$ units), is an input error before any
 calculation (Section~\ref{sec:dxf}). Found by the DXF fuzz tests: a line $10^{11}$ units long made the automatic column
@@ -530,8 +537,18 @@ unbound xrefs and missing blocks are reported.
 \item Columns: sides from the frame of the longest edge (rotated blocks); circle $\Rightarrow$ square of equal area
 ($0.886\times$ diameter, WARN); duplicates within $\tfrac14$ of the smaller side counted once (WARN); outlines with a
 side $<150$ mm or $>3$ m on column layers are not columns (WARN).
-\item Units from \$INSUNITS (in, ft, mm, cm, m); unitless or implausible ($<1$ m or $>1000$ m extent)
-$\Rightarrow$ millimetres if coordinates exceed 500 (WARN).
+\item Units from \$INSUNITS (in, ft, mm, cm, m). \textbf{Unitless or implausible} ($<1$ m or $>1000$ m extent; every
+R12 file) \textbf{(D-35, 21 Oct 2026):} the first of mm, m, cm, inch, ft for which (a) the extent is 2--1000 m,
+(b) the median distance from each column-sized outline / circle (150 mm -- 1.5 m) to the nearest distinct one is
+1.5--15 m, with (c) the most column-sized outlines; without such evidence millimetres if coordinates exceed 500, else
+metres. The unit and the reason are a WARN. (Coordinate size alone read inch / foot / cm drawings, and metre drawings
+with survey coordinates, at the wrong scale, N55.)
+\item \textbf{Rotated plans (D-34):} when the rectangular column outlines (75\,\% within $0.5^\circ$ of their median),
+else the beam / wall lines (length-weighted resultant of $4\theta$ $\ge0.95$), agree on an angle $\theta$ to the axes
+with $|\theta|\ge0.05^\circ$ (modulo $90^\circ$), the drawing is rotated by $-\theta$ before reading (WARN).
+\item Entities with extrusion $(0,0,-1)$ (mirrored blocks) are rewritten upright before reading (N53).
+\item \textbf{Circular columns on layers without a column name (D-36):} a column-sized circle is a column when two or
+more line ends lie within $\tfrac12 d+150$ mm of its centre; a lone circle (grid bubble) is not.
 \item Coordinates moved so the first grid intersection is (0,\,0) (WARN when moved by $>1$ m); column centres within
 150 mm merge into one grid line (WARN with the misalignment).
 \item Beams: LINE and every polyline segment; ends within half a column $+150$ mm of a column centre are moved to it;
@@ -571,10 +588,13 @@ Layer role changed by the engineer & results marked out of date \\
 Beam deflection without analysis load & not evaluated (no assumed load) \\
 Floors without torsional restraint & translation-only sharing (WARN) \\
 Non-finite coordinate, or structure wider than 1000 m & input error before any calculation (D-32) \\
+Columns all on one line, or no slab panel enclosed by the drawn columns / beams / walls & input error (D-33) \\
+Floor without rotational mass in the 3D model & translation-only sharing (WARN), no torsion \\
 Non-finite design force (NaN / $\infty$) in a column or beam check & design stops with a numerical error
 (\code{FloatingPointError}); never a pass, never an input error (N51, N52) \\
 Non-finite $W$ or $V_B$ & FAIL ``Numerical failure'' \\
-$P_u$ outside the interaction diagram ($P_u>P_{uz}$) & ratio $\infty$, FAIL; message gives $P_u$ and $P_{uz}$ \\
+$P_u$ outside the interaction diagram ($P_u>P_{uz}$) & ratio $\infty$, FAIL; message gives $P_u$ and $P_{uz}$;
+every output shows ``beyond capacity'' (D-38) \\
 Gross stiffness selected & WARN (6.4.3.1) \\
 BBS & one typical floor and ground-storey columns; default bars when a description cannot be parsed (KD-21) \\
 \bottomrule

@@ -17,6 +17,8 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 
+from .rebar_detailer import format_interaction_ratio
+
 ES_MPA = 200000.0   # modulus of elasticity of reinforcing steel, IS 456 Cl 5.6.3 (SP 16 1.4)
 
 
@@ -166,7 +168,7 @@ def member_info(gm, beams, footings, marks, member_id: str) -> Dict[str, str]:
                     "Concrete": f"M{gm.fck:.0f}", "Steel": f"Fe{gm.fy:.0f}"}
             if r:
                 info.update({"Main bars": r.main_bars_desc, "Ties": r.links_desc, "Status": r.status,
-                             "Interaction ratio": f"{r.interaction_ratio:.3f}", "Governing combination": r.governing_combo})
+                             "Interaction ratio": format_interaction_ratio(r.interaction_ratio, 3), "Governing combination": r.governing_combo})
             return info
     for b in beams:
         if b.id == member_id:

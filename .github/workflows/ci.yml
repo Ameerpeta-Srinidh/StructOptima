@@ -61,6 +61,7 @@ jobs:
       - name: Regression layer with 300 random buildings
         env:
           STRUCTOPTIMA_FUZZ_N: "300"
+          STRUCTOPTIMA_CORPUS_N: "300"
           PYTHONDONTWRITEBYTECODE: "1"
         run: python tests/run_suite.py --layer regression --timeout 7200 --out "$RUNNER_TEMP/tests"
       - name: Keep logs and summary

@@ -345,7 +345,11 @@ def run_design_from_inputs():
     else:
         s['editor_placement'] = None
     inputs = _design_inputs(s, gm)
-    res = run_design(gm, beams, inputs)
+    from src.grid_manager import InvalidStructureError
+    try:
+        res = run_design(gm, beams, inputs)
+    except InvalidStructureError as e:  # a structure the tool does not design: a fixable input, not a crash
+        raise InputError(str(e)) from e
     _store_results(res, inputs)
     return res
 

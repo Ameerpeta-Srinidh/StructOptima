@@ -32,6 +32,25 @@ def _worst(*statuses: str) -> str:
 
 # ------------------------------------------------------------------ models --
 
+BEYOND_CAPACITY = "beyond capacity (Pu outside the interaction diagram)"
+
+
+def format_interaction_ratio(ratio, digits: int = 2) -> str:
+    """Column interaction ratio for display. A ratio is infinite when the factored axial load lies outside the
+    section's interaction diagram (no moment capacity at that load, IS 456 39.6): shown as text, never as a number
+    (D-38; 'inf' crashed the IFC export and broke the 3D viewer JSON)."""
+    if ratio is None:
+        return "-"
+    return f"{ratio:.{digits}f}" if math.isfinite(ratio) else BEYOND_CAPACITY
+
+
+def interaction_ratio_value(ratio, digits: int = 2):
+    """For tables and JSON: the rounded number when finite, otherwise the BEYOND_CAPACITY text (D-38)."""
+    if ratio is None:
+        return None
+    return round(float(ratio), digits) if math.isfinite(ratio) else BEYOND_CAPACITY
+
+
 class RebarResult(BaseModel):
     """Column detailing result."""
     main_bars_desc: str                 # e.g. "8-16#"
@@ -300,7 +319,7 @@ class RebarDetailer:
             f"My = {chk.muy_kNm:.1f} kNm (lever along Y) incl. e_min / slenderness",
             f"3. Uniaxial capacities at Pu (strain compatibility): Mux1 = {chk.mux1_kNm:.1f} kNm, Muy1 = {chk.muy1_kNm:.1f} kNm",
             f"4. Puz = {chk.puz_kN:.0f} kN, alpha_n = {chk.alpha_n:.2f}",
-            f"5. Interaction (Mx/Mux1)^an + (My/Muy1)^an = {chk.ratio:.3f} ({chk.governing})",
+            f"5. Interaction (Mx/Mux1)^an + (My/Muy1)^an = {format_interaction_ratio(chk.ratio, 3)} ({chk.governing})",
             f"6. Reinforcement: {n}-{dia}# = {provided:.0f} mm2 ({pct:.2f}%)",
             f"7. Result: {status}",
         ]
