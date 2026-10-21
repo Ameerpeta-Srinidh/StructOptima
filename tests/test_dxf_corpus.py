@@ -213,3 +213,30 @@ def test_reports_with_a_column_beyond_capacity(beyond_capacity, tmp_path):
     wb = openpyxl.load_workbook(io.BytesIO(ExcelExporter.export_to_excel(res.gm, res.all_beams, res.bom, res.footings)))
     cells = " ".join(str(c.value) for ws in wb for row in ws.iter_rows() for c in row if isinstance(c.value, str))
     assert not BAD.search(cells)
+
+
+# ---- drafting habits found in real drawings ---------------------------------------------------------------------
+from tests.dxf_corpus import HARD, make_hard  # noqa: E402
+
+
+@pytest.mark.parametrize("name", sorted(HARD))
+def test_drafting_habit(tmp_path, name):
+    """N61 (MINSERT), N62 (beam lines through columns), D-39 (columns as lines), D-40 (frozen / off layers), D-41
+    (overlapping outlines), curved beams, NaN coordinates: each read as the drawing shows it, or refused clearly."""
+    expected = HARD[name][1]
+    p = make_hard(tmp_path / f"{name}.dxf", name)
+    with open(p, "rb") as fh:
+        preview = read_dxf(fh.read(), None)
+    if expected[0] == "input error":
+        assert preview["error"] and expected[1] in preview["error"]
+        return
+    assert preview["error"] is None, preview["error"]
+    assert (len(preview["columns"]), len(preview["beams"])) == expected[1:3]
+    if expected[3]:
+        assert any(expected[3] in w for w in preview["warnings"]), preview["warnings"]
+    res, inp, _ = _design(p)
+    assert not design_violations(res, inp)
+    spans = sorted(round(b.length_m(), 3) if hasattr(b, "length_m") else
+                   round(math.hypot(b.end_point.x - b.start_point.x, b.end_point.y - b.start_point.y), 3)
+                   for b in res.beams)
+    assert max(spans) <= 4.5 + 1e-6                     # no beam spans more than one bay of the drawn grid

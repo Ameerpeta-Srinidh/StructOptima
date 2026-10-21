@@ -349,3 +349,167 @@ def random_spec(seed: int) -> Dict:
         nest=r.random() < 0.2, duplicate_columns=r.random() < 0.15, cantilever=r.random() < 0.2,
         col_sizes=r.choice([[(0.3, 0.45)], [(0.23, 0.23)], [(0.3, 0.3), (0.3, 0.6), (0.45, 0.45)]]),
         vary_sizes=r.random() < 0.4, xlines=r.random() < 0.2, noise=r.random() < 0.8)
+
+
+# ---- drafting habits found in real drawings (one function per habit; 4 x 3 columns on an irregular grid) --------
+_HX, _HY = [0, 4000, 8500, 12000], [0, 4500, 9000]
+
+
+def _hard_base(cols=True, beams=True):
+    doc = ezdxf.new("R2018")
+    doc.header["$INSUNITS"] = 4
+    msp = doc.modelspace()
+    for n in ("COLUMN", "BEAM", "WALL", "OLD-COLUMN", "BEAM-OLD", "FURNITURE"):
+        doc.layers.add(n)
+    if cols:
+        for x in _HX:
+            for y in _HY:
+                msp.add_lwpolyline([(x - 150, y - 225), (x + 150, y - 225), (x + 150, y + 225), (x - 150, y + 225)],
+                                   close=True, dxfattribs={"layer": "COLUMN"})
+    if beams:
+        for y in _HY:
+            for a, b in zip(_HX, _HX[1:]):
+                msp.add_line((a, y), (b, y), dxfattribs={"layer": "BEAM"})
+        for x in _HX:
+            for a, b in zip(_HY, _HY[1:]):
+                msp.add_line((x, a), (x, b), dxfattribs={"layer": "BEAM"})
+    return doc, msp
+
+
+def _h_lines_as_columns():
+    doc, msp = _hard_base(cols=False)
+    for x in _HX:
+        for y in _HY:
+            pts = [(x - 150, y - 225), (x + 150, y - 225), (x + 150, y + 225), (x - 150, y + 225)]
+            for a, b in zip(pts, pts[1:] + pts[:1]):
+                msp.add_line(a, b, dxfattribs={"layer": "COLUMN"})
+    return doc
+
+
+def _h_minsert():
+    doc, msp = _hard_base(cols=False, beams=False)
+    blk = doc.blocks.new("C300x450")
+    blk.add_lwpolyline([(-150, -225), (150, -225), (150, 225), (-150, 225)], close=True)
+    ins = msp.add_blockref("C300x450", (0, 0), dxfattribs={"layer": "COLUMN"})
+    ins.dxf.column_count, ins.dxf.row_count, ins.dxf.column_spacing, ins.dxf.row_spacing = 4, 3, 4000, 4500
+    for y in (0, 4500, 9000):
+        for a in (0, 4000, 8000):
+            msp.add_line((a, y), (a + 4000, y), dxfattribs={"layer": "BEAM"})
+    for x in (0, 4000, 8000, 12000):
+        for a in (0, 4500):
+            msp.add_line((x, a), (x, a + 4500), dxfattribs={"layer": "BEAM"})
+    return doc
+
+
+def _h_nonuniform_block():
+    doc, msp = _hard_base(cols=False)
+    blk = doc.blocks.new("C300")
+    blk.add_lwpolyline([(-150, -150), (150, -150), (150, 150), (-150, 150)], close=True)
+    for x in _HX:
+        for y in _HY:
+            msp.add_blockref("C300", (x, y), dxfattribs={"layer": "COLUMN", "xscale": 1.0, "yscale": 1.5})
+    return doc
+
+
+def _h_frozen_old_columns():
+    doc, msp = _hard_base()
+    for x in _HX:
+        for y in _HY:
+            msp.add_lwpolyline([(x + 850, y - 150), (x + 1150, y - 150), (x + 1150, y + 150), (x + 850, y + 150)],
+                               close=True, dxfattribs={"layer": "OLD-COLUMN"})
+    doc.layers.get("OLD-COLUMN").freeze()
+    return doc
+
+
+def _h_off_layer_beam():
+    doc, msp = _hard_base()
+    msp.add_line((0, 2000), (12000, 2000), dxfattribs={"layer": "BEAM-OLD"})
+    doc.layers.get("BEAM-OLD").off()
+    return doc
+
+
+def _h_bulge_columns():
+    doc, msp = _hard_base(cols=False)
+    for x in _HX:
+        for y in _HY:
+            msp.add_lwpolyline([(x - 150, y - 225, 0, 0, 0.2), (x + 150, y - 225, 0, 0, 0),
+                                (x + 150, y + 225, 0, 0, 0.2), (x - 150, y + 225, 0, 0, 0)],
+                               format="xyseb", close=True, dxfattribs={"layer": "COLUMN"})
+    return doc
+
+
+def _h_arc_beam():
+    doc, msp = _hard_base()
+    msp.add_arc((6000, 9000), 3000, 0, 180, dxfattribs={"layer": "BEAM"})
+    return doc
+
+
+def _h_nan_coordinate():
+    doc, msp = _hard_base()
+    msp.add_line((0, 0), (float("nan"), 4500), dxfattribs={"layer": "BEAM"})
+    return doc
+
+
+def _h_heavy_noise():
+    doc, msp = _hard_base()
+    for i in range(15000):
+        msp.add_line((i % 120 * 100, i // 120 * 70), (i % 120 * 100 + 50, i // 120 * 70 + 30),
+                     dxfattribs={"layer": "FURNITURE"})
+    return doc
+
+
+def _h_column_with_hole():
+    doc, msp = _hard_base()
+    for x in _HX:
+        for y in _HY:
+            msp.add_lwpolyline([(x - 50, y - 50), (x + 50, y - 50), (x + 50, y + 50), (x - 50, y + 50)], close=True,
+                               dxfattribs={"layer": "COLUMN"})
+    return doc
+
+
+def _h_overlapping_column():
+    doc, msp = _hard_base()
+    msp.add_lwpolyline([(4050, -225), (4350, -225), (4350, 225), (4050, 225)], close=True,
+                       dxfattribs={"layer": "COLUMN"})
+    return doc
+
+
+def _h_beam_lines_through_columns():
+    doc, msp = _hard_base(beams=False)
+    for y in _HY:
+        msp.add_line((_HX[0], y), (_HX[-1], y), dxfattribs={"layer": "BEAM"})
+    for x in _HX:
+        msp.add_line((x, _HY[0]), (x, _HY[-1]), dxfattribs={"layer": "BEAM"})
+    return doc
+
+
+def _h_3d_polyline_beams():
+    doc, msp = _hard_base(beams=False)
+    for y in _HY:
+        msp.add_polyline3d([(_HX[0], y, 3000), (_HX[-1], y, 3000)], dxfattribs={"layer": "BEAM"})
+    for x in _HX:
+        msp.add_polyline3d([(x, _HY[0], 3000), (x, _HY[-1], 3000)], dxfattribs={"layer": "BEAM"})
+    return doc
+
+
+# name -> (builder, expected): ("designed", columns, beams, warning text or None) or ("input error", message text)
+HARD = {
+    "lines-as-columns": (_h_lines_as_columns, ("designed", 12, 17, None)),
+    "minsert-column-array": (_h_minsert, ("designed", 12, 17, None)),
+    "non-uniform-block-scale": (_h_nonuniform_block, ("designed", 12, 17, None)),
+    "frozen-old-columns": (_h_frozen_old_columns, ("designed", 12, 17, "Frozen or switched-off layers")),
+    "off-layer-beam": (_h_off_layer_beam, ("designed", 12, 17, "Frozen or switched-off layers")),
+    "bulge-columns": (_h_bulge_columns, ("designed", 12, 17, None)),
+    "arc-beam": (_h_arc_beam, ("designed", 12, 17, "arc(s) on beam layers were not read")),
+    "nan-coordinate": (_h_nan_coordinate, ("input error", "invalid (infinite or undefined) coordinate")),
+    "heavy-noise-15000": (_h_heavy_noise, ("designed", 12, 17, None)),
+    "column-with-hole": (_h_column_with_hole, ("designed", 12, 17, None)),
+    "overlapping-column": (_h_overlapping_column, ("designed", 12, 17, "overlap another column")),
+    "beam-lines-through-columns": (_h_beam_lines_through_columns, ("designed", 12, 17, "divided into one beam per span")),
+    "3d-polyline-beams": (_h_3d_polyline_beams, ("designed", 12, 17, "divided into one beam per span")),
+}
+
+
+def make_hard(path, name: str) -> str:
+    HARD[name][0]().saveas(path)
+    return str(path)

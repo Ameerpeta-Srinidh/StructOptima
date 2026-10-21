@@ -89,6 +89,10 @@ class CADParser:
                                  f"against the drawing.")
         self.msp = self.doc.modelspace()
         self._upright(self.msp)
+        # frozen / switched-off layers are not part of the drawing as shown (old revisions, references): not read
+        # (D-40); entities skipped per layer are counted by _explode and reported once
+        self.hidden_layers = {ly.dxf.name for ly in self.doc.layers if ly.is_frozen() or ly.is_off()}
+        self.hidden_skipped: Dict[str, int] = {}
         logger.info("Loaded %s", self.filepath)
 
     @staticmethod
@@ -142,6 +146,7 @@ class CADParser:
         Entities on layer "0" inside a block take the layer of the INSERT, as in AutoCAD. Unbound external
         references cannot be read and are reported."""
         if self._flat_cache is None:
+            self.hidden_skipped = {}
             self._flat_cache = list(self._explode(self.msp, None, 0)) if self.msp is not None else []
         return self._flat_cache
 
@@ -150,6 +155,9 @@ class CADParser:
             layer = e.dxf.get("layer", "0")
             if layer == "0" and parent_layer:
                 layer = parent_layer
+            if layer in getattr(self, "hidden_layers", ()):
+                self.hidden_skipped[layer] = self.hidden_skipped.get(layer, 0) + 1
+                continue
             if e.dxftype() != "INSERT":
                 if layer != e.dxf.get("layer", "0"):
                     e.dxf.layer = layer
@@ -167,12 +175,24 @@ class CADParser:
                 self.warnings.append(f"Block '{name}' nested deeper than {MAX_BLOCK_DEPTH} levels: not read.")
                 continue
             try:
-                virtual = list(e.virtual_entities())
+                if getattr(e, "mcount", 1) > 1:              # MINSERT: rows x columns of the block (N61)
+                    virtual = [v for one in e.multi_insert() for v in one.virtual_entities()]
+                else:
+                    virtual = list(e.virtual_entities())
                 self._upright(virtual)
             except Exception as ex:   # non-uniform scaling of some entity types etc.
                 self.warnings.append(f"Block '{name}' could not be exploded ({ex}): its contents were not read.")
                 continue
             yield from self._explode(virtual, layer, depth + 1)
+
+    def hidden_layer_warning(self) -> Optional[str]:
+        """The frozen / switched-off layers whose entities were not read (D-40), or None."""
+        self._flat()
+        if not getattr(self, "hidden_skipped", None):
+            return None
+        names = ", ".join(f"'{k}' ({v} entities)" for k, v in sorted(self.hidden_skipped.items()))
+        return (f"Frozen or switched-off layers were not read: {names}. Turn them on in the CAD program if they "
+                f"are part of the structure.")
 
     def roles(self) -> Dict[str, str]:
         """Role of every layer: the confirmed mapping, or the suggestion from names and drawn shapes."""
@@ -370,15 +390,31 @@ class CADParser:
                 side = 2 * r * math.sqrt(math.pi) / 2.0
                 found.append({"x": float(e.dxf.center.x), "y": float(e.dxf.center.y), "width": side, "depth": side,
                               "orientation_deg": 0.0, "shape": "circle", "diameter": 2 * r})
-        columns, dup = [], 0
+        col_lines = [((e.dxf.start.x, e.dxf.start.y), (e.dxf.end.x, e.dxf.end.y)) for e in self._flat()
+                     if e.dxftype() == "LINE" and self.role_of(e.dxf.get("layer", "0")) == "column"]
+        for pts in self.line_loops(col_lines):          # outlines drawn as separate LINEs (D-39)
+            w, d, ang, cx, cy = self._rect_dims(pts)
+            found.append({"x": cx, "y": cy, "width": w, "depth": d, "orientation_deg": ang, "shape": "rect"})
+        columns, dup, overlap = [], 0, []
         for c in found:
             tol = 0.25 * min(c["width"], c["depth"])
             if any(math.hypot(c["x"] - k["x"], c["y"] - k["y"]) <= tol for k in columns):
                 dup += 1
                 continue
+            hit = next((k for k in columns if abs(c["x"] - k["x"]) < 0.5 * (c["width"] + k["width"]) and
+                        abs(c["y"] - k["y"]) < 0.5 * (c["depth"] + k["depth"])), None)
+            if hit is not None:                          # outlines that overlap cannot be two columns (D-41)
+                overlap.append((c["x"], c["y"]))
+                if c["width"] * c["depth"] > hit["width"] * hit["depth"]:
+                    columns[columns.index(hit)] = c      # keep the larger outline (an inner hollow is not it)
+                continue
             columns.append(c)
         if dup:
             self.warnings.append(f"{dup} duplicate column outline(s) at the same position were counted once.")
+        if overlap:
+            at = ", ".join(f"({x:.0f}, {y:.0f})" for x, y in overlap[:4])
+            self.warnings.append(f"{len(overlap)} column outline(s) overlap another column and were merged with it "
+                                 f"(the larger outline is kept), e.g. at {at} drawing units: check the drawing.")
         n_circ = sum(1 for c in columns if c["shape"] == "circle")
         if n_circ:
             self.warnings.append(f"{n_circ} circular column(s): designed as squares of equal area "
@@ -390,6 +426,47 @@ class CADParser:
         for i, c in enumerate(columns):
             c["id"] = f"C{i + 1}"
         return columns
+
+    @staticmethod
+    def line_loops(segs, max_sides: int = 8, with_index: bool = False) -> list:
+        """Closed outlines drawn as separate LINEs: connected groups of segments in which every end meets exactly
+        one other end (within 0.2 % of the median segment length) and that close on themselves, 3 to ``max_sides``
+        sides. Returns the vertex lists in order, or (vertices, segment indices) pairs with ``with_index`` (D-39:
+        columns drawn as four lines were not read)."""
+        idx = [k for k, s in enumerate(segs) if all(math.isfinite(v) for pt in s for v in pt[:2])
+               and math.hypot(s[1][0] - s[0][0], s[1][1] - s[0][1]) > 0]
+        segs = [segs[k] for k in idx]
+        if len(segs) < 3:
+            return []
+        lens = sorted(math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in segs)
+        tol = max(1e-9, 0.002 * lens[len(lens) // 2])
+        key = lambda p: (round(p[0] / tol), round(p[1] / tol))
+        ends: Dict[tuple, List[int]] = {}
+        for i, (a, b) in enumerate(segs):
+            for p in (a, b):
+                ends.setdefault(key(p), []).append(i)
+        if any(len(v) > 2 for v in ends.values()):
+            ends = {k: v for k, v in ends.items() if len(v) <= 2}
+        loops, used = [], set()
+        for i in range(len(segs)):
+            if i in used:
+                continue
+            chain, pts, cur, here = [i], [segs[i][0]], i, segs[i][1]
+            while len(chain) <= max_sides:
+                nxt = [j for j in ends.get(key(here), []) if j != cur]
+                if len(nxt) != 1:
+                    break
+                cur = nxt[0]
+                if cur == i:
+                    break
+                chain.append(cur)
+                a, b = segs[cur]
+                pts.append(here)
+                here = b if key(a) == key(here) else a
+            if cur == i and key(here) == key(segs[i][0]) and 3 <= len(chain) <= max_sides:
+                used.update(chain)
+                loops.append((pts, [idx[c] for c in chain]))
+        return loops if with_index else [p for p, _ in loops]
 
     @staticmethod
     def _rect_dims(pts) -> Tuple[float, float, float, float, float]:
@@ -439,6 +516,10 @@ class CADParser:
                 if math.hypot(b[0] - a[0], b[1] - a[1]) > 0:
                     beams.append({"start": (float(a[0]), float(a[1])), "end": (float(b[0]), float(b[1])),
                                   "id": f"B{len(beams) + 1}"})
+        arcs = sum(1 for e in self._flat() if e.dxftype() == "ARC" and self.role_of(e.dxf.get("layer", "0")) == "beam")
+        if arcs:
+            self.warnings.append(f"{arcs} arc(s) on beam layers were not read: curved beams are not designed. "
+                                 f"Design them separately or draw them as straight segments.")
         return beams
 
     def extract_walls(self) -> List[Tuple[Tuple[float, float], Tuple[float, float]]]:

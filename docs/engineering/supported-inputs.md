@@ -44,8 +44,12 @@ preliminary design (CLAUDE.md, [limitations](limitations.md)).
 | Plan drawn rotated by any single angle | Supported | D-34: rotated back to the axes, warned; equivalence tests (30, -17, 0.5 degrees) |
 | Plans with wings at different angles | Partial | Not rotated; skewed columns designed on the main axes (warned) |
 | Mirrored drawings / mirrored blocks (extrusion -Z) | Supported | N53 fixed; equivalence tests |
-| Columns: closed LWPOLYLINE, 2D POLYLINE, blocks (rotated, scaled, mirrored, nested), circles | Supported | Corpus |
-| Beams: LINE, polyline per grid line, drawn to the column faces, partly missing, none (generated on grid lines) | Supported | Corpus |
+| Columns: closed LWPOLYLINE, 2D POLYLINE, blocks (rotated, scaled incl. non-uniform, mirrored, nested, MINSERT arrays), circles, rounded (bulge) outlines, outlines drawn as separate LINEs (D-39) | Supported | Corpus, drafting-habit tests |
+| Overlapping / duplicated column outlines, hollow (inner) outlines | Supported (merged, warned, D-41) | Drafting-habit tests |
+| Beams: LINE, polyline per grid line, one line through several columns (split per span, N62), 3D polylines, drawn to the column faces, partly missing, none (generated on grid lines) | Supported | Corpus, drafting-habit tests |
+| Curved beams (ARC) | Unsupported (warned, not read) | Drafting-habit tests |
+| Frozen / switched-off layers | Not read (warned, D-40) | Drafting-habit tests |
+| NaN / infinite coordinates on structural layers | Unsupported (input error) | Drafting-habit tests |
 | Walls: double lines (wall layer), interior partitions, none (generated perimeter walls); walls only, no columns (automatic column placement) | Supported / Partial (automatic placement assumes millimetre-like scale) | Corpus |
 | Layer names: NCS, Indian, unknown, everything on layer 0 | Supported | D-28, D-36; circular columns on unnamed layers need two members framing in (KD-32) |
 | R12, R2000, R2010, R2018 | Supported | Corpus |

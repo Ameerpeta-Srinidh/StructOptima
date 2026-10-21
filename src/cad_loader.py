@@ -297,27 +297,31 @@ class CADLoader:
                     return best[0], best[1], True
                 return px, py, False
 
-            loose, seen = 0, set()
+            loose, seen, split = 0, set(), 0
             for rb in raw_beams:
                 start = rb['start']
                 end = rb['end']
                 sx, sy, ok1 = snap(start[0] * self.scale_factor - ox, start[1] * self.scale_factor - oy)
                 ex, ey, ok2 = snap(end[0] * self.scale_factor - ox, end[1] * self.scale_factor - oy)
                 loose += (not ok1) + (not ok2)
-                key = tuple(sorted([(round(sx, 3), round(sy, 3)), (round(ex, 3), round(ey, 3))]))
-                if key[0] == key[1] or key in seen:
-                    continue
-                seen.add(key)
-                p1 = Point(x=sx, y=sy)
-                p2 = Point(x=ex, y=ey)
-                
-                beams.append(StructuralMember(
-                    id=rb['id'],
-                    type="beam",
-                    start_point=p1,
-                    end_point=p2,
-                    properties=MemberProperties(width_mm=300, depth_mm=600)
-                ))
+                pieces = self._split_at_columns((sx, sy), (ex, ey), centres)
+                if len(pieces) > 1:
+                    split += 1
+                for n, ((ax, ay), (bx, by)) in enumerate(pieces):
+                    key = tuple(sorted([(round(ax, 3), round(ay, 3)), (round(bx, 3), round(by, 3))]))
+                    if key[0] == key[1] or key in seen:
+                        continue
+                    seen.add(key)
+                    beams.append(StructuralMember(
+                        id=rb['id'] if len(pieces) == 1 else f"{rb['id']}-{n + 1}",
+                        type="beam",
+                        start_point=Point(x=ax, y=ay),
+                        end_point=Point(x=bx, y=by),
+                        properties=MemberProperties(width_mm=300, depth_mm=600)
+                    ))
+            if split:
+                self.load_warnings.append(f"{split} beam line(s) drawn through intermediate columns were divided into "
+                                          f"one beam per span (at the columns they pass through).")
             
             if loose:
                 self.load_warnings.append(f"{loose} beam end(s) in the drawing do not reach a column (beam-on-beam "
@@ -358,6 +362,9 @@ class CADLoader:
             
             logger.info("Extracted %d wall segments (thickness=%.0fmm)", len(gm.walls), wall_thickness)
             self.load_warnings.extend(w for w in self.parser.warnings if w not in self.load_warnings)
+            hidden = self.parser.hidden_layer_warning()
+            if hidden:
+                self.load_warnings.append(hidden)
 
         if not beams:
             self.load_warnings.append("No beams found in the DXF (no BEAM layer): beams will be generated along "
@@ -367,8 +374,45 @@ class CADLoader:
 
         return gm, beams
 
+    @staticmethod
+    def _split_at_columns(a, b, centres, tol: float = 0.15):
+        """A beam line drawn through intermediate columns (one line along a whole grid line) is one beam per span:
+        pieces between the column centres lying on it, more than half a column + ``tol`` from its ends (N62: it
+        was designed as a single member spanning several bays)."""
+        (x1, y1), (x2, y2) = a, b
+        ln = math.hypot(x2 - x1, y2 - y1)
+        if ln <= 0:
+            return [(a, b)]
+        ux, uy = (x2 - x1) / ln, (y2 - y1) / ln
+        cuts = sorted({round((cx - x1) * ux + (cy - y1) * uy, 6): (cx, cy) for cx, cy, half in centres
+                       if abs((cx - x1) * -uy + (cy - y1) * ux) <= tol
+                       and half + tol < (cx - x1) * ux + (cy - y1) * uy < ln - half - tol}.items())
+        pts = [a] + [c for _, c in cuts] + [b]
+        return list(zip(pts, pts[1:]))
+
     # a plan rotated by less than this is left as drawn (drafting noise; grid clustering absorbs it)
     MIN_ROTATION_DEG = 0.05
+
+    def _non_finite_structural(self) -> int:
+        """Entities on column / beam / wall / mixed layers with a NaN or infinite coordinate (the extractors drop a
+        NaN line silently: hypot(nan) > 0 is false)."""
+        p, n = self.parser, 0
+        for e in p._flat():
+            if p.role_of(e.dxf.get("layer", "0")) not in ("column", "beam", "wall", "mixed"):
+                continue
+            t = e.dxftype()
+            if t == "LINE":
+                vals = [*e.dxf.start, *e.dxf.end]
+            elif t == "CIRCLE":
+                vals = [*e.dxf.center, e.dxf.radius]
+            elif t == "LWPOLYLINE":
+                vals = [v for pt in p._lwpoly_xy(e) for v in pt[:2]]
+            elif t == "POLYLINE":
+                vals = [v for q in e.vertices for v in (q.dxf.location.x, q.dxf.location.y)]
+            else:
+                continue
+            n += not all(math.isfinite(v) for v in vals)
+        return n
 
     def _align_to_axes(self) -> None:
         """A plan drawn rotated (every column outline, or every beam / wall line, at the same angle to the drawing
@@ -440,6 +484,11 @@ class CADLoader:
             pts += [tuple(pt) for seg in p.extract_walls() for pt in seg]
         finally:
             del p.warnings[n_warn:]                      # the load reads them again (after any rotation)
+        bad = self._non_finite_structural()
+        if bad:
+            raise ValueError(f"The drawing has {bad} column, beam or wall entit{'y' if bad == 1 else 'ies'} with an "
+                             f"invalid (infinite or undefined) coordinate: the file is damaged. Save it again from the "
+                             f"CAD program.")
         if not pts:
             return
         if not all(math.isfinite(v) for pt in pts for v in pt[:2]):

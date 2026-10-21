@@ -3,7 +3,7 @@
 **As of:** 2026-10-21. Original audit IDs R1–R27 are preserved; N1–N12 were
 found during stage-2 verification and remediation; N13 by the manual walkthrough; N14–N21 by the
 mandate gap analysis ([gap-analysis.md](gap-analysis.md)); N23–N28 by the UI review of 2026-10-20; N29–N45 by the
-check against the printed standards and the testing of 2026-10-20; N50–N52 by the DXF fuzz tests and N53–N60 by the DXF corpus of 2026-10-21
+check against the printed standards and the testing of 2026-10-20; N50–N52 by the DXF fuzz tests and N53–N64 by the DXF corpus and drafting-habit probes of 2026-10-21
 ([../verification/standards-check-2026-10-20.md](../verification/standards-check-2026-10-20.md), whose ids S/J/T/D/F/L/W/A/X
 are given in brackets).
 
@@ -100,3 +100,7 @@ C critical · H high · M medium · L low. Confidence refers to the original fin
 | N58 | One or two columns: the 3D model had no rotational mass and scipy raised LinAlgError (a ValueError subclass, shown as an input problem); 1-3 columns without a slab gave a FAIL 'design' | M | High (corpus) | `pseudo3d`, `analysis_integration`, `run_design` | Misleading message / meaningless result | corpus single / two / three-column / one-row cases | UNVERIFIED (fix implemented 2026-10-21) | D-33 | RM-40 |
 | N59 | Parser warnings repeated (the extractors run more than once per load since RM-39) | L | High | `cad_parser.warnings` | Noisy warnings | corpus: no repeated warning | UNVERIFIED (fix implemented 2026-10-21) | — | RM-40 |
 | N60 | A column beyond its capacity (interaction ratio inf) crashed the IFC export, made the 3D viewer JSON invalid (Infinity) and printed 'inf' on drawings and tables (KD-29) | M | High (output probe) | `ifc_exporter`, `viewer_model`, `drawings`, `ui_tables`, `documentation`, `site_monitoring`, `visualizer` | Broken deliverables | output tests in `test_dxf_corpus.py` | UNVERIFIED (fix implemented 2026-10-21) | D-38 | RM-40 |
+| N61 | MINSERT (one block insert repeated in rows x columns) read as its first instance only: a 3 x 4 column array gave one column | H | High (drafting-habit probe) | `cad_parser._explode` | Missing columns | `test_drafting_habit[minsert-column-array]` | UNVERIFIED (fix implemented 2026-10-21) | — | RM-41 |
+| N62 | A beam line drawn through intermediate columns (one LINE along a whole grid line, also 3D polylines) was one member spanning several bays | H | High (probe) | `cad_loader` beams | Beam designed for a multi-bay span | `test_drafting_habit[beam-lines-through-columns]`, `[3d-polyline-beams]` | UNVERIFIED (fix implemented 2026-10-21) | — | RM-41 |
+| N63 | A beam line with a NaN coordinate was dropped silently (hypot(nan) > 0 is false): 'no beams found', beams generated | M | High (probe) | `cad_parser.extract_beams` | Damaged drawing designed as if complete | `test_drafting_habit[nan-coordinate]` | UNVERIFIED (fix implemented 2026-10-21) | D-32 | RM-41 |
+| N64 | Columns drawn as four separate LINEs (common drafting) not read; frozen / switched-off layers read (an old revision on a frozen layer doubled the columns); overlapping column outlines read as two columns (0.2 m bay); arc beams ignored silently | H | High (probe) | `cad_parser`, `dxf_layers` | Missing / phantom columns and beams | `test_drafting_habit[...]` | UNVERIFIED (fix implemented 2026-10-21) | D-39, D-40, D-41 | RM-41 |

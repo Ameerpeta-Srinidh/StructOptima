@@ -51,13 +51,13 @@ A file can be in several layers. A new test file is reported as *unclassified* u
 
 ## Measured cost per file (2026-10-21 final run, sequential, runner)
 
-Full run (after RM-40): 53 files, **1154 passed, 0 failed, 0 errors, 3 skipped, 3 xfailed**, 441 s of test processes.
-Peak resident memory per test process: ≤ 339 MB. Files over 5 s or 200 MB:
+Full run (after RM-41): 53 files, **1167 passed, 0 failed, 0 errors, 3 skipped, 3 xfailed**, 470 s of test processes.
+Peak resident memory per test process: ≤ 367 MB. Files over 5 s or 200 MB:
 
 | File | Tests | Wall (s) | Peak RSS (MB) |
 |---|---|---|---|
-| `test_design_matrix.py` | 60 | 267 | 132 |
-| `test_dxf_corpus.py` | 125 | 33 | 339 |
+| `test_design_matrix.py` | 60 | 286 | 132 |
+| `test_dxf_corpus.py` | 138 | 40 | 367 |
 | `test_dxf_robustness.py` | 113 | 47 | 279 |
 | `test_streamlit_app.py` | 23 | 13 | 250 |
 | `test_metamorphic.py` | 13 | 14 | 97 |

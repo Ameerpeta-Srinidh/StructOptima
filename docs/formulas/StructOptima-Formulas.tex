@@ -58,7 +58,9 @@ circular columns on layer 0 dropped, rotated plans misread, 1--2 columns crashed
 warnings, outputs broken by a column beyond capacity. Decisions taken under the owner's delegation: D-33 (scope:
 a slab panel is required), D-34 (rotated plans), D-35 (unit inference), D-36 (circular columns), D-37 (column
 orientation deferred), D-38 (``beyond capacity'' display); Section~\ref{sec:dxf}, Section~\ref{sec:edge}. No formula
-changed. Tests 1154 passed, 3 skipped, 3 xfailed. \\
+changed. Drafting habits (N61--N64): MINSERT arrays, beam lines through several columns, NaN coordinates,
+columns drawn as lines (D-39), frozen layers (D-40), overlapping outlines (D-41). Tests 1167 passed, 3 skipped,
+3 xfailed. \\
 21 Oct 2026 & \textbf{Geometry bound (D-32, approved by the owner):} a column / beam / wall coordinate that is not
 finite, or a structure wider than 1000 m (raw drawing: more than $10^6$ units), is an input error before any
 calculation (Section~\ref{sec:dxf}). Found by the DXF fuzz tests: a line $10^{11}$ units long made the automatic column
@@ -547,6 +549,11 @@ with survey coordinates, at the wrong scale, N55.)
 else the beam / wall lines (length-weighted resultant of $4\theta$ $\ge0.95$), agree on an angle $\theta$ to the axes
 with $|\theta|\ge0.05^\circ$ (modulo $90^\circ$), the drawing is rotated by $-\theta$ before reading (WARN).
 \item Entities with extrusion $(0,0,-1)$ (mirrored blocks) are rewritten upright before reading (N53).
+\item \textbf{Drafting habits (21 Oct 2026):} columns drawn as separate LINEs closing on themselves are outlines
+(D-39); MINSERT arrays are expanded; frozen / switched-off layers are not read (WARN, D-40); overlapping column
+outlines are merged keeping the larger (WARN, D-41); a beam line passing through intermediate column centres (within
+150 mm of the line, more than half a column $+150$ mm from its ends) is divided into one beam per span (N62); arcs on
+beam layers are not read (WARN); a NaN / infinite coordinate on a structural layer is an input error.
 \item \textbf{Circular columns on layers without a column name (D-36):} a column-sized circle is a column when two or
 more line ends lie within $\tfrac12 d+150$ mm of its centre; a lone circle (grid bubble) is not.
 \item Coordinates moved so the first grid intersection is (0,\,0) (WARN when moved by $>1$ m); column centres within

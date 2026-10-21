@@ -206,6 +206,14 @@ class _Geometry:
                 txt = entity_text(e)
                 if txt:
                     d["texts"].append(txt)
+        for d in self.by_layer.values():                 # closed outlines drawn as separate LINEs (D-39)
+            loops = parser.line_loops(d["segs"], with_index=True)
+            if loops:
+                drop = {k for _, chain in loops for k in chain}
+                for pts, _ in loops:
+                    w, dp, ang, cx, cy = parser._rect_dims(pts)
+                    d["outlines"].append({"x": cx, "y": cy, "w": w, "d": dp, "pts": pts})
+                d["segs"] = [sg for k, sg in enumerate(d["segs"]) if k not in drop]
 
     def mm(self, v: float) -> float:
         return v * self.unit_m * 1000.0
